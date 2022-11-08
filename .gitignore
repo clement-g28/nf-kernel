@@ -1,0 +1,11 @@
+.idea
+*.npz
+*.log
+datasets/*
+checkpoint/*
+__pycache__
+utils/__pycache__/
+ffjord_lib/__pycache__/
+ffjord_lib/layers/__pycache__/
+ffjord_lib/layers/diffeq_layers/__pycache__/
+ffjord_lib/layers/wrappers/__pycache__/
