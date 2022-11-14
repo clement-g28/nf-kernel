@@ -49,7 +49,6 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
 
         else:
             assert False, 'unknown model type!'
-
         model_single = WrappedModel(model_single)
         model_single.load_state_dict(torch.load(model_loading_params['loading_path'], map_location=device))
         model = model_single.module
@@ -186,13 +185,8 @@ if __name__ == '__main__':
         elif 'eigvalgaussian' in split:
             gaussian_split = split
             in_split = gaussian_split.split("std")
-            mean_of_eigval = int(in_split[0].replace("eigvalgaussian", ""))
-            std_value = float(str(in_split[-1]).replace('-', '.'))
-            gaussian_eigval = [0.0, std_value]
-            print(f'Flow trained with gaussian eigenvalues params: {mean_of_eigval},{gaussian_eigval}')
-        elif 'manualeigval' in split:
-            manual_split = split
-            mean_of_eigval = int(in_split[0].replace("manualeigval", ""))
+            mean_of_eigval = in_split[0].replace("eigvalgaussian", "")
+            mean_of_eigval = float(mean_of_eigval.replace("-", "."))
             std_value = float(str(in_split[-1]).replace('-', '.'))
             gaussian_eigval = [0.0, std_value]
             print(f'Flow trained with gaussian eigenvalues params: {mean_of_eigval},{gaussian_eigval}')

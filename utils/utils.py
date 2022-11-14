@@ -130,6 +130,7 @@ def initialize_regression_gaussian_params(dataset, al_list, isotrope=False, dim_
             eigenvecs = np.zeros((n_dim, n_dim))
             np.fill_diagonal(eigenvecs, 1)
             eigenvals = np.ones(n_dim)
+            eigenvals[:] = al_list
             gaussian_params.append((mean, eigenvecs, eigenvals, i))
     else:
         assert n_dim != dim_per_label, 'for regression dataset, isotrope_gaussian should be used if n_dim_per_label ' \

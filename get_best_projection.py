@@ -5,7 +5,7 @@ import glob
 import os
 import re
 
-from utils.custom_glow import CGlow, WrappedModel, initialize_gaussian_params
+from utils.custom_glow import CGlow, WrappedModel
 from utils.dataset import ImDataset, SimpleDataset
 
 from utils.utils import set_seed, create_folder
@@ -18,6 +18,8 @@ from utils.testing import testing_arguments, noise_data, save_fig
 from utils.training import ffjord_arguments
 
 from utils.toy_models import load_seqflow_model, load_ffjord_model
+
+from utils.utils import initialize_gaussian_params
 
 from sklearn.decomposition import PCA
 
@@ -234,13 +236,8 @@ if __name__ == '__main__':
         elif 'eigvalgaussian' in split:
             gaussian_split = split
             in_split = gaussian_split.split("std")
-            mean_of_eigval = int(in_split[0].replace("eigvalgaussian", ""))
-            std_value = float(str(in_split[-1]).replace('-', '.'))
-            gaussian_eigval = [0.0, std_value]
-            print(f'Flow trained with gaussian eigenvalues params: {mean_of_eigval},{gaussian_eigval}')
-        elif 'manualeigval' in split:
-            manual_split = split
-            mean_of_eigval = int(in_split[0].replace("manualeigval", ""))
+            mean_of_eigval = in_split[0].replace("eigvalgaussian", "")
+            mean_of_eigval = float(mean_of_eigval.replace("-", "."))
             std_value = float(str(in_split[-1]).replace('-', '.'))
             gaussian_eigval = [0.0, std_value]
             print(f'Flow trained with gaussian eigenvalues params: {mean_of_eigval},{gaussian_eigval}')

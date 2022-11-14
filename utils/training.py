@@ -92,7 +92,7 @@ def training_arguments():
                         help='value of uniform eigenvalues associated to the dim-per-label eigenvectors')
     parser.add_argument("--gaussian_eigval", default=None, type=str,
                         help='parameters of the gaussian distribution from which we sample eigenvalues')
-    parser.add_argument("--mean_of_eigval", default=10, type=int, help='mean value of eigenvalues')
+    parser.add_argument("--mean_of_eigval", default=10, type=float, help='mean value of eigenvalues')
     parser.add_argument("--set_eigval_manually", default=None, type=str,
                         help='set the eigenvalues manually, it should be in the form of list of n_dim value e.g [50,0.003]')
 
