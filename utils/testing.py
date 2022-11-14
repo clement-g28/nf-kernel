@@ -11,6 +11,8 @@ from skimage.util import random_noise
 
 from sklearn.svm import SVC
 from sklearn.decomposition import PCA, KernelPCA
+from sklearn.kernel_ridge import KernelRidge
+from sklearn.linear_model import Ridge
 
 
 def testing_arguments():
@@ -50,7 +52,7 @@ def learn_or_load_modelhyperparams(X_train, tlabels, kernel_name, param_grid, sa
         keys = [k.split('__')[-1] for k, v in param_grid[0].items()]
         ind_step = 0 if not scaler else 1
         learned_params = {k: eval(f'{str(model.best_estimator_.steps[ind_step][1])}.{k}') for k in keys}
-        kernel_name = learned_params['kernel']
+        # kernel_name = learned_params['kernel']
         with open(f'{save_dir}/params_{model_type[0]}_{kernel_name}.pkl', 'wb') as f:
             pickle.dump(learned_params, f)
         print(f'Learned hyperparams : {learned_params}')

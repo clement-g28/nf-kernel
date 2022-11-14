@@ -7,9 +7,10 @@ import re
 import torch
 from torchvision import utils
 
-from utils.utils import set_seed, create_folder, save_every_pic
+from utils.utils import set_seed, create_folder, save_every_pic, initialize_gaussian_params, \
+    initialize_regression_gaussian_params, save_fig
 
-from utils.custom_glow import CGlow, WrappedModel, initialize_gaussian_params
+from utils.custom_glow import CGlow, WrappedModel
 from utils.toy_models import load_seqflow_model, load_ffjord_model
 from utils.dataset import ImDataset, SimpleDataset
 from utils.density import construct_covariance
@@ -17,6 +18,8 @@ from utils.testing import learn_or_load_modelhyperparams, generate_sample, proje
 from utils.training import ffjord_arguments
 
 from sklearn.decomposition import PCA, KernelPCA
+from sklearn.kernel_ridge import KernelRidge
+from sklearn.linear_model import Ridge
 
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
@@ -625,9 +628,180 @@ def evaluate_distances(model, train_dataset, val_dataset, gaussian_params, z_sha
     return distances_results
 
 
+def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fithyperparam=True):
+    # Compute results with our approach if not None
+    if model is not None:
+        batch_size = 20
+        loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+
+        start = time.time()
+        Z = []
+        tlabels = []
+        model.eval()
+        with torch.no_grad():
+            for j, data in enumerate(loader):
+                inp = data[0].float().to(device)
+                labels = data[1].to(device)
+                log_p, distloss, logdet, out = model(inp, labels)
+                Z.append(out.detach().cpu().numpy())
+                tlabels.append(labels.detach().cpu().numpy())
+        Z = np.concatenate(Z, axis=0).reshape(len(train_dataset), -1)
+        tlabels = np.concatenate(tlabels, axis=0)
+        end = time.time()
+        print(f"time to get Z_train from X_train: {str(end - start)}, batch size: {batch_size}")
+
+        # Learn Ridge
+        start = time.time()
+        # zlinridge = make_pipeline(StandardScaler(), KernelRidge(kernel='linear', alpha=0.1))
+        zlinridge = Ridge(alpha=0.1)
+        zlinridge.fit(Z, tlabels)
+        print(zlinridge)
+        end = time.time()
+        print(f"time to fit linear ridge in Z : {str(end - start)}")
+
+        val_loader = val_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+
+        start = time.time()
+        val_inZ = []
+        elabels = []
+        with torch.no_grad():
+            for j, data in enumerate(val_loader):
+                inp = data[0].float().to(device)
+                labels = data[1].to(device)
+                log_p, distloss, logdet, out = model(inp, labels)
+                val_inZ.append(out.detach().cpu().numpy())
+                elabels.append(labels.detach().cpu().numpy())
+        val_inZ = np.concatenate(val_inZ, axis=0).reshape(len(val_dataset), -1)
+        elabels = np.concatenate(elabels, axis=0)
+        end = time.time()
+        print(f"time to get Z_val from X_val : {str(end - start)}")
+
+        zridge_score = zlinridge.score(val_inZ, elabels)
+        print(f'Our approach : {zridge_score}')
+
+    X_train = train_dataset.X.reshape(train_dataset.X.shape[0], -1)
+    labels_train = train_dataset.true_labels
+
+    start = time.time()
+    kernel_name = 'linear'
+    if fithyperparam:
+        # param_gridlin = [{'Ridge__kernel': [kernel_name], 'Ridge__alpha': np.linspace(0, 10, 11)}]
+        # linridge = learn_or_load_modelhyperparams(X_train, labels_train, kernel_name, param_gridlin, save_dir,
+        #                                           model_type=('Ridge', KernelRidge()), scaler=True)
+        param_gridlin = [{'Ridge__alpha': np.linspace(0, 10, 11)}]
+        linridge = learn_or_load_modelhyperparams(X_train, labels_train, kernel_name, param_gridlin, save_dir,
+                                                  model_type=('Ridge', Ridge()), scaler=True)
+    else:
+        # linridge = make_pipeline(StandardScaler(), KernelRidge(kernel=kernel_name))
+        linridge = make_pipeline(StandardScaler(), Ridge(alpha=0.1))
+        linridge.fit(X_train, labels_train)
+        print(f'Fitting done.')
+    end = time.time()
+    print(f"time to fit linear ridge : {str(end - start)}")
+
+    # krr_types = ['linear', 'poly', 'rbf', 'sigmoid', 'cosine']
+    krr_types = ['rbf', 'poly', 'sigmoid']
+    krr_params = [
+        {'Ridge__kernel': ['rbf'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__alpha': np.linspace(0, 10, 11)},
+        {'Ridge__kernel': ['poly'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__degree': np.linspace(1, 4, 4),
+         'Ridge__alpha': np.linspace(0, 10, 11)},
+        {'Ridge__kernel': ['sigmoid'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__alpha': np.linspace(0, 10, 11)}
+    ]
+
+    krrs = [None] * len(krr_types)
+    for i, krr_type in enumerate(krr_types):
+        start = time.time()
+        if fithyperparam:
+            krrs[i] = learn_or_load_modelhyperparams(X_train, labels_train, krr_type, [krr_params[i]], save_dir,
+                                                     model_type=('Ridge', KernelRidge()), scaler=True)
+        else:
+            krrs[i] = make_pipeline(StandardScaler(), KernelRidge(kernel=krr_type))
+            krrs[i].fit(X_train, labels_train)
+            print(f'Fitting done.')
+        end = time.time()
+        print(f"time to fit {krr_type} ridge : {str(end - start)}")
+
+    X_val = val_dataset.X.reshape(val_dataset.X.shape[0], -1)
+    labels_val = val_dataset.true_labels
+
+    krr_scores = []
+    for krr in krrs:
+        krr_scores.append([])
+
+    ridge_score = linridge.score(X_val, labels_val)
+
+    for i, krr in enumerate(krrs):
+        krr_score = krr.score(X_val, labels_val)
+        krr_scores[i].append(krr_score)
+
+    print('Predictions scores :')
+    print(f'Ridge : {np.mean(ridge_score)}')
+    for j, krr_type in enumerate(krr_types):
+        print(f'KernelRidge ({krr_type}) : {np.mean(krr_scores[j])}')
+    print(f'Our approach : {zridge_score}')
+
+
+def create_figures_XZ(model, train_dataset, save_path, device, std_noise=0.1):
+    size_pt_fig = 5
+
+    batch_size = 20
+    loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+
+    X = []
+    Z = []
+    tlabels = []
+    model.eval()
+    with torch.no_grad():
+        for j, data in enumerate(loader):
+            inp = (data[0] + np.random.randn(*data[0].shape) * std_noise).float().to(device)
+            labels = data[1].to(device)
+            log_p, distloss, logdet, out = model(inp, labels)
+            X.append(inp.detach().cpu().numpy())
+            Z.append(out.detach().cpu().numpy())
+            tlabels.append(labels.detach().cpu().numpy())
+    X = np.concatenate(X, axis=0).reshape(len(train_dataset), -1)
+    Z = np.concatenate(Z, axis=0).reshape(len(train_dataset), -1)
+    tlabels = np.concatenate(tlabels, axis=0)
+
+    save_fig(X, tlabels, size=size_pt_fig, save_path=f'{save_path}/X_space')
+    save_fig(Z, tlabels, size=size_pt_fig, save_path=f'{save_path}/Z_space')
+
+
+def evaluate_regression_preimage(model, val_dataset, device):
+    batch_size = 20
+
+    y_min = model.label_min
+    y_max = model.label_max
+    model_means = model.means[:2].detach().cpu().numpy()
+    samples = []
+    true_X = val_dataset.X
+    for i, y in enumerate(val_dataset.true_labels):
+        alpha_y = (y - y_min) / (y_max - y_min)
+        mean = alpha_y * model_means[0] + (1 - alpha_y) * model_means[1]
+        samples.append(np.expand_dims(mean, axis=0))
+    samples = np.concatenate(samples, axis=0)
+
+    z_shape = model.calc_last_z_shape(dataset.im_size)
+    nb_batch = math.ceil(samples.shape[0] / batch_size)
+    all_res = []
+    samples = torch.from_numpy(samples)
+    with torch.no_grad():
+        for j in range(nb_batch):
+            size = samples[j * batch_size:(j + 1) * batch_size].shape[0]
+            input = samples[j * batch_size:(j + 1) * batch_size].reshape(size, *z_shape).float().to(device)
+
+            res = model.reverse(input)
+            all_res.append(res.detach().cpu().numpy())
+    all_res = np.concatenate(all_res, axis=0)
+
+    distance = np.mean(np.power(all_res - true_X, 2))
+
+    print(f'Pre-image distance :{distance}')
+
+
 if __name__ == "__main__":
-    choices = ['classification', 'projection', 'generation']
-    best_model_choices = ['classification', 'projection']
+    choices = ['classification', 'projection', 'generation', 'regression']
+    best_model_choices = ['classification', 'projection', 'regression']
     parser = testing_arguments()
     parser.add_argument('--eval_type', type=str, default='classification', choices=choices, help='evaluation type')
     parser.add_argument('--model_to_use', type=str, default='classification', choices=best_model_choices,
@@ -739,9 +913,13 @@ if __name__ == "__main__":
     n_dim = dataset.X[0].shape[0]
     for sh in dataset.X[0].shape[1:]:
         n_dim *= sh
+
     if not dim_per_label:
-        uni = np.unique(dataset.true_labels)
-        dim_per_label = math.floor(n_dim / len(uni))
+        if not dataset.is_regression_dataset():
+            uni = np.unique(dataset.true_labels)
+            dim_per_label = math.floor(n_dim / len(uni))
+        else:
+            dim_per_label = n_dim
 
     # initialize gaussian params
     if fixed_eigval is None:
@@ -765,21 +943,28 @@ if __name__ == "__main__":
             assert False, 'Unknown distribution !'
     else:
         eigval_list = None
-    gaussian_params = initialize_gaussian_params(dataset, eigval_list, isotrope='isotrope' in folder_name,
-                                                 dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
+
+    if not dataset.is_regression_dataset():
+        gaussian_params = initialize_gaussian_params(dataset, eigval_list, isotrope='isotrope' in folder_name,
+                                                     dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
+    else:
+        gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list,
+                                                                isotrope='isotrope' in folder_name,
+                                                                dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
+
     if model_type == 'cglow':
         # Load model
         model_single = CGlow(n_channel, n_flow, n_block, affine=affine, conv_lu=not no_lu,
                              gaussian_params=gaussian_params, device=device, learn_mean='lmean' in folder_name)
     elif model_type == 'seqflow':
         model_single = load_seqflow_model(n_dim, n_flow, gaussian_params=gaussian_params,
-                                          learn_mean='lmean' in folder_name)
+                                          learn_mean='lmean' in folder_name, dataset=dataset)
 
     elif model_type == 'ffjord':
         args_ffjord, _ = ffjord_arguments().parse_known_args()
         args_ffjord.n_block = n_block
         model_single = load_ffjord_model(args_ffjord, n_dim, gaussian_params=gaussian_params,
-                                         learn_mean='lmean' in folder_name)
+                                         learn_mean='lmean' in folder_name, dataset=dataset)
 
     else:
         assert False, 'unknown model type!'
@@ -827,3 +1012,8 @@ if __name__ == "__main__":
         else:
             dataset_name_eval = ['mnist', 'single_moon', 'double_moon']
             assert dataset_name in dataset_name_eval, f'Projection can only be evaluated on {dataset_name_eval}'
+    elif eval_type == 'regression':
+        assert dataset.is_regression_dataset(), 'the dataset is not made for regression purposes'
+        # evaluate_regression(model, train_dataset, val_dataset, save_dir, device)
+        # create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1)
+        evaluate_regression_preimage(model, val_dataset, device)

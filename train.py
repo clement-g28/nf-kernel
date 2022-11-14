@@ -6,12 +6,13 @@ from torch import nn, optim
 from torch.utils.tensorboard import SummaryWriter
 from torchvision import transforms, utils
 
-from utils.custom_glow import CGlow, initialize_gaussian_params
+from utils.custom_glow import CGlow
 from utils.toy_models import load_seqflow_model, load_ffjord_model
 from utils.training import training_arguments, ffjord_arguments, AddGaussianNoise, calc_loss
 from utils.dataset import ImDataset, SimpleDataset
 from utils.density import construct_covariance
-from utils.utils import write_dict_to_tensorboard, set_seed, create_folder, AverageMeter
+from utils.utils import write_dict_to_tensorboard, set_seed, create_folder, AverageMeter, initialize_gaussian_params, \
+    initialize_regression_gaussian_params
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -222,15 +223,22 @@ if __name__ == "__main__":
 
     device = 'cuda:0'
 
+    n_dim = dataset.X[0].shape[0]
+    for sh in dataset.X[0].shape[1:]:
+        n_dim *= sh
+
     # initialize gaussian params
-    if not args.dim_per_label:
-        uni = np.unique(dataset.true_labels)
-        n_dim = dataset.X[0].shape[0]
-        for sh in dataset.X[0].shape[1:]:
-            n_dim *= sh
-        dim_per_label = math.floor(n_dim / len(uni))
+    if not dataset.is_regression_dataset():
+        if not args.dim_per_label:
+            uni = np.unique(dataset.true_labels)
+            dim_per_label = math.floor(n_dim / len(uni))
+        else:
+            dim_per_label = args.dim_per_label
     else:
-        dim_per_label = args.dim_per_label
+        if not args.dim_per_label:
+            dim_per_label = n_dim
+        else:
+            dim_per_label = args.dim_per_label
 
     fixed_eigval = None
     eigval_str = ''
@@ -265,8 +273,12 @@ if __name__ == "__main__":
         eigval_str = args.set_eigval_manually.strip('[]').replace(',', '-')
         eigval_str = f'_manualeigval{eigval_str}'
 
-    gaussian_params = initialize_gaussian_params(dataset, eigval_list, isotrope=args.isotrope_gaussian,
-                                                 dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
+    if not dataset.is_regression_dataset():
+        gaussian_params = initialize_gaussian_params(dataset, eigval_list, isotrope=args.isotrope_gaussian,
+                                                     dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
+    else:
+        gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list, isotrope=args.isotrope_gaussian,
+                                                                dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
     folder_path = f'{args.dataset}/{args.model}/'
     if args.model == 'cglow':
         n_channel = dataset.n_channel
@@ -275,19 +287,19 @@ if __name__ == "__main__":
         folder_path += f'b{args.n_block}_f{args.n_flow}'
     elif args.model == 'seqflow':
         model_single = load_seqflow_model(dataset.im_size, args.n_flow, gaussian_params=gaussian_params,
-                                          learn_mean=not args.fix_mean)
+                                          learn_mean=not args.fix_mean, dataset=dataset)
         folder_path += f'f{args.n_flow}'
     elif args.model == 'ffjord':
         args_ffjord, _ = ffjord_arguments().parse_known_args()
         args_ffjord.n_block = args.n_block
         model_single = load_ffjord_model(args_ffjord, dataset.im_size, gaussian_params=gaussian_params,
-                                         learn_mean=not args.fix_mean)
+                                         learn_mean=not args.fix_mean, dataset=dataset)
         folder_path += f'b{args.n_block}'
     else:
         assert False, 'unknown model type'
 
     lmean_str = f'_lmean{args.beta}' if not args.fix_mean else ''
-    isotrope_str = 'isotrope' if args.isotrope_gaussian else ''
+    isotrope_str = '_isotrope' if args.isotrope_gaussian else ''
     folder_path += f'_nfkernel{lmean_str}{isotrope_str}{eigval_str}{noise_str}' \
                    f'{redclass_str}{redlabel_str}_dimperlab{dim_per_label}'
 

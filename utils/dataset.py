@@ -14,8 +14,11 @@ from sklearn import svm
 import scipy
 import pickle
 
-from sklearn.datasets import load_iris, load_diabetes, load_breast_cancer, make_moons
+from sklearn.datasets import load_iris, load_diabetes, load_breast_cancer, make_moons, make_swiss_roll
 from utils import visualize_flow
+
+DATASETS = ['single_moon', 'double_moon', 'iris', 'bcancer', 'mnist']
+REGRESSION_DATASETS = ['swissroll', 'diabetes']
 
 
 # abstract base kernel dataset class
@@ -148,6 +151,7 @@ class BaseDataset(Dataset):
 class SimpleDataset(BaseDataset):
     def __init__(self, dataset_name, transform=None):
         self.dataset_name = dataset_name
+        self.label_type = np.int if self.dataset_name not in REGRESSION_DATASETS else np.float
         self.transform = transform
         ori_X, ori_true_labels = self.load_dataset(dataset_name)
         super().__init__(ori_X, ori_true_labels)
@@ -165,7 +169,11 @@ class SimpleDataset(BaseDataset):
         if self.transform is not None:
             input = torch.from_numpy(input)
             input = self.transform(input)
-        return input, (self.true_labels[idx]).astype(np.int)
+        return input, (self.true_labels[idx]).astype(self.label_type)
+
+    def reduce_dataset(self, reduce_type, label=None, how_many=None, reduce_from_ori=True):
+        assert self.dataset_name not in REGRESSION_DATASETS, "the dataset can\'t be reduced (regression dataset)"
+        return self.reduce_dataset(reduce_type, label, how_many, reduce_from_ori)
 
     @staticmethod
     def load_dataset(name):
@@ -186,6 +194,12 @@ class SimpleDataset(BaseDataset):
             elif name == 'bcancer':
                 visualize_flow.LOW = -3.5
                 visualize_flow.HIGH = 12.5
+            elif name == 'swissroll':
+                visualize_flow.LOW = -2
+                visualize_flow.HIGH = 2.2
+            elif name == 'diabetes':
+                visualize_flow.LOW = -3
+                visualize_flow.HIGH = 4.3
         else:
             if name == 'single_moon':
                 n_samples = 1000
@@ -203,7 +217,7 @@ class SimpleDataset(BaseDataset):
                 X, labels = load_iris(return_X_y=True)  # noise std 0.1
                 std = np.std(X, axis=0)
                 mean = X.mean(axis=0)
-                X = ((X - mean) / std) # noise std 0.2
+                X = ((X - mean) / std)  # noise std 0.2
                 visualize_flow.LOW = -2.7
                 visualize_flow.HIGH = 3.2
             elif name == 'bcancer':
@@ -213,6 +227,32 @@ class SimpleDataset(BaseDataset):
                 X = ((X - mean) / std)  # noise std 0.2
                 visualize_flow.LOW = -3.5
                 visualize_flow.HIGH = 12.5
+            # REGRESSION DATASETS
+            elif name == 'swissroll':
+                n_samples = 1000
+                X, labels = make_swiss_roll(n_samples=n_samples, noise=0)
+                X = X[:, [0, 2]]
+                std = np.std(X, axis=0)
+                mean = X.mean(axis=0)
+                X = ((X - mean) / std)
+                visualize_flow.LOW = -2
+                visualize_flow.HIGH = 2.2
+            elif name == 'diabetes':
+                X, labels = load_diabetes(return_X_y=True)
+                std = np.std(X, axis=0)
+                mean = X.mean(axis=0)
+                X = ((X - mean) / std)
+                visualize_flow.LOW = -3
+                visualize_flow.HIGH = 4.3
+            elif name =='airquality':
+                import csv
+                results = []
+                with open(f"{path}/input.csv") as csvfile:
+                    reader = csv.reader(csvfile, quoting=csv.QUOTE_NONNUMERIC)  # change contents to floats
+                    for row in reader:  # each row is a list
+                        results.append(row)
+                print(results)
+                X = np.loadtxt(f"{path}/AirQualityUCI.csv")
             else:
                 assert False, 'unknown dataset'
 
@@ -232,6 +272,9 @@ class SimpleDataset(BaseDataset):
     @staticmethod
     def rescale(x):
         return x
+
+    def is_regression_dataset(self):
+        return self.dataset_name in REGRESSION_DATASETS
 
 
 class ImDataset(BaseDataset):
@@ -368,3 +411,6 @@ class ImDataset(BaseDataset):
             assert False, 'unknown dataset'
 
         return dset
+
+    def is_regression_dataset(self):
+        return self.dataset_name in REGRESSION_DATASETS

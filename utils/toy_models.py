@@ -10,9 +10,9 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from utils.density import construct_covariance, multivariate_gaussian
-from utils.custom_glow import calculate_log_p_with_gaussian_params
 from utils.visualize_flow import visualize_transform
-from utils.utils import create_folder
+from utils.utils import create_folder, calculate_log_p_with_gaussian_params, \
+    calculate_log_p_with_gaussian_params_regression
 from utils.ffjord_model import build_model_tabular, create_regularization_fns, add_spectral_norm, set_cnf_options, \
     get_regularization, spectral_norm_power_iteration
 from utils.seqflow_model import load_flow_model
@@ -20,8 +20,25 @@ from utils.seqflow_model import load_flow_model
 
 # abstract NF class
 class NF(nn.Module):
-    def __init__(self, model, gaussian_params=None, device='cuda:0', learn_mean=True):
+    def __init__(self, model, gaussian_params=None, device='cuda:0', learn_mean=True, dataset=None):
         super().__init__()
+        if dataset is not None and dataset.is_regression_dataset():
+            self.dataset_type = 'regression'
+            self.label_min = np.min(dataset.true_labels)
+            self.label_max = np.max(dataset.true_labels)
+
+            def calculate_log_p_reg(x, label, means, gaussian_params):
+                return calculate_log_p_with_gaussian_params_regression(x, label, means, gaussian_params, self.label_min,
+                                                                       self.label_max)
+
+            self.calculate_log_p = calculate_log_p_reg
+            self.sample_from_distrib = self.sample_from_distrib_regression
+            self.vis_log_p_calcul = self.vis_log_p_calcul_regression
+        else:
+            self.dataset_type = 'labeled'
+            self.calculate_log_p = calculate_log_p_with_gaussian_params
+            self.sample_from_distrib = self.sample_from_distrib_label
+            self.vis_log_p_calcul = self.vis_log_p_calcul_label
         self.device = device
         self.model = model
         self.gp = gaussian_params
@@ -83,6 +100,13 @@ class NF(nn.Module):
         samples = torch.cat(samples, dim=0)
         return samples
 
+    def sample_from_distrib_regression(self, n, dim):
+        t_means = self.means.detach().cpu()
+        sampled_fac = torch.rand(n).unsqueeze(1).repeat(1, dim)
+        sampled_means = t_means[0] * sampled_fac + t_means[1] * (1 - sampled_fac)
+        samples = torch.normal(mean=sampled_means)
+        return samples
+
     def vis_log_p_calcul_label(self, z):
         z = z.to(torch.float64)
 
@@ -91,6 +115,25 @@ class NF(nn.Module):
             log_ps.append(multivariate_gaussian(z, mean=self.means[i], determinant=gaussian_param[1],
                                                 inverse_covariance_matrix=gaussian_param[0]).unsqueeze(1))
         log_p = torch.max(torch.cat(log_ps, dim=1), dim=1).values
+
+        return log_p
+
+    def vis_log_p_calcul_regression(self, z):
+        z = z.to(torch.float64)
+        dir = (self.means[-1] - self.means[0]).to(torch.float64)
+        dot_dir = torch.dot(dir, dir)
+        lab_fac = torch.mm(z, dir.unsqueeze(1)) / dot_dir
+        s_means = lab_fac * dir
+
+        mins = torch.min(self.means, axis=0)[0]
+        maxs = torch.max(self.means, axis=0)[0]
+        li = []
+        for dim in range(mins.shape[0]):
+            li.append(torch.clamp(s_means[:, dim], mins[dim], maxs[dim]).unsqueeze(1))
+        s_means = torch.cat(li, axis=1)
+
+        log_p = multivariate_gaussian(z, mean=s_means, determinant=self.gaussian_params[0][1],
+                                      inverse_covariance_matrix=self.gaussian_params[0][0]).unsqueeze(1)
 
         return log_p
 
@@ -124,7 +167,7 @@ class NF(nn.Module):
         # plt.close()
 
 
-def load_seqflow_model(num_inputs, n_flows, gaussian_params, learn_mean=True, device='cuda:0'):
+def load_seqflow_model(num_inputs, n_flows, gaussian_params, learn_mean=True, device='cuda:0', dataset=None):
     # Flow Sequential
     num_hidden = num_inputs * 4
     num_cond_inputs = None
@@ -132,13 +175,13 @@ def load_seqflow_model(num_inputs, n_flows, gaussian_params, learn_mean=True, de
 
     model.to(torch.float).to(device)
     model.train()
-    model = SeqFlow(model, gaussian_params=gaussian_params, learn_mean=learn_mean)
+    model = SeqFlow(model, gaussian_params=gaussian_params, learn_mean=learn_mean, dataset=dataset)
     return model
 
 
 class SeqFlow(NF):
-    def __init__(self, model, gaussian_params=None, device='cuda:0', learn_mean=True):
-        super().__init__(model, gaussian_params, device, learn_mean)
+    def __init__(self, model, gaussian_params=None, device='cuda:0', learn_mean=True, dataset=None):
+        super().__init__(model, gaussian_params, device, learn_mean, dataset)
 
     def downstream_process(self):
         return -1
@@ -150,7 +193,7 @@ class SeqFlow(NF):
         z, delta_logp = self.model(input)
 
         # compute log q(z)
-        log_p = calculate_log_p_with_gaussian_params(z, label, self.means, self.gaussian_params)
+        log_p = self.calculate_log_p(z, label, self.means, self.gaussian_params)
         distloss = torch.log(1 + torch.cdist(self.means, self.means).mean())
 
         return log_p, distloss, delta_logp, z
@@ -188,7 +231,7 @@ class SeqFlow(NF):
 
         plt.figure(figsize=(9, 3))
         visualize_transform(
-            p_samples, self.sample_from_distrib_label, self.vis_log_p_calcul_label, transform=sample_fn,
+            p_samples, self.sample_from_distrib, self.vis_log_p_calcul, transform=sample_fn,
             inverse_transform=density_fn, samples=True, npts=100, device=self.device
         )
         fig_filename = os.path.join(save_dir, 'figs', '{:04d}.jpg'.format(itr))
@@ -217,7 +260,7 @@ class SeqFlow(NF):
         plt.close()
 
 
-def load_ffjord_model(args, n_dim, gaussian_params, learn_mean=True, device='cuda:0'):
+def load_ffjord_model(args, n_dim, gaussian_params, learn_mean=True, device='cuda:0', dataset=None):
     regularization_fns, regularization_coeffs = create_regularization_fns(args)
     model = build_model_tabular(args, n_dim, regularization_fns).to(device)
     if args.spectral_norm: add_spectral_norm(model)
@@ -226,13 +269,14 @@ def load_ffjord_model(args, n_dim, gaussian_params, learn_mean=True, device='cud
     model.to(torch.float).to(device)
     model.train()
     model = FFJORD(args, model, regularization_coeffs=regularization_coeffs, gaussian_params=gaussian_params,
-                   learn_mean=learn_mean)
+                   learn_mean=learn_mean, dataset=dataset)
     return model
 
 
 class FFJORD(NF):
-    def __init__(self, args, model, regularization_coeffs, gaussian_params=None, device='cuda:0', learn_mean=True):
-        super().__init__(model, gaussian_params, device, learn_mean)
+    def __init__(self, args, model, regularization_coeffs, gaussian_params=None, device='cuda:0', learn_mean=True,
+                 dataset=None):
+        super().__init__(model, gaussian_params, device, learn_mean, dataset)
         self.regularization_coeffs = regularization_coeffs
         self.spectral_norm = args.spectral_norm
 
@@ -253,7 +297,7 @@ class FFJORD(NF):
         z, delta_logp = self.model(input, zero)
 
         # compute log q(z)
-        log_p = calculate_log_p_with_gaussian_params(z, label, self.means, self.gaussian_params)
+        log_p = self.calculate_log_p(z, label, self.means, self.gaussian_params)
         distloss = torch.log(1 + torch.cdist(self.means, self.means).mean())
 
         return log_p, distloss, -delta_logp, z
@@ -287,7 +331,7 @@ class FFJORD(NF):
 
         plt.figure(figsize=(9, 3))
         visualize_transform(
-            p_samples, self.sample_from_distrib_label, self.vis_log_p_calcul_label, transform=sample_fn,
+            p_samples, self.sample_from_distrib, self.vis_log_p_calcul, transform=sample_fn,
             inverse_transform=density_fn, samples=True, npts=100, device=self.device
         )
         fig_filename = os.path.join(save_dir, 'figs', '{:04d}.jpg'.format(itr))

@@ -3,6 +3,7 @@ import math
 import torch
 
 import ffjord_lib.layers.odefunc as odefunc
+from utils.dataset import DATASETS, REGRESSION_DATASETS
 
 
 def ffjord_arguments():
@@ -47,9 +48,9 @@ def ffjord_arguments():
 
 def training_arguments():
     parser = argparse.ArgumentParser(description="CGlow trainer")
-    DATASETS = ['mnist', 'single_moon', 'double_moon', 'iris', 'bcancer', 'diabetes']
     MODELS = ['cglow', 'seqflow', 'ffjord']
-    parser.add_argument("--dataset", type=str, default='mnist', choices=DATASETS, help="Dataset to use")
+    parser.add_argument("--dataset", type=str, default='mnist', choices=DATASETS + REGRESSION_DATASETS,
+                        help="Dataset to use")
     parser.add_argument("--batch_size", default=16, type=int, help="batch size")
     parser.add_argument("--n_epoch", default=1000, type=int, help="number of epoch")
     parser.add_argument("--model", type=str, default='cglow', choices=MODELS, help="Model to use")

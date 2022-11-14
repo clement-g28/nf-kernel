@@ -5,7 +5,8 @@ from torch.nn import functional as F
 import numpy as np
 from scipy import linalg as la
 
-from utils.density import multivariate_gaussian, construct_covariance
+from utils.density import construct_covariance
+from utils.utils import calculate_log_p_with_gaussian_params
 
 from torchvision import utils
 
@@ -434,49 +435,7 @@ class WrappedModel(nn.Module):
         return self.module(x)
 
 
-def initialize_gaussian_params(dataset, al_list, isotrope=False, dim_per_label=30, fixed_eigval=None):
-    uni = np.unique(dataset.true_labels)
-    n_dim = dataset.X[0].shape[0]
-    for sh in dataset.X[0].shape[1:]:
-        n_dim *= sh
-    assert dim_per_label <= math.floor(
-        n_dim / len(uni)), 'dim_per_label is too big not enough dimensions for all classes'
-    gaussian_params = []
-    if isotrope:
-        for i, label in enumerate(uni):
-            mean = np.zeros(n_dim)
-            eigenvecs = np.zeros((n_dim, n_dim))
-            np.fill_diagonal(eigenvecs, 1)
-            eigenvals = np.ones(n_dim)
-            gaussian_params.append((mean, eigenvecs, eigenvals, label))
-    else:
-        for i, label in enumerate(uni):
-            mean = np.zeros(n_dim)
-            eigenvecs = np.zeros((n_dim, n_dim))
-            np.fill_diagonal(eigenvecs, 1)
-            if fixed_eigval is None:
-                be = np.exp(1 / (n_dim - dim_per_label) * np.log(1 / math.pow(sum(al_list) / len(al_list), dim_per_label)))
-                eigenvals = np.ones(n_dim) * be
-                eigenvals[dim_per_label * i:dim_per_label * (i + 1)] = al_list
-            else:
-                eigenvals = np.ones(n_dim)
-                eigenvals[:] = fixed_eigval
-            gaussian_params.append((mean, eigenvecs, eigenvals, label))
 
-    return gaussian_params
-
-
-def calculate_log_p_with_gaussian_params(x, label, means, gaussian_params):
-    log_ps = []
-    for i, gaussian_param in enumerate(gaussian_params):
-        log_ps.append(multivariate_gaussian(x, mean=means[i], determinant=gaussian_param[1],
-                                            inverse_covariance_matrix=gaussian_param[0]).unsqueeze(1))
-
-    log_ps = torch.cat(log_ps, dim=1)
-    one_hot_label = torch.nn.functional.one_hot(label, num_classes=log_ps.shape[1])
-    log_p = torch.sum(log_ps * one_hot_label, dim=1)
-
-    return log_p
 
 
 def denoise_loss(ori_z, noisy_z, ori_lab, noisy_lab, means, eigvals, eigvecs, k):
