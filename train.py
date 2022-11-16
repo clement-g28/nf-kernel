@@ -36,7 +36,8 @@ def train(args, model_single, add_path, gaussian_params, train_dataset, val_data
     beta = args.beta
     z_shape = model_single.calc_last_z_shape(dataset.im_size)
 
-    train_loader = train_dataset.get_loader(args.batch_size, shuffle=True, drop_last=False)
+    # TEST with weighted sampler
+    train_loader = train_dataset.get_loader(args.batch_size, shuffle=True, drop_last=False, sampler=True)
     if val_dataset is not None:
         val_loader = val_dataset.get_loader(args.batch_size, shuffle=True, drop_last=False)
     loader_size = len(train_loader)
@@ -212,7 +213,8 @@ if __name__ == "__main__":
 
     validation = args.validation
     if validation > 0:
-        train_dataset, val_dataset = dataset.split_dataset(validation)
+        # TEST with stratified sample
+        train_dataset, val_dataset = dataset.split_dataset(validation, stratified=True)
         train_dataset.ori_X = train_dataset.X
         train_dataset.ori_true_labels = train_dataset.true_labels
         val_dataset.ori_X = val_dataset.X

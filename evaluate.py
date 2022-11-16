@@ -701,11 +701,17 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
 
     # krr_types = ['linear', 'poly', 'rbf', 'sigmoid', 'cosine']
     krr_types = ['rbf', 'poly', 'sigmoid']
+    # krr_params = [
+    #     {'Ridge__kernel': ['rbf'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__alpha': np.linspace(0, 10, 11)},
+    #     {'Ridge__kernel': ['poly'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__degree': np.linspace(1, 4, 4),
+    #      'Ridge__alpha': np.linspace(0, 10, 11)},
+    #     {'Ridge__kernel': ['sigmoid'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__alpha': np.linspace(0, 10, 11)}
+    # ]
     krr_params = [
-        {'Ridge__kernel': ['rbf'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__alpha': np.linspace(0, 10, 11)},
-        {'Ridge__kernel': ['poly'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__degree': np.linspace(1, 4, 4),
+        {'Ridge__kernel': ['rbf'], 'Ridge__alpha': np.linspace(0, 10, 11)},
+        {'Ridge__kernel': ['poly'], 'Ridge__degree': np.linspace(1, 4, 4),
          'Ridge__alpha': np.linspace(0, 10, 11)},
-        {'Ridge__kernel': ['sigmoid'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__alpha': np.linspace(0, 10, 11)}
+        {'Ridge__kernel': ['sigmoid'], 'Ridge__alpha': np.linspace(0, 10, 11)}
     ]
 
     krrs = [None] * len(krr_types)
@@ -903,7 +909,12 @@ if __name__ == "__main__":
         val_dataset.load_split(val_idx_path)
     else:
         print('No val idx found, searching for test dataset...')
-        val_dataset = ImDataset(dataset_name=dataset_name, test=True)
+        if dataset_name == 'mnist':
+            val_dataset = ImDataset(dataset_name=dataset_name, test=True)
+        else:
+            train_dataset, val_dataset = dataset.split_dataset(0)
+            _, val_dataset = val_dataset.split_dataset(0.01, stratified=True)
+        # val_dataset = ImDataset(dataset_name=dataset_name, test=True)
 
     n_dim = dataset.X[0].shape[0]
     for sh in dataset.X[0].shape[1:]:

@@ -127,6 +127,7 @@ def initialize_regression_gaussian_params(dataset, al_list, isotrope=False, dim_
     if isotrope:
         for i in range(2):
             mean = np.zeros(n_dim)
+            # mean = np.ones(n_dim) * -20 * i
             eigenvecs = np.zeros((n_dim, n_dim))
             np.fill_diagonal(eigenvecs, 1)
             eigenvals = np.ones(n_dim)

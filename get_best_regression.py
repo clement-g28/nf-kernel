@@ -8,7 +8,8 @@ import re
 from utils.custom_glow import CGlow, WrappedModel
 from utils.dataset import ImDataset, SimpleDataset
 
-from utils.utils import set_seed, create_folder, initialize_gaussian_params, initialize_regression_gaussian_params
+from utils.utils import set_seed, create_folder, initialize_gaussian_params, initialize_regression_gaussian_params, \
+    save_fig
 
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
@@ -28,6 +29,9 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
     # Our approach
     best_score = 0
     best_i = 0
+
+    save_fig(train_dataset.X, train_dataset.true_labels, size=10, save_path=f'{save_dir}/X_space')
+    save_fig(val_dataset.X, val_dataset.true_labels, size=10, save_path=f'{save_dir}/X_space_val')
     # Get z_val for zpca
     for i, model_loading_params in enumerate(t_model_params):
         if model_loading_params['model'] == 'cglow':
@@ -80,7 +84,7 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
         # zlinridge = learn_or_load_modelhyperparams(Z, tlabels, kernel_name, param_gridlin, save_dir,
         #                                            model_type=('Ridge', KernelRidge()), scaler=False)
 
-        val_loader = val_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+        val_loader = eval_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
 
         val_inZ = []
         elabels = []
@@ -91,13 +95,23 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
                 log_p, distloss, logdet, out = model(inp, labels)
                 val_inZ.append(out.detach().cpu().numpy())
                 elabels.append(labels.detach().cpu().numpy())
-        val_inZ = np.concatenate(val_inZ, axis=0).reshape(len(val_dataset), -1)
+        val_inZ = np.concatenate(val_inZ, axis=0).reshape(len(eval_dataset), -1)
         elabels = np.concatenate(elabels, axis=0)
 
-        zridge_score = zlinridge.score(val_inZ, elabels)
+        # zridge_score = zlinridge.score(val_inZ, elabels)
+        y_pred = zlinridge.predict(val_inZ)
+        zridge_score = (np.power((y_pred-elabels),2)).mean()
         zridge_scores.append(zridge_score)
 
-        print(f'Our approach ({i}) : {zridge_score}')
+        # Train score
+        # zridge_score_train = zlinridge.score(Z, tlabels)
+        y_pred_train = zlinridge.predict(Z)
+        zridge_score_train = (np.power((y_pred_train-tlabels),2)).mean()
+
+        save_fig(Z, tlabels, size=10, save_path=f'{save_dir}/Z_space_{i}')
+        save_fig(val_inZ, elabels, size=10, save_path=f'{save_dir}/Z_space_val_{i}')
+
+        print(f'Our approach ({i}) : {zridge_score}, (train score : {zridge_score_train})')
         if zridge_score >= best_score:
             best_score = zridge_score
             best_i = i
@@ -233,7 +247,11 @@ if __name__ == '__main__':
         val_dataset.load_split(val_idx_path)
     else:
         print('No val idx found, searching for test dataset...')
-        val_dataset = ImDataset(dataset_name=dataset_name, test=True)
+        if dataset_name == 'mnist':
+            val_dataset = ImDataset(dataset_name=dataset_name, test=True)
+        else:
+            train_dataset, val_dataset = dataset.split_dataset(0)
+        # val_dataset = ImDataset(dataset_name=dataset_name, test=True)
 
     n_dim = dataset.X[0].shape[0]
     for sh in dataset.X[0].shape[1:]:

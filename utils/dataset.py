@@ -17,13 +17,13 @@ import pickle
 from sklearn.datasets import load_iris, load_diabetes, load_breast_cancer, make_moons, make_swiss_roll
 from utils import visualize_flow
 
-DATASETS = ['single_moon', 'double_moon', 'iris', 'bcancer', 'mnist']
-REGRESSION_DATASETS = ['swissroll', 'diabetes']
+DATASETS = ['single_moon', 'double_moon', 'iris', 'bcancer', 'mnist', 'waterquality']
+REGRESSION_DATASETS = ['swissroll', 'diabetes', 'waterquality']
 
 
 # abstract base kernel dataset class
 class BaseDataset(Dataset):
-    def __init__(self, X, true_labels):
+    def __init__(self, X, true_labels, test_dataset=None):
         self.ori_X = X
         self.ori_true_labels = true_labels
         self.X = X
@@ -33,12 +33,27 @@ class BaseDataset(Dataset):
 
         self.reduce_type = 'all'
 
+        self.test_dataset = test_dataset
+
     def __len__(self):
         return len(self.X)
 
-    def get_loader(self, batch_size, shuffle=True, drop_last=True, pin_memory=True):
-        loader = torch.utils.data.DataLoader(
-            dataset=self, batch_size=batch_size, shuffle=shuffle, drop_last=drop_last, pin_memory=pin_memory)
+    def get_loader(self, batch_size, shuffle=True, drop_last=True, pin_memory=True, sampler=False):
+        if sampler:
+            class_sample_count = np.histogram(self.true_labels)[0]
+            idxs = np.argsort(self.true_labels)
+            probs = np.zeros(len(self))
+            done = 0
+            for i in range(len(class_sample_count)):
+                probs[idxs[done:done + class_sample_count[i]]] = class_sample_count[i]
+                done += class_sample_count[i]
+            probs = 1 / torch.Tensor(probs / self.true_labels.shape[0])
+            sampler = torch.utils.data.sampler.WeightedRandomSampler(probs, len(self), replacement=True)
+            loader = torch.utils.data.DataLoader(self, batch_size=batch_size,
+                                                 drop_last=drop_last, pin_memory=pin_memory, sampler=sampler)
+        else:
+            loader = torch.utils.data.DataLoader(
+                dataset=self, batch_size=batch_size, shuffle=shuffle, drop_last=drop_last, pin_memory=pin_memory)
         # print("Loader using batch size {}. Total {} iterations/epoch.".format(batch_size, len(loader)))
         return loader
 
@@ -105,24 +120,48 @@ class BaseDataset(Dataset):
         self.X = n_X
         self.true_labels = n_true_labels
 
-    def split_dataset(self, validation):
+    def split_dataset(self, validation, stratified=False):
         val_dataset = copy.deepcopy(self)
         train_dataset = copy.deepcopy(self)
+        if self.test_dataset is not None:
+            print('Test dataset known, split using the test dataset...')
+            val_dataset.X = self.test_dataset[0]
+            val_dataset.true_labels = self.test_dataset[1]
+            val_dataset.test_dataset = None
+            val_dataset.idx = None
 
-        val_idx = random.sample(range(0, self.X.shape[0]), k=math.floor(self.X.shape[0] * validation))
-        val_dataset.X = self.X[val_idx]
-        val_dataset.true_labels = self.true_labels[val_idx]
-
-        train_idx = [idx for idx in range(self.X.shape[0]) if idx not in val_idx]
-        train_dataset.X = self.X[train_idx]
-        train_dataset.true_labels = self.true_labels[train_idx]
-
-        if self.idx is None:
-            val_dataset.idx = val_idx
-            train_dataset.idx = train_idx
+            train_dataset.test_dataset = None
         else:
-            val_dataset.idx = self.idx[val_idx]
-            train_dataset.idx = self.idx[train_idx]
+            if stratified:
+                class_sample_count = np.histogram(self.true_labels)[0]
+                idxs = np.argsort(self.true_labels)
+                probs = np.zeros(len(self))
+                done = 0
+                for i in range(len(class_sample_count)):
+                    probs[idxs[done:done + class_sample_count[i]]] = class_sample_count[i]
+                    done += class_sample_count[i]
+                probs = 1 / torch.Tensor(probs / self.true_labels.shape[0])
+                sampler = torch.utils.data.sampler.WeightedRandomSampler(probs,
+                                                                         math.floor(self.X.shape[0] * validation),
+                                                                         replacement=False)
+                val_idx = []
+                for idx in sampler:
+                    val_idx.append(idx)
+            else:
+                val_idx = random.sample(range(0, self.X.shape[0]), k=math.floor(self.X.shape[0] * validation))
+            val_dataset.X = self.X[val_idx]
+            val_dataset.true_labels = self.true_labels[val_idx]
+
+            train_idx = [idx for idx in range(self.X.shape[0]) if idx not in val_idx]
+            train_dataset.X = self.X[train_idx]
+            train_dataset.true_labels = self.true_labels[train_idx]
+
+            if self.idx is None:
+                val_dataset.idx = val_idx
+                train_dataset.idx = train_idx
+            else:
+                val_dataset.idx = self.idx[val_idx]
+                train_dataset.idx = self.idx[train_idx]
 
         return train_dataset, val_dataset
 
@@ -153,8 +192,8 @@ class SimpleDataset(BaseDataset):
         self.dataset_name = dataset_name
         self.label_type = np.int if self.dataset_name not in REGRESSION_DATASETS else np.float
         self.transform = transform
-        ori_X, ori_true_labels = self.load_dataset(dataset_name)
-        super().__init__(ori_X, ori_true_labels)
+        ori_X, ori_true_labels, test_dataset = self.load_dataset(dataset_name)
+        super().__init__(ori_X, ori_true_labels, test_dataset)
         print('Z and K are not initialized in constructor')
         self.im_size = ori_X.shape[-1]
 
@@ -179,6 +218,7 @@ class SimpleDataset(BaseDataset):
     def load_dataset(name):
         path = './datasets'
         exist_dataset = os.path.exists(f'{path}/{name}_data.npy') if path is not None else False
+        test_dataset = None
         if exist_dataset:
             X = np.load(f'{path}/{name}_data.npy')
             labels = np.load(f'{path}/{name}_labels.npy')
@@ -198,6 +238,12 @@ class SimpleDataset(BaseDataset):
                 visualize_flow.LOW = -2
                 visualize_flow.HIGH = 2.2
             elif name == 'diabetes':
+                visualize_flow.LOW = -3
+                visualize_flow.HIGH = 4.3
+            elif name == 'waterquality':
+                X_test = np.load(f'{path}/{name}_testdata.npy')
+                labels_test = np.load(f'{path}/{name}_testlabels.npy')
+                test_dataset = (X_test, labels_test)
                 visualize_flow.LOW = -3
                 visualize_flow.HIGH = 4.3
         else:
@@ -244,7 +290,7 @@ class SimpleDataset(BaseDataset):
                 X = ((X - mean) / std)
                 visualize_flow.LOW = -3
                 visualize_flow.HIGH = 4.3
-            elif name =='airquality':
+            elif name == 'airquality':
                 import csv
                 results = []
                 with open(f"{path}/input.csv") as csvfile:
@@ -253,13 +299,31 @@ class SimpleDataset(BaseDataset):
                         results.append(row)
                 print(results)
                 X = np.loadtxt(f"{path}/AirQualityUCI.csv")
+            elif name == 'waterquality':
+                import scipy.io
+
+                mat = scipy.io.loadmat(f"{path}/water_quality_prediciton/water_dataset.mat")
+                X = np.concatenate(mat['X_tr'].squeeze(), axis=0)
+                labels = np.concatenate(mat['Y_tr'].squeeze(), axis=0)
+                X_test = np.concatenate(mat['X_te'].squeeze(), axis=0)
+                y_test = np.concatenate(mat['Y_te'].squeeze(), axis=0)
+                std = np.std(X, axis=0)
+                mean = X.mean(axis=0)
+                X = ((X - mean) / std)
+                X_test = ((X_test - mean) / std)
+                visualize_flow.LOW = -9.5
+                visualize_flow.HIGH = 9
+
+                test_dataset = (X_test, y_test)
+                np.save(f'{path}/{name}_testdata.npy', X_test)
+                np.save(f'{path}/{name}_testlabels.npy', y_test)
             else:
                 assert False, 'unknown dataset'
 
             np.save(f'{path}/{name}_data.npy', X)
             np.save(f'{path}/{name}_labels.npy', labels)
 
-        return X, labels
+        return X, labels, test_dataset
 
     @staticmethod
     def format_data(input, n_bits, n_bins):
