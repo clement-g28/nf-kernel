@@ -135,18 +135,28 @@ class BaseDataset(Dataset):
             if stratified:
                 class_sample_count = np.histogram(self.true_labels)[0]
                 idxs = np.argsort(self.true_labels)
-                probs = np.zeros(len(self))
+                # probs = np.zeros(len(self))
+                # done = 0
+                # for i in range(len(class_sample_count)):
+                #     probs[idxs[done:done + class_sample_count[i]]] = class_sample_count[i]
+                #     done += class_sample_count[i]
+                # probs = 1 / torch.Tensor(probs / self.true_labels.shape[0])
+                # sampler = torch.utils.data.sampler.WeightedRandomSampler(probs,
+                #                                                          math.floor(self.X.shape[0] * validation),
+                #                                                          replacement=False)
+                # val_idx = []
+                # for idx in sampler:
+                #     val_idx.append(idx)
+
                 done = 0
-                for i in range(len(class_sample_count)):
-                    probs[idxs[done:done + class_sample_count[i]]] = class_sample_count[i]
-                    done += class_sample_count[i]
-                probs = 1 / torch.Tensor(probs / self.true_labels.shape[0])
-                sampler = torch.utils.data.sampler.WeightedRandomSampler(probs,
-                                                                         math.floor(self.X.shape[0] * validation),
-                                                                         replacement=False)
                 val_idx = []
-                for idx in sampler:
-                    val_idx.append(idx)
+                for i in range(len(class_sample_count)):
+                    nb_idx = math.floor(class_sample_count[i] * validation)
+                    if nb_idx == 0 and class_sample_count[i] > 1:
+                        nb_idx = 1
+                    val_idx += random.sample(list(idxs[done:done + class_sample_count[i]]), k=nb_idx)
+                    done += class_sample_count[i]
+
             else:
                 val_idx = random.sample(range(0, self.X.shape[0]), k=math.floor(self.X.shape[0] * validation))
             val_dataset.X = self.X[val_idx]

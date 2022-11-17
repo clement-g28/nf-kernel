@@ -37,9 +37,9 @@ def train(args, model_single, add_path, gaussian_params, train_dataset, val_data
     z_shape = model_single.calc_last_z_shape(dataset.im_size)
 
     # TEST with weighted sampler
-    train_loader = train_dataset.get_loader(args.batch_size, shuffle=True, drop_last=False, sampler=True)
+    train_loader = train_dataset.get_loader(args.batch_size, shuffle=True, drop_last=True, sampler=True)
     if val_dataset is not None:
-        val_loader = val_dataset.get_loader(args.batch_size, shuffle=True, drop_last=False)
+        val_loader = val_dataset.get_loader(args.batch_size, shuffle=True, drop_last=True)
     loader_size = len(train_loader)
 
     with tqdm(range(args.n_epoch)) as pbar:

@@ -914,6 +914,7 @@ if __name__ == "__main__":
         else:
             train_dataset, val_dataset = dataset.split_dataset(0)
             _, val_dataset = val_dataset.split_dataset(0.01, stratified=True)
+            _, train_dataset = train_dataset.split_dataset(0.1, stratified=True)
         # val_dataset = ImDataset(dataset_name=dataset_name, test=True)
 
     n_dim = dataset.X[0].shape[0]
