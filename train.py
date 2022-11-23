@@ -12,7 +12,7 @@ from utils.training import training_arguments, ffjord_arguments, AddGaussianNois
 from utils.dataset import ImDataset, SimpleDataset
 from utils.density import construct_covariance
 from utils.utils import write_dict_to_tensorboard, set_seed, create_folder, AverageMeter, initialize_gaussian_params, \
-    initialize_regression_gaussian_params
+    initialize_regression_gaussian_params, initialize_tmp_regression_gaussian_params
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -279,8 +279,15 @@ if __name__ == "__main__":
         gaussian_params = initialize_gaussian_params(dataset, eigval_list, isotrope=args.isotrope_gaussian,
                                                      dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
     else:
-        gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list, isotrope=args.isotrope_gaussian,
-                                                                dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
+        if args.method == 0:
+            gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list, isotrope=args.isotrope_gaussian,
+                                                                    dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
+        elif args.method == 1:
+            gaussian_params = initialize_tmp_regression_gaussian_params(dataset, eigval_list)
+        elif args.method == 2:
+            gaussian_params = initialize_tmp_regression_gaussian_params(dataset, eigval_list, ones=True)
+        else:
+            assert False, 'no method selected'
     folder_path = f'{args.dataset}/{args.model}/'
     if args.model == 'cglow':
         n_channel = dataset.n_channel

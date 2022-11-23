@@ -93,6 +93,21 @@ def project_inZ(z_noisy, params, how_much):
     return proj
 
 
+def project_between(z, a, b):
+    assert len(z.shape) > 1, 'z should be of shape (batch, -1)'
+    direction = (a - b).astype(np.float)
+    magnitude = np.linalg.norm(a - b)
+    direction = direction / magnitude
+    z_norm = np.expand_dims((z - b) / magnitude, 0)
+    direction = np.expand_dims(direction, 0)
+    dot_val = z_norm @ direction.T
+    proj = (dot_val @ direction).squeeze()
+
+    proj *= magnitude
+    proj += b
+    return proj, dot_val
+
+
 def noise_data(data, noise_type, gaussian_std, gaussian_mean, clip=True):
     if noise_type == 'gaussian':
         noisy = random_noise(data, mode='gaussian', mean=gaussian_mean, var=gaussian_std * gaussian_std, clip=clip)

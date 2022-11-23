@@ -9,7 +9,7 @@ from utils.custom_glow import CGlow, WrappedModel
 from utils.dataset import ImDataset, SimpleDataset
 
 from utils.utils import set_seed, create_folder, initialize_gaussian_params, initialize_regression_gaussian_params, \
-    save_fig
+    save_fig, initialize_tmp_regression_gaussian_params
 
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
@@ -28,6 +28,7 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
 
     # Our approach
     best_score = 0
+    best_score = math.inf
     best_i = 0
 
     save_fig(train_dataset.X, train_dataset.true_labels, size=10, save_path=f'{save_dir}/X_space')
@@ -100,19 +101,31 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
 
         # zridge_score = zlinridge.score(val_inZ, elabels)
         y_pred = zlinridge.predict(val_inZ)
-        zridge_score = (np.power((y_pred-elabels),2)).mean()
+        zridge_score = (np.power((y_pred - elabels), 2)).mean()
         zridge_scores.append(zridge_score)
 
         # Train score
         # zridge_score_train = zlinridge.score(Z, tlabels)
         y_pred_train = zlinridge.predict(Z)
-        zridge_score_train = (np.power((y_pred_train-tlabels),2)).mean()
+        zridge_score_train = (np.power((y_pred_train - tlabels), 2)).mean()
 
-        save_fig(Z, tlabels, size=10, save_path=f'{save_dir}/Z_space_{i}')
-        save_fig(val_inZ, elabels, size=10, save_path=f'{save_dir}/Z_space_val_{i}')
+        save_fig(Z, tlabels, size=20, save_path=f'{save_dir}/Z_space_{i}')
+        save_fig(val_inZ, elabels, size=20, save_path=f'{save_dir}/Z_space_val_{i}')
 
-        print(f'Our approach ({i}) : {zridge_score}, (train score : {zridge_score_train})')
-        if zridge_score >= best_score:
+        # TEST project between the means
+        from utils.testing import project_between
+        means = model.means.detach().cpu().numpy()
+        proj, dot_val = project_between(val_inZ, means[0], means[1])
+        # pred = ((proj - means[1]) / (means[0] - means[1])) * (
+        #         model.label_max - model.label_min) + model.label_min
+        # pred = pred.mean(axis=1)
+        pred = dot_val.squeeze() * (model.label_max - model.label_min) + model.label_min
+        projection_score = np.power((pred - elabels), 2).mean()
+
+        print(
+            f'Our approach ({i}) : {zridge_score}, (train score : {zridge_score_train}), (projection) : {projection_score}')
+        # if zridge_score >= best_score:
+        if zridge_score <= best_score:
             best_score = zridge_score
             best_i = i
 
@@ -143,9 +156,76 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
         model_single.state_dict(), f"{save_dir}/best_regression_model.pth"
     )
 
+    return best_i
+
+
+def visualize_dataset(dataset, train_dataset, val_dataset, model, save_dir):
+    save_path = f'{save_dir}/visualize'
+    create_folder(save_path)
+    hist_train = np.histogram(train_dataset.true_labels)
+    hist_val = np.histogram(val_dataset.true_labels, bins=hist_train[1])
+    idxs_train = np.argsort(train_dataset.true_labels)
+    idxs_val = np.argsort(val_dataset.true_labels)
+    done_train = 0
+    done_val = 0
+    model.eval()
+
+    import scipy
+    from sklearn.decomposition import PCA
+    pca = PCA(n_components=2)
+    pca.fit(dataset.X)
+    X_pca = pca.transform(dataset.X)
+
+    save_fig(X_pca, dataset.true_labels, f'{save_path}/PCA_X.png', size=20)
+
+    minx = model.means[:, 0].detach().cpu().numpy().min()
+    maxx = model.means[:, 0].detach().cpu().numpy().max()
+    diff = maxx - minx
+    minx -= diff / 2
+    maxx += diff / 2
+    miny = model.means[:, 1].detach().cpu().numpy().min()
+    maxy = model.means[:, 1].detach().cpu().numpy().max()
+    diff = maxy - miny
+    miny -= diff / 2
+    maxy += diff / 2
+
+    for i, nb_class in enumerate(hist_train[0]):
+        nb_class_val = hist_val[0][i]
+        X_train = train_dataset.X[idxs_train[done_train:done_train + nb_class]]
+        X_val = val_dataset.X[idxs_val[done_val:done_val + nb_class_val]]
+        labels_train = train_dataset.true_labels[idxs_train[done_train:done_train + nb_class]]
+        labels_val = val_dataset.true_labels[idxs_val[done_val:done_val + nb_class_val]]
+        X = np.concatenate((X_train, X_val), axis=0)
+        dist = scipy.spatial.distance.cdist(X, X)
+        print(f'Distances({i}) : \n' + str(dist))
+        print(f'Mean Distances({i}) : \n' + str(dist.mean(axis=0)))
+        print(f'Nval:{nb_class_val}')
+        labels = np.concatenate((labels_train, np.ones_like(labels_val) * -100), axis=0)
+        save_fig(X, labels, f'{save_path}/X_{i}.png', size=20,
+                 limits=(dataset.X[:, 0].min(), dataset.X[:, 0].max(), dataset.X[:, 1].min(), dataset.X[:, 0].max()),
+                 rangelabels=(-100, model.label_max))
+
+        pca = PCA(n_components=2)
+        pca.fit(X)
+        X_pca = pca.transform(X)
+
+        save_fig(X_pca, labels, f'{save_path}/PCA_X_{i}.png', size=20, rangelabels=(-100, model.label_max))
+
+        with torch.no_grad():
+            inp = torch.from_numpy(X.reshape(X.shape[0], -1)).float().to(device)
+            labels = torch.from_numpy(labels).to(device)
+            log_p, distloss, logdet, out = model(inp, labels)
+            Z = out.detach().cpu().numpy()
+        Z = Z.reshape(Z.shape[0], -1)
+        save_fig(Z, labels.detach().cpu().numpy(), f'{save_path}/Z_{i}.png', size=20, limits=(minx, maxx, miny, maxy),
+                 rangelabels=(-100, model.label_max))
+        done_train += nb_class
+        done_val += nb_class_val
+
 
 if __name__ == '__main__':
     parser = testing_arguments()
+    parser.add_argument("--method", default=0, type=int, help='select between [0,1,2]')
     args = parser.parse_args()
 
     set_seed(0)
@@ -194,7 +274,10 @@ if __name__ == '__main__':
             uniform_eigval = True
             uniform_split = split
             mean_of_eigval = uniform_split.replace("eigvaluniform", "")
-            mean_of_eigval = float(mean_of_eigval.replace("-", "."))
+            if 'e' not in mean_of_eigval:
+                mean_of_eigval = float(mean_of_eigval.replace("-", "."))
+            else:
+                mean_of_eigval = float(mean_of_eigval)
             print(f'Flow trained with uniform eigenvalues: {mean_of_eigval}')
         elif 'eigvalgaussian' in split:
             gaussian_split = split
@@ -293,10 +376,17 @@ if __name__ == '__main__':
             gaussian_params = initialize_gaussian_params(dataset, eigval_list, isotrope='isotrope' in folder_name,
                                                          dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
         else:
-            gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list,
+            if args.method == 0:
+                gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list,
                                                                     isotrope='isotrope' in folder_name,
                                                                     dim_per_label=dim_per_label,
                                                                     fixed_eigval=fixed_eigval)
+            elif args.method == 1:
+                gaussian_params = initialize_tmp_regression_gaussian_params(dataset, eigval_list)
+            elif args.method == 2:
+                gaussian_params = initialize_tmp_regression_gaussian_params(dataset, eigval_list, ones=True)
+            else:
+                assert False, 'no method selected'
 
         learn_mean = 'lmean' in folder_name
         model_loading_params = {'model': model_type, 'n_dim': n_dim, 'n_channel': n_channel, 'n_flow': n_flow,
@@ -313,5 +403,32 @@ if __name__ == '__main__':
     save_dir = './save'
     create_folder(save_dir)
 
-    evaluate_regression(t_model_params, train_dataset, val_dataset, full_dataset=dataset, save_dir=save_dir,
-                        device=device)
+    best_i = evaluate_regression(t_model_params, train_dataset, val_dataset, full_dataset=dataset, save_dir=save_dir,
+                                 device=device)
+
+    model_loading_params = t_model_params[best_i]
+    if model_loading_params['model'] == 'cglow':
+        # Load model
+        model_single = CGlow(model_loading_params['n_channel'], model_loading_params['n_flow'],
+                             model_loading_params['n_block'], affine=model_loading_params['affine'],
+                             conv_lu=model_loading_params['conv_lu'],
+                             gaussian_params=model_loading_params['gaussian_params'],
+                             device=model_loading_params['device'], learn_mean=model_loading_params['learn_mean'])
+    elif model_loading_params['model'] == 'seqflow':
+        model_single = load_seqflow_model(model_loading_params['n_dim'], model_loading_params['n_flow'],
+                                          gaussian_params=model_loading_params['gaussian_params'],
+                                          learn_mean=model_loading_params['learn_mean'], dataset=dataset)
+
+    elif model_loading_params['model'] == 'ffjord':
+        model_single = load_ffjord_model(model_loading_params['ffjord_args'], model_loading_params['n_dim'],
+                                         gaussian_params=model_loading_params['gaussian_params'],
+                                         learn_mean=model_loading_params['learn_mean'], dataset=dataset)
+
+    else:
+        assert False, 'unknown model type!'
+    model_single = WrappedModel(model_single)
+    model_single.load_state_dict(torch.load(model_loading_params['loading_path'], map_location=device))
+    model = model_single.module
+    model = model.to(device)
+    model.eval()
+    visualize_dataset(dataset, train_dataset, val_dataset, model, save_dir)

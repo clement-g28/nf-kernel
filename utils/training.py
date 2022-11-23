@@ -97,6 +97,10 @@ def training_arguments():
                         help='set the eigenvalues manually, it should be in the form of list of n_dim value e.g [50,0.003]')
 
     parser.add_argument("--dim_per_label", default=None, type=int, help='number of dimension to use for one class')
+
+    # METHOD SELECTION ARG
+    parser.add_argument("--method", default=0, type=int, help='select between [0,1,2]')
+
     return parser
 
 

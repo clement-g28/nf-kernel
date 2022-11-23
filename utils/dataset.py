@@ -17,8 +17,8 @@ import pickle
 from sklearn.datasets import load_iris, load_diabetes, load_breast_cancer, make_moons, make_swiss_roll
 from utils import visualize_flow
 
-DATASETS = ['single_moon', 'double_moon', 'iris', 'bcancer', 'mnist', 'waterquality']
-REGRESSION_DATASETS = ['swissroll', 'diabetes', 'waterquality']
+DATASETS = ['single_moon', 'double_moon', 'iris', 'bcancer', 'mnist']
+REGRESSION_DATASETS = ['swissroll', 'diabetes', 'waterquality', 'aquatoxi']
 
 
 # abstract base kernel dataset class
@@ -256,6 +256,9 @@ class SimpleDataset(BaseDataset):
                 test_dataset = (X_test, labels_test)
                 visualize_flow.LOW = -3
                 visualize_flow.HIGH = 4.3
+            elif name == 'aquatoxi':
+                visualize_flow.LOW = -6
+                visualize_flow.HIGH = 14
         else:
             if name == 'single_moon':
                 n_samples = 1000
@@ -327,6 +330,17 @@ class SimpleDataset(BaseDataset):
                 test_dataset = (X_test, y_test)
                 np.save(f'{path}/{name}_testdata.npy', X_test)
                 np.save(f'{path}/{name}_testlabels.npy', y_test)
+            elif name == 'aquatoxi':
+                from numpy import genfromtxt
+                mat = np.loadtxt(open(f"{path}/qsar_aquatic_toxicity.csv", "rb"), delimiter=";")
+
+                X = mat[:,:-1]
+                labels = mat[:,-1]
+                std = np.std(X, axis=0)
+                mean = X.mean(axis=0)
+                X = ((X - mean) / std)
+                visualize_flow.LOW = -6
+                visualize_flow.HIGH = 14
             else:
                 assert False, 'unknown dataset'
 

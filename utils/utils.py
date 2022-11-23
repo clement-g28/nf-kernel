@@ -52,8 +52,13 @@ def save_every_pic(path, numpy_pics, methods, labels, add_str=None, clamp_min=0,
         im.save(f'{path}/{name}')
 
 
-def save_fig(X, labels, save_path, limits=None, size=7):
-    plt.scatter(X[:, 0], X[:, 1], s=size, c=labels, zorder=3)
+def save_fig(X, labels, save_path, limits=None, size=7, rangelabels=None):
+    if rangelabels is not None:
+        vmin = rangelabels[0]
+        vmax = rangelabels[-1]
+        plt.scatter(X[:, 0], X[:, 1], s=size, c=labels, zorder=3, vmin=vmin, vmax=vmax)
+    else:
+        plt.scatter(X[:, 0], X[:, 1], s=size, c=labels, zorder=3)
     plt.xlabel("x")
     plt.ylabel("y")
 
@@ -62,8 +67,9 @@ def save_fig(X, labels, save_path, limits=None, size=7):
         plt.xlim([x_xmin - 1, x_xmax + 1])
         plt.ylim([x_ymin - 1, x_ymax + 1])
 
-    plt.savefig(fname=f'{save_path}.eps', format='eps')
+    # plt.savefig(fname=f'{save_path}.eps', format='eps')
     plt.savefig(fname=f'{save_path}.png', format='png')
+
     plt.close()
 
 
@@ -149,6 +155,29 @@ def initialize_regression_gaussian_params(dataset, al_list, isotrope=False, dim_
                 eigenvals = np.ones(n_dim)
                 eigenvals[:] = fixed_eigval
             gaussian_params.append((mean, eigenvecs, eigenvals, i))
+
+    return gaussian_params
+
+
+def initialize_tmp_regression_gaussian_params(dataset, al_list, ones=False):
+    n_dim = dataset.X[0].shape[0]
+    for sh in dataset.X[0].shape[1:]:
+        n_dim *= sh
+    gaussian_params = []
+
+    assert len(al_list) == 1, 'al_list should contains one dimension only'
+    dim_interpolation = 1
+
+    for i in range(2):
+        mean = np.zeros(n_dim)
+        eigenvecs = np.zeros((n_dim, n_dim))
+        np.fill_diagonal(eigenvecs, 1)
+        be = np.exp(
+            1 / (n_dim - dim_interpolation) * np.log(1 / math.pow(sum(al_list) / len(al_list), dim_interpolation)))
+        eigenvals = np.ones(n_dim) * be if not ones else np.ones(n_dim)
+        eigenvals[:1] = al_list
+        mean[:1] = i
+        gaussian_params.append((mean, eigenvecs, eigenvals, i))
 
     return gaussian_params
 

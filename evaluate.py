@@ -8,7 +8,7 @@ import torch
 from torchvision import utils
 
 from utils.utils import set_seed, create_folder, save_every_pic, initialize_gaussian_params, \
-    initialize_regression_gaussian_params, save_fig
+    initialize_regression_gaussian_params, save_fig, initialize_tmp_regression_gaussian_params
 
 from utils.custom_glow import CGlow, WrappedModel
 from utils.toy_models import load_seqflow_model, load_ffjord_model
@@ -652,9 +652,23 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
 
         # Learn Ridge
         start = time.time()
+        kernel_name = 'zlinear'
+        if fithyperparam:
+            # param_gridlin = [{'Ridge__kernel': [kernel_name], 'Ridge__alpha': np.linspace(0, 10, 11)}]
+            # linridge = learn_or_load_modelhyperparams(X_train, labels_train, kernel_name, param_gridlin, save_dir,
+            #                                           model_type=('Ridge', KernelRidge()), scaler=True)
+            # param_gridlin = [{'Ridge__kernel': [kernel_name], 'Ridge__alpha': np.logspace(-5, 2, 11)}]
+            param_gridlin = [{'Ridge__alpha': np.logspace(-5, 2, 11)}]
+            zlinridge = learn_or_load_modelhyperparams(Z, tlabels, kernel_name, param_gridlin, save_dir,
+                                                       model_type=('Ridge', Ridge()), scaler=False)
+        else:
+            # linridge = make_pipeline(StandardScaler(), KernelRidge(kernel=kernel_name))
+            zlinridge = make_pipeline(StandardScaler(), Ridge(alpha=0.1))
+            zlinridge.fit(Z, tlabels)
+            print(f'Fitting done.')
         # zlinridge = make_pipeline(StandardScaler(), KernelRidge(kernel='linear', alpha=0.1))
-        zlinridge = Ridge(alpha=0.1)
-        zlinridge.fit(Z, tlabels)
+        # zlinridge = Ridge(alpha=0.1)
+        # zlinridge.fit(Z, tlabels)
         print(zlinridge)
         end = time.time()
         print(f"time to fit linear ridge in Z : {str(end - start)}")
@@ -676,8 +690,22 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
         end = time.time()
         print(f"time to get Z_val from X_val : {str(end - start)}")
 
-        zridge_score = zlinridge.score(val_inZ, elabels)
-        print(f'Our approach : {zridge_score}')
+        # TEST project between the means
+        from utils.testing import project_between
+        means = model.means.detach().cpu().numpy()
+        proj, dot_val = project_between(val_inZ, means[0], means[1])
+        # pred = ((proj - means[1]) / (means[0] - means[1])) * (
+        #         model.label_max - model.label_min) + model.label_min
+        # pred = pred.mean(axis=1)
+        pred = dot_val.squeeze() * (model.label_max - model.label_min) + model.label_min
+        projection_mse_score = np.power((pred - elabels), 2).mean()
+        projection_mae_score = np.abs((pred - elabels)).mean()
+        print(f'Our approach (projection) MSE: {projection_mse_score}, MAE: {projection_mae_score}')
+
+        zridge_r2_score = zlinridge.score(val_inZ, elabels)
+        zridge_mae_score = np.abs(zlinridge.predict(val_inZ) - elabels).mean()
+        zridge_mse_score = np.power(zlinridge.predict(val_inZ) - elabels, 2).mean()
+        print(f'Our approach R2: {zridge_r2_score}, MSE: {zridge_mse_score}, MAE: {zridge_mae_score}')
 
     X_train = train_dataset.X.reshape(train_dataset.X.shape[0], -1)
     labels_train = train_dataset.true_labels
@@ -688,9 +716,10 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
         # param_gridlin = [{'Ridge__kernel': [kernel_name], 'Ridge__alpha': np.linspace(0, 10, 11)}]
         # linridge = learn_or_load_modelhyperparams(X_train, labels_train, kernel_name, param_gridlin, save_dir,
         #                                           model_type=('Ridge', KernelRidge()), scaler=True)
-        param_gridlin = [{'Ridge__alpha': np.linspace(0, 10, 11)}]
+        # param_gridlin = [{'Ridge__kernel': [kernel_name], 'Ridge__alpha': np.logspace(-5, 2, 11)}]
+        param_gridlin = [{'Ridge__alpha': np.logspace(-5, 2, 11)}]
         linridge = learn_or_load_modelhyperparams(X_train, labels_train, kernel_name, param_gridlin, save_dir,
-                                                  model_type=('Ridge', Ridge()), scaler=True)
+                                                  model_type=('Ridge', Ridge()), scaler=False)
     else:
         # linridge = make_pipeline(StandardScaler(), KernelRidge(kernel=kernel_name))
         linridge = make_pipeline(StandardScaler(), Ridge(alpha=0.1))
@@ -701,25 +730,25 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
 
     # krr_types = ['linear', 'poly', 'rbf', 'sigmoid', 'cosine']
     krr_types = ['rbf', 'poly', 'sigmoid']
-    # krr_params = [
-    #     {'Ridge__kernel': ['rbf'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__alpha': np.linspace(0, 10, 11)},
-    #     {'Ridge__kernel': ['poly'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__degree': np.linspace(1, 4, 4),
-    #      'Ridge__alpha': np.linspace(0, 10, 11)},
-    #     {'Ridge__kernel': ['sigmoid'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__alpha': np.linspace(0, 10, 11)}
-    # ]
     krr_params = [
-        {'Ridge__kernel': ['rbf'], 'Ridge__alpha': np.linspace(0, 10, 11)},
-        {'Ridge__kernel': ['poly'], 'Ridge__degree': np.linspace(1, 4, 4),
-         'Ridge__alpha': np.linspace(0, 10, 11)},
-        {'Ridge__kernel': ['sigmoid'], 'Ridge__alpha': np.linspace(0, 10, 11)}
+        {'Ridge__kernel': ['rbf'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__alpha': np.logspace(-5, 2, 11)},
+        {'Ridge__kernel': ['poly'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__degree': np.linspace(1, 4, 4),
+         'Ridge__alpha': np.logspace(-5, 2, 11)},
+        {'Ridge__kernel': ['sigmoid'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__alpha': np.logspace(-5, 2, 11)}
     ]
+    # krr_params = [
+    #     {'Ridge__kernel': ['rbf'], 'Ridge__alpha': np.linspace(0, 10, 11)},
+    #     {'Ridge__kernel': ['poly'], 'Ridge__degree': np.linspace(1, 4, 4),
+    #      'Ridge__alpha': np.linspace(0, 10, 11)},
+    #     {'Ridge__kernel': ['sigmoid'], 'Ridge__alpha': np.linspace(0, 10, 11)}
+    # ]
 
     krrs = [None] * len(krr_types)
     for i, krr_type in enumerate(krr_types):
         start = time.time()
         if fithyperparam:
             krrs[i] = learn_or_load_modelhyperparams(X_train, labels_train, krr_type, [krr_params[i]], save_dir,
-                                                     model_type=('Ridge', KernelRidge()), scaler=True)
+                                                     model_type=('Ridge', KernelRidge()), scaler=False)
         else:
             krrs[i] = make_pipeline(StandardScaler(), KernelRidge(kernel=krr_type))
             krrs[i].fit(X_train, labels_train)
@@ -734,17 +763,25 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
     for krr in krrs:
         krr_scores.append([])
 
-    ridge_score = linridge.score(X_val, labels_val)
+    ridge_r2_score = linridge.score(X_val, labels_val)
+    ridge_mae_score = np.abs(linridge.predict(X_val) - labels_val).mean()
+    ridge_mse_score = np.power(linridge.predict(X_val) - labels_val, 2).mean()
 
     for i, krr in enumerate(krrs):
-        krr_score = krr.score(X_val, labels_val)
-        krr_scores[i].append(krr_score)
+        krr_r2_score = krr.score(X_val, labels_val)
+        krr_mae_score = np.abs(krr.predict(X_val) - labels_val).mean()
+        krr_mse_score = np.power(krr.predict(X_val) - labels_val, 2).mean()
+        # krr_score = np.abs(krr.predict(X_val) - labels_val).mean()
+        krr_scores[i].append((krr_r2_score, krr_mae_score, krr_mse_score))
 
     print('Predictions scores :')
-    print(f'Ridge : {np.mean(ridge_score)}')
+    print(f'Ridge R2: {ridge_r2_score}, MSE: {ridge_mse_score}, MAE: {ridge_mae_score}')
     for j, krr_type in enumerate(krr_types):
-        print(f'KernelRidge ({krr_type}) : {np.mean(krr_scores[j])}')
-    print(f'Our approach : {zridge_score}')
+        krr_r2_score, krr_mae_score, krr_mse_score = krr_scores[j][0]
+        print(f'KernelRidge ({krr_type}) R2: {krr_r2_score}, MSE: {krr_mse_score}, MAE: {krr_mae_score}')
+
+    print(f'Our approach (projection) MSE: {projection_mse_score}, MAE: {projection_mae_score}')
+    print(f'Our approach R2: {zridge_r2_score}, MSE: {zridge_mse_score}, MAE: {zridge_mae_score}')
 
 
 def create_figures_XZ(model, train_dataset, save_path, device, std_noise=0.1):
@@ -812,6 +849,7 @@ if __name__ == "__main__":
     parser.add_argument('--eval_type', type=str, default='classification', choices=choices, help='evaluation type')
     parser.add_argument('--model_to_use', type=str, default='classification', choices=best_model_choices,
                         help='what best model to use for the evaluation')
+    parser.add_argument("--method", default=0, type=int, help='select between [0,1,2]')
     args = parser.parse_args()
     print(args)
     set_seed(0)
@@ -864,8 +902,10 @@ if __name__ == "__main__":
             uniform_eigval = True
             uniform_split = split
             mean_of_eigval = uniform_split.replace("eigvaluniform", "")
-            mean_of_eigval = float(mean_of_eigval.replace("-", "."))
-            print(f'Flow trained with uniform eigenvalues: {mean_of_eigval}')
+            if 'e' not in mean_of_eigval:
+                mean_of_eigval = float(mean_of_eigval.replace("-", "."))
+            else:
+                mean_of_eigval = float(mean_of_eigval)
         elif 'eigvalgaussian' in split:
             gaussian_split = split
             in_split = gaussian_split.split("std")
@@ -955,9 +995,17 @@ if __name__ == "__main__":
         gaussian_params = initialize_gaussian_params(dataset, eigval_list, isotrope='isotrope' in folder_name,
                                                      dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
     else:
-        gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list,
-                                                                isotrope='isotrope' in folder_name,
-                                                                dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
+        if args.method == 0:
+            gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list,
+                                                                    isotrope='isotrope' in folder_name,
+                                                                    dim_per_label=dim_per_label,
+                                                                    fixed_eigval=fixed_eigval)
+        elif args.method == 1:
+            gaussian_params = initialize_tmp_regression_gaussian_params(dataset, eigval_list)
+        elif args.method == 2:
+            gaussian_params = initialize_tmp_regression_gaussian_params(dataset, eigval_list, ones=True)
+        else:
+            assert False, 'no method selected'
 
     if model_type == 'cglow':
         # Load model
