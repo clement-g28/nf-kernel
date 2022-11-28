@@ -174,7 +174,7 @@ def initialize_tmp_regression_gaussian_params(dataset, al_list, ones=False):
         np.fill_diagonal(eigenvecs, 1)
         be = np.exp(
             1 / (n_dim - dim_interpolation) * np.log(1 / math.pow(sum(al_list) / len(al_list), dim_interpolation)))
-        eigenvals = np.ones(n_dim) * be if not ones else np.ones(n_dim)
+        eigenvals = np.ones(n_dim) * be if not ones else np.ones(n_dim) * 0.1
         eigenvals[:1] = al_list
         mean[:1] = i
         gaussian_params.append((mean, eigenvecs, eigenvals, i))
@@ -206,12 +206,9 @@ def calculate_log_p_with_gaussian_params(x, label, means, gaussian_params):
 #
 #     return log_p
 
-# TEST
-def calculate_log_p_with_gaussian_params_regression(x, label, means, gaussian_params, label_min, label_max):
-    # log_ps = []
-    lab_fac = ((label - label_min) / (label_max - label_min)).unsqueeze(1)
-    mean = means[0] * lab_fac + means[1] * (1 - lab_fac)
-    log_ps = multivariate_gaussian(x, mean=mean, determinant=gaussian_params[0][1],
-                                   inverse_covariance_matrix=gaussian_params[0][0]).unsqueeze(1)
+
+def calculate_log_p_with_gaussian_params_regression(x, mean, inv_cov, det):
+    log_ps = multivariate_gaussian(x, mean=mean, determinant=det,
+                                   inverse_covariance_matrix=inv_cov).unsqueeze(1)
 
     return log_ps

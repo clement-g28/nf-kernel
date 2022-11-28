@@ -98,6 +98,8 @@ def training_arguments():
 
     parser.add_argument("--dim_per_label", default=None, type=int, help='number of dimension to use for one class')
 
+    parser.add_argument("--reg_use_var", action="store_true",
+                        help='use variance computed wrt distance and label min dist during training')
     # METHOD SELECTION ARG
     parser.add_argument("--method", default=0, type=int, help='select between [0,1,2]')
 

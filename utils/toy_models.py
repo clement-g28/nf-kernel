@@ -20,16 +20,26 @@ from utils.seqflow_model import load_flow_model
 
 # abstract NF class
 class NF(nn.Module):
-    def __init__(self, model, gaussian_params=None, device='cuda:0', learn_mean=True, dataset=None):
+    def __init__(self, model, gaussian_params=None, device='cuda:0', learn_mean=True, reg_use_var=False, dataset=None):
         super().__init__()
         if dataset is not None and dataset.is_regression_dataset():
             self.dataset_type = 'regression'
             self.label_min = np.min(dataset.true_labels)
             self.label_max = np.max(dataset.true_labels)
 
-            def calculate_log_p_reg(x, label, means, gaussian_params):
-                return calculate_log_p_with_gaussian_params_regression(x, label, means, gaussian_params, self.label_min,
-                                                                       self.label_max)
+            self.use_var = reg_use_var
+            if reg_use_var:
+                assert len(np.where(gaussian_params[0][2] != 1)[
+                               0]) == 0, 'eigenval should be 1 everywhere to use variance in loss '
+                self.label_mindist = dataset.label_mindist
+
+                def calculate_log_p_reg(x, label, means, gaussian_params):
+                    mean, inv_cov, det = self.get_regression_gaussian_training_parameters_var(label, means)
+                    return calculate_log_p_with_gaussian_params_regression(x, mean, inv_cov, det)
+            else:
+                def calculate_log_p_reg(x, label, means, gaussian_params):
+                    mean, inv_cov, det = self.get_regression_gaussian_training_parameters(label, means)
+                    return calculate_log_p_with_gaussian_params_regression(x, mean, inv_cov, det)
 
             self.calculate_log_p = calculate_log_p_reg
             self.sample_from_distrib = self.sample_from_distrib_regression
@@ -104,7 +114,15 @@ class NF(nn.Module):
         t_means = self.means.detach().cpu()
         sampled_fac = torch.rand(n).unsqueeze(1).repeat(1, dim)
         sampled_means = t_means[0] * sampled_fac + t_means[1] * (1 - sampled_fac)
-        samples = torch.normal(mean=sampled_means)
+        # samples = torch.normal(mean=sampled_means)
+        if self.use_var:
+            variance = self.label_mindist / (self.label_max - self.label_min)
+            variance = variance * (t_means[1] - t_means[0])
+            variance[np.where(variance <= 0)] = 1
+        else:
+            variance = torch.from_numpy(self.gp[0][2])
+        samples = torch.normal(mean=sampled_means) * variance.unsqueeze(0)
+
         return samples
 
     def vis_log_p_calcul_label(self, z):
@@ -119,21 +137,39 @@ class NF(nn.Module):
         return log_p
 
     def vis_log_p_calcul_regression(self, z):
-        z = z.to(torch.float64)
-        dir = (self.means[-1] - self.means[0]).to(torch.float64)
-        dot_dir = torch.dot(dir, dir)
-        lab_fac = torch.mm(z, dir.unsqueeze(1)) / dot_dir
-        s_means = lab_fac * dir
+        from utils.testing import project_between
+        means = self.means.detach().cpu().numpy()
+        np_z = z.detach().cpu().numpy()
+        proj, _ = project_between(np_z, means[0], means[1])
+        s_means = torch.from_numpy(proj).to(z.device)
 
-        mins = torch.min(self.means, axis=0)[0]
-        maxs = torch.max(self.means, axis=0)[0]
-        li = []
-        for dim in range(mins.shape[0]):
-            li.append(torch.clamp(s_means[:, dim], mins[dim], maxs[dim]).unsqueeze(1))
-        s_means = torch.cat(li, axis=1)
+        # z = z.to(torch.float64)
+        # dir = (self.means[-1] - self.means[0]).to(torch.float64)
+        # dot_dir = torch.dot(dir, dir)
+        # lab_fac = torch.mm(z, dir.unsqueeze(1)) / dot_dir
+        # s_means = lab_fac * dir
 
-        log_p = multivariate_gaussian(z, mean=s_means, determinant=self.gaussian_params[0][1],
-                                      inverse_covariance_matrix=self.gaussian_params[0][0]).unsqueeze(1)
+        # mins = torch.min(self.means, axis=0)[0]
+        # maxs = torch.max(self.means, axis=0)[0]
+        # li = []
+        # for dim in range(mins.shape[0]):
+        #     li.append(torch.clamp(s_means[:, dim], mins[dim], maxs[dim]).unsqueeze(1))
+        # s_means = torch.cat(li, axis=1)
+
+        if self.use_var:
+            variance = self.label_mindist / (self.label_max - self.label_min)
+            variance = variance * (self.means[1] - self.means[0])
+            variance = torch.where(variance <= 0, torch.ones_like(variance), variance)
+            inv_cov = self.gaussian_params[0][0] * (1 / variance)
+            det = self.gaussian_params[0][1]
+            for v in variance:
+                det = det * v
+        else:
+            det = self.gaussian_params[0][1]
+            inv_cov = self.gaussian_params[0][0]
+
+        log_p = multivariate_gaussian(z, mean=s_means, determinant=det,
+                                      inverse_covariance_matrix=inv_cov).unsqueeze(1)
 
         return log_p
 
@@ -166,8 +202,52 @@ class NF(nn.Module):
         # plt.savefig(fig_filename)
         # plt.close()
 
+    def get_regression_gaussian_mean(self, label, means):
+        lab_fac = ((label - self.label_min) / (self.label_max - self.label_min)).unsqueeze(1)
+        mean = means[0] * lab_fac + means[1] * (1 - lab_fac)
+        return mean
 
-def load_seqflow_model(num_inputs, n_flows, gaussian_params, learn_mean=True, device='cuda:0', dataset=None):
+    def get_regression_gaussian_training_parameters(self, label, means):
+        inv_cov = self.gaussian_params[0][0]
+        det = self.gaussian_params[0][1]
+
+        mean = self.get_regression_gaussian_mean(label, means)
+        return mean, inv_cov, det
+
+    def get_regression_gaussian_training_parameters_var(self, label, means):
+        # variance = self.label_mindist / (self.label_max - self.label_min)
+        # variance = variance * (means[1] - means[0]).abs() *100
+        # variance[np.where(variance <= 0)] = 1
+        # variance = torch.where(variance <= 0, torch.ones_like(variance)*0.1, variance)
+        variance = torch.ones_like(means[0])*0.1
+        if (means[1] - means[0]).abs().mean() > 6:
+            variance = self.label_mindist / (self.label_max - self.label_min)
+            variance = variance * (means[1] - means[0]).abs()
+        # variance = torch.ones_like(variance)*0.1
+        inv_cov = self.gaussian_params[0][0] * (1 / variance)
+        det = self.gaussian_params[0][1]
+        for v in variance:
+            det = det * v
+
+        mean = self.get_regression_gaussian_mean(label, means)
+        return mean, inv_cov, det
+
+    def get_regression_gaussian_sampling_parameters(self, label):
+        eigenvec = self.gp[0][1]
+        eigenval = self.gp[0][2]
+        covariance_matrix = construct_covariance(eigenvec, eigenval)
+        means = self.means.detach().cpu().numpy()
+        if self.use_var:
+            variance = self.label_mindist / (self.label_max - self.label_min)
+            variance = variance * (means[1] - means[0]) + .001
+            covariance_matrix = covariance_matrix * variance
+
+        mean = self.get_regression_gaussian_mean(label)
+        return mean, covariance_matrix
+
+
+def load_seqflow_model(num_inputs, n_flows, gaussian_params, learn_mean=True, device='cuda:0', reg_use_var=False,
+                       dataset=None):
     # Flow Sequential
     num_hidden = num_inputs * 4
     num_cond_inputs = None
@@ -175,13 +255,14 @@ def load_seqflow_model(num_inputs, n_flows, gaussian_params, learn_mean=True, de
 
     model.to(torch.float).to(device)
     model.train()
-    model = SeqFlow(model, gaussian_params=gaussian_params, learn_mean=learn_mean, dataset=dataset)
+    model = SeqFlow(model, gaussian_params=gaussian_params, learn_mean=learn_mean, reg_use_var=reg_use_var,
+                    dataset=dataset)
     return model
 
 
 class SeqFlow(NF):
-    def __init__(self, model, gaussian_params=None, device='cuda:0', learn_mean=True, dataset=None):
-        super().__init__(model, gaussian_params, device, learn_mean, dataset)
+    def __init__(self, model, gaussian_params=None, device='cuda:0', learn_mean=True, reg_use_var=False, dataset=None):
+        super().__init__(model, gaussian_params, device, learn_mean, reg_use_var, dataset)
 
     def downstream_process(self):
         return -1
@@ -192,9 +273,11 @@ class SeqFlow(NF):
     def forward(self, input, label, pair_with_noise=False):
         z, delta_logp = self.model(input)
 
-        # compute log q(z)
-        log_p = self.calculate_log_p(z, label, self.means, self.gaussian_params)
+        # compute distance loss
         distloss = torch.log(1 + torch.cdist(self.means, self.means).mean())
+        # compute log q(z)
+        # means = torch.empty_like(self.means).copy_(self.means)
+        log_p = self.calculate_log_p(z, label, self.means, self.gaussian_params)
 
         return log_p, distloss, delta_logp, z
 
@@ -263,7 +346,7 @@ class SeqFlow(NF):
         plt.close()
 
 
-def load_ffjord_model(args, n_dim, gaussian_params, learn_mean=True, device='cuda:0', dataset=None):
+def load_ffjord_model(args, n_dim, gaussian_params, learn_mean=True, device='cuda:0', reg_use_var=False, dataset=None):
     regularization_fns, regularization_coeffs = create_regularization_fns(args)
     model = build_model_tabular(args, n_dim, regularization_fns).to(device)
     if args.spectral_norm: add_spectral_norm(model)
@@ -272,14 +355,14 @@ def load_ffjord_model(args, n_dim, gaussian_params, learn_mean=True, device='cud
     model.to(torch.float).to(device)
     model.train()
     model = FFJORD(args, model, regularization_coeffs=regularization_coeffs, gaussian_params=gaussian_params,
-                   learn_mean=learn_mean, dataset=dataset)
+                   learn_mean=learn_mean, reg_use_var=reg_use_var, dataset=dataset)
     return model
 
 
 class FFJORD(NF):
     def __init__(self, args, model, regularization_coeffs, gaussian_params=None, device='cuda:0', learn_mean=True,
-                 dataset=None):
-        super().__init__(model, gaussian_params, device, learn_mean, dataset)
+                 reg_use_var=False, dataset=None):
+        super().__init__(model, gaussian_params, device, learn_mean, reg_use_var, dataset)
         self.regularization_coeffs = regularization_coeffs
         self.spectral_norm = args.spectral_norm
 

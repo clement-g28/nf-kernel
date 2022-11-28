@@ -15,6 +15,7 @@ from utils.toy_models import load_seqflow_model, load_ffjord_model
 from utils.dataset import ImDataset, SimpleDataset
 from utils.density import construct_covariance
 from utils.testing import learn_or_load_modelhyperparams, generate_sample, project_inZ, testing_arguments, noise_data
+from utils.testing import project_between
 from utils.training import ffjord_arguments
 
 from sklearn.decomposition import PCA, KernelPCA
@@ -691,7 +692,6 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
         print(f"time to get Z_val from X_val : {str(end - start)}")
 
         # TEST project between the means
-        from utils.testing import project_between
         means = model.means.detach().cpu().numpy()
         proj, dot_val = project_between(val_inZ, means[0], means[1])
         # pred = ((proj - means[1]) / (means[0] - means[1])) * (
@@ -729,12 +729,13 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
     print(f"time to fit linear ridge : {str(end - start)}")
 
     # krr_types = ['linear', 'poly', 'rbf', 'sigmoid', 'cosine']
-    krr_types = ['rbf', 'poly', 'sigmoid']
+    krr_types = ['rbf', 'poly']
+    # , 'sigmoid']
     krr_params = [
         {'Ridge__kernel': ['rbf'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__alpha': np.logspace(-5, 2, 11)},
         {'Ridge__kernel': ['poly'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__degree': np.linspace(1, 4, 4),
          'Ridge__alpha': np.logspace(-5, 2, 11)},
-        {'Ridge__kernel': ['sigmoid'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__alpha': np.logspace(-5, 2, 11)}
+        # {'Ridge__kernel': ['sigmoid'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__alpha': np.logspace(-5, 2, 11)}
     ]
     # krr_params = [
     #     {'Ridge__kernel': ['rbf'], 'Ridge__alpha': np.linspace(0, 10, 11)},
@@ -819,6 +820,7 @@ def evaluate_regression_preimage(model, val_dataset, device):
     samples = []
     true_X = val_dataset.X
     for i, y in enumerate(val_dataset.true_labels):
+        # mean, cov = model.get_regression_gaussian_sampling_parameters(y)
         alpha_y = (y - y_min) / (y_max - y_min)
         mean = alpha_y * model_means[0] + (1 - alpha_y) * model_means[1]
         samples.append(np.expand_dims(mean, axis=0))
@@ -881,6 +883,7 @@ if __name__ == "__main__":
     fixed_eigval = None
     n_block = 2  # base value
     n_flow = 32  # base value
+    reg_use_var = False
 
     for split in splits:
         b = re.search("^b\d{1,2}$", split)
@@ -918,6 +921,9 @@ if __name__ == "__main__":
             dpl_split = split
             dim_per_label = int(dpl_split.replace("dimperlab", ""))
             print(f'Flow trained with dimperlab: {dim_per_label}')
+        elif 'usevar' in split:
+            reg_use_var = True
+            print(f'Flow trained using variance.')
 
     # Model params
     affine = args.affine
@@ -953,8 +959,8 @@ if __name__ == "__main__":
             val_dataset = ImDataset(dataset_name=dataset_name, test=True)
         else:
             train_dataset, val_dataset = dataset.split_dataset(0)
-            _, val_dataset = val_dataset.split_dataset(0.01, stratified=True)
-            _, train_dataset = train_dataset.split_dataset(0.1, stratified=True)
+            # _, val_dataset = val_dataset.split_dataset(0.01, stratified=True)
+            # _, train_dataset = train_dataset.split_dataset(0.1, stratified=True)
         # val_dataset = ImDataset(dataset_name=dataset_name, test=True)
 
     n_dim = dataset.X[0].shape[0]
@@ -1013,13 +1019,13 @@ if __name__ == "__main__":
                              gaussian_params=gaussian_params, device=device, learn_mean='lmean' in folder_name)
     elif model_type == 'seqflow':
         model_single = load_seqflow_model(n_dim, n_flow, gaussian_params=gaussian_params,
-                                          learn_mean='lmean' in folder_name, dataset=dataset)
+                                          learn_mean='lmean' in folder_name, reg_use_var=reg_use_var, dataset=dataset)
 
     elif model_type == 'ffjord':
         args_ffjord, _ = ffjord_arguments().parse_known_args()
         args_ffjord.n_block = n_block
         model_single = load_ffjord_model(args_ffjord, n_dim, gaussian_params=gaussian_params,
-                                         learn_mean='lmean' in folder_name, dataset=dataset)
+                                         learn_mean='lmean' in folder_name, reg_use_var=reg_use_var, dataset=dataset)
 
     else:
         assert False, 'unknown model type!'

@@ -253,6 +253,7 @@ if __name__ == '__main__':
     fixed_eigval = None
     n_block = 2  # base value
     n_flow = 32  # base value
+    reg_use_var = False
 
     for split in splits:
         b = re.search("^b\d{1,2}$", split)
@@ -291,6 +292,9 @@ if __name__ == '__main__':
             dpl_split = split
             dim_per_label = int(dpl_split.replace("dimperlab", ""))
             print(f'Flow trained with dimperlab: {dim_per_label}')
+        elif 'usevar' in split:
+            reg_use_var = True
+            print(f'Flow trained using variance.')
 
     # Model params
     affine = args.affine
@@ -378,9 +382,9 @@ if __name__ == '__main__':
         else:
             if args.method == 0:
                 gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list,
-                                                                    isotrope='isotrope' in folder_name,
-                                                                    dim_per_label=dim_per_label,
-                                                                    fixed_eigval=fixed_eigval)
+                                                                        isotrope='isotrope' in folder_name,
+                                                                        dim_per_label=dim_per_label,
+                                                                        fixed_eigval=fixed_eigval)
             elif args.method == 1:
                 gaussian_params = initialize_tmp_regression_gaussian_params(dataset, eigval_list)
             elif args.method == 2:
@@ -417,12 +421,14 @@ if __name__ == '__main__':
     elif model_loading_params['model'] == 'seqflow':
         model_single = load_seqflow_model(model_loading_params['n_dim'], model_loading_params['n_flow'],
                                           gaussian_params=model_loading_params['gaussian_params'],
-                                          learn_mean=model_loading_params['learn_mean'], dataset=dataset)
+                                          learn_mean=model_loading_params['learn_mean'], reg_use_var=reg_use_var,
+                                          dataset=dataset)
 
     elif model_loading_params['model'] == 'ffjord':
         model_single = load_ffjord_model(model_loading_params['ffjord_args'], model_loading_params['n_dim'],
                                          gaussian_params=model_loading_params['gaussian_params'],
-                                         learn_mean=model_loading_params['learn_mean'], dataset=dataset)
+                                         learn_mean=model_loading_params['learn_mean'], reg_use_var=reg_use_var,
+                                         dataset=dataset)
 
     else:
         assert False, 'unknown model type!'

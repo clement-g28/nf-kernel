@@ -4,8 +4,10 @@ from PIL import Image
 import random
 import torch
 import numpy as np
+from numpy import genfromtxt
 import math
 import copy
+import scipy
 import cv2
 import os
 import matplotlib.pyplot as plt
@@ -18,7 +20,7 @@ from sklearn.datasets import load_iris, load_diabetes, load_breast_cancer, make_
 from utils import visualize_flow
 
 DATASETS = ['single_moon', 'double_moon', 'iris', 'bcancer', 'mnist']
-REGRESSION_DATASETS = ['swissroll', 'diabetes', 'waterquality', 'aquatoxi']
+REGRESSION_DATASETS = ['swissroll', 'diabetes', 'waterquality', 'aquatoxi', 'fishtoxi', 'trafficflow']
 
 
 # abstract base kernel dataset class
@@ -210,8 +212,29 @@ class SimpleDataset(BaseDataset):
         self.current_mode = 'XY'
         self.get_func = self.get_XY_item
 
+        if self.is_regression_dataset():
+            self.label_mindist = self.init_labelmin()
+
     def __getitem__(self, idx):
         return self.get_func(idx)
+
+    def init_labelmin(self):
+        # mat = scipy.spatial.distance.cdist(np.expand_dims(self.true_labels, axis=1),
+        #                                    np.expand_dims(self.true_labels, axis=1))
+        # mat[np.where(mat == 0)] = 1
+        # label_mindist = mat.min()
+
+        a = np.sort(self.true_labels)
+        max_dist_neig = 0
+        sum_dist_neig = 0
+        for i in range(a.shape[0] - 1):
+            sum_dist_neig += a[i + 1] - a[i]
+            if a[i + 1] - a[i] > max_dist_neig:
+                max_dist_neig = a[i + 1] - a[i]
+        mean_dist_neig = sum_dist_neig / (a.shape[0] - 1)
+
+        return mean_dist_neig
+        # return label_mindist
 
     def get_XY_item(self, idx):
         input = self.X[idx]
@@ -259,6 +282,15 @@ class SimpleDataset(BaseDataset):
             elif name == 'aquatoxi':
                 visualize_flow.LOW = -6
                 visualize_flow.HIGH = 14
+            elif name == 'fishtoxi':
+                visualize_flow.LOW = -6
+                visualize_flow.HIGH = 14
+            elif name == 'trafficflow':
+                X_test = np.load(f'{path}/{name}_testdata.npy')
+                labels_test = np.load(f'{path}/{name}_testlabels.npy')
+                test_dataset = (X_test, labels_test)
+                visualize_flow.LOW = -4
+                visualize_flow.HIGH = 5.8
         else:
             if name == 'single_moon':
                 n_samples = 1000
@@ -331,16 +363,47 @@ class SimpleDataset(BaseDataset):
                 np.save(f'{path}/{name}_testdata.npy', X_test)
                 np.save(f'{path}/{name}_testlabels.npy', y_test)
             elif name == 'aquatoxi':
-                from numpy import genfromtxt
                 mat = np.loadtxt(open(f"{path}/qsar_aquatic_toxicity.csv", "rb"), delimiter=";")
 
-                X = mat[:,:-1]
-                labels = mat[:,-1]
+                X = mat[:, :-1]
+                labels = mat[:, -1]
                 std = np.std(X, axis=0)
                 mean = X.mean(axis=0)
                 X = ((X - mean) / std)
                 visualize_flow.LOW = -6
                 visualize_flow.HIGH = 14
+            elif name == 'fishtoxi':
+                mat = np.loadtxt(open(f"{path}/qsar_fish_toxicity.csv", "rb"), delimiter=";")
+
+                X = mat[:, :-1]
+                labels = mat[:, -1]
+                std = np.std(X, axis=0)
+                mean = X.mean(axis=0)
+                X = ((X - mean) / std)
+                visualize_flow.LOW = -6
+                visualize_flow.HIGH = 14
+            elif name == 'trafficflow':
+                import scipy.io
+
+                mat = scipy.io.loadmat(f"{path}/Traffic Flow Prediction/traffic_dataset.mat")
+                X = np.concatenate([np.expand_dims(arr.toarray(), axis=0) for arr in mat['tra_X_tr'].squeeze()],
+                                   axis=0).swapaxes(0, 1)
+                X = X.reshape(-1, X.shape[-1])
+                labels = mat['tra_Y_tr'].reshape(-1, 1).squeeze()
+                X_test = np.concatenate([np.expand_dims(arr.toarray(), axis=0) for arr in mat['tra_X_te'].squeeze()],
+                                        axis=0).swapaxes(0, 1)
+                X_test = X_test.reshape(-1, X_test.shape[-1])
+                y_test = mat['tra_Y_te'].reshape(-1, 1).squeeze()
+                std = np.std(X, axis=0)
+                mean = X.mean(axis=0)
+                X = ((X - mean) / std)
+                X_test = ((X_test - mean) / std)
+                visualize_flow.LOW = -4
+                visualize_flow.HIGH = 5.8
+
+                test_dataset = (X_test, y_test)
+                np.save(f'{path}/{name}_testdata.npy', X_test)
+                np.save(f'{path}/{name}_testlabels.npy', y_test)
             else:
                 assert False, 'unknown dataset'
 

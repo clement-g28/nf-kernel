@@ -68,11 +68,17 @@ def train(args, model_single, add_path, gaussian_params, train_dataset, val_data
                 # nll_loss, log_p, log_det = calc_loss(log_p, logdet, dataset.im_size, n_bins)
                 nll_loss, log_p, log_det = dataset.format_loss(log_p, logdet, n_bins)
                 loss = nll_loss - beta * distloss
+                # + torch.pow(log_det, 2)
 
                 loss = model_single.upstream_process(loss)
 
                 model.zero_grad()
                 loss.backward()
+
+                # loss.backward(retain_graph=True)
+                # loss2 = torch.pow(log_det, 2)
+                # loss2.backward()
+
                 # warmup_lr = args.lr * min(1, i * batch_size / (50000 * 10))
                 warmup_lr = args.lr
                 optimizer.param_groups[0]["lr"] = warmup_lr
@@ -280,14 +286,21 @@ if __name__ == "__main__":
                                                      dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
     else:
         if args.method == 0:
-            gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list, isotrope=args.isotrope_gaussian,
-                                                                    dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
+            gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list,
+                                                                    isotrope=args.isotrope_gaussian,
+                                                                    dim_per_label=dim_per_label,
+                                                                    fixed_eigval=fixed_eigval)
         elif args.method == 1:
             gaussian_params = initialize_tmp_regression_gaussian_params(dataset, eigval_list)
         elif args.method == 2:
             gaussian_params = initialize_tmp_regression_gaussian_params(dataset, eigval_list, ones=True)
         else:
             assert False, 'no method selected'
+
+    reg_use_var_str = f''
+    if args.reg_use_var:
+        reg_use_var_str = f'_usevar'
+
     folder_path = f'{args.dataset}/{args.model}/'
     if args.model == 'cglow':
         n_channel = dataset.n_channel
@@ -296,13 +309,13 @@ if __name__ == "__main__":
         folder_path += f'b{args.n_block}_f{args.n_flow}'
     elif args.model == 'seqflow':
         model_single = load_seqflow_model(dataset.im_size, args.n_flow, gaussian_params=gaussian_params,
-                                          learn_mean=not args.fix_mean, dataset=dataset)
+                                          learn_mean=not args.fix_mean, reg_use_var=args.reg_use_var, dataset=dataset)
         folder_path += f'f{args.n_flow}'
     elif args.model == 'ffjord':
         args_ffjord, _ = ffjord_arguments().parse_known_args()
         args_ffjord.n_block = args.n_block
         model_single = load_ffjord_model(args_ffjord, dataset.im_size, gaussian_params=gaussian_params,
-                                         learn_mean=not args.fix_mean, dataset=dataset)
+                                         learn_mean=not args.fix_mean, reg_use_var=args.reg_use_var, dataset=dataset)
         folder_path += f'b{args.n_block}'
     else:
         assert False, 'unknown model type'
@@ -310,8 +323,10 @@ if __name__ == "__main__":
     lmean_str = f'_lmean{args.beta}' if not args.fix_mean else ''
     isotrope_str = '_isotrope' if args.isotrope_gaussian else ''
     folder_path += f'_nfkernel{lmean_str}{isotrope_str}{eigval_str}{noise_str}' \
-                   f'{redclass_str}{redlabel_str}_dimperlab{dim_per_label}'
+                   f'{redclass_str}{redlabel_str}_dimperlab{dim_per_label}{reg_use_var_str}'
 
+    # TEST
+    # folder_path += '_test'
     create_folder(f'./checkpoint/{folder_path}')
 
     path = f'./checkpoint/{folder_path}/train_idx'
