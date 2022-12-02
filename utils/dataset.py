@@ -252,9 +252,14 @@ class SimpleDataset(BaseDataset):
         path = './datasets'
         exist_dataset = os.path.exists(f'{path}/{name}_data.npy') if path is not None else False
         test_dataset = None
+        fulldata = True
+        name_c = name
+        if fulldata and name in ['aquatoxi', 'fishtoxi']:
+            name_c = f'{name}_fulldata'
+            exist_dataset = os.path.exists(f'{path}/{name_c}_data.npy')
         if exist_dataset:
-            X = np.load(f'{path}/{name}_data.npy')
-            labels = np.load(f'{path}/{name}_labels.npy')
+            X = np.load(f'{path}/{name_c}_data.npy')
+            labels = np.load(f'{path}/{name_c}_labels.npy')
             if name == 'single_moon':
                 visualize_flow.LOW = -1.5
                 visualize_flow.HIGH = 2.5
@@ -280,9 +285,17 @@ class SimpleDataset(BaseDataset):
                 visualize_flow.LOW = -3
                 visualize_flow.HIGH = 4.3
             elif name == 'aquatoxi':
+                if fulldata:
+                    X_test = np.load(f'{path}/{name_c}_testdata.npy')
+                    labels_test = np.load(f'{path}/{name_c}_testlabels.npy')
+                    test_dataset = (X_test, labels_test)
                 visualize_flow.LOW = -6
                 visualize_flow.HIGH = 14
             elif name == 'fishtoxi':
+                if fulldata:
+                    X_test = np.load(f'{path}/{name_c}_testdata.npy')
+                    labels_test = np.load(f'{path}/{name_c}_testlabels.npy')
+                    test_dataset = (X_test, labels_test)
                 visualize_flow.LOW = -6
                 visualize_flow.HIGH = 14
             elif name == 'trafficflow':
@@ -363,23 +376,61 @@ class SimpleDataset(BaseDataset):
                 np.save(f'{path}/{name}_testdata.npy', X_test)
                 np.save(f'{path}/{name}_testlabels.npy', y_test)
             elif name == 'aquatoxi':
-                mat = np.loadtxt(open(f"{path}/qsar_aquatic_toxicity.csv", "rb"), delimiter=";")
+                if fulldata:
+                    name += '_fulldata'
+                    import pandas as pd
+                    mat = pd.read_excel(f'{path}/qsar_aquatic_toxicity_fulldata.xlsx', engine='openpyxl')
+                    mat = np.array(mat)
 
-                X = mat[:, :-1]
-                labels = mat[:, -1]
-                std = np.std(X, axis=0)
-                mean = X.mean(axis=0)
-                X = ((X - mean) / std)
+                    X = mat[np.where(mat[:, 2] == 'train'), 4:].squeeze().astype(np.float64)
+                    labels = mat[np.where(mat[:, 2] == 'train'), 3].squeeze().astype(np.float64)
+                    X_test = mat[np.where(mat[:, 2] == 'test'), 4:].squeeze().astype(np.float64)
+                    y_test = mat[np.where(mat[:, 2] == 'test'), 3].squeeze().astype(np.float64)
+                    std = np.std(X, axis=0)
+                    mean = X.mean(axis=0)
+                    X = ((X - mean) / std)
+                    X_test = ((X_test - mean) / std)
+
+                    test_dataset = (X_test, y_test)
+                    np.save(f'{path}/{name}_testdata.npy', X_test)
+                    np.save(f'{path}/{name}_testlabels.npy', y_test)
+                else:
+                    mat = np.loadtxt(open(f"{path}/qsar_aquatic_toxicity.csv", "rb"), delimiter=";")
+
+                    X = mat[:, :-1]
+                    labels = mat[:, -1]
+                    std = np.std(X, axis=0)
+                    mean = X.mean(axis=0)
+                    X = ((X - mean) / std)
                 visualize_flow.LOW = -6
                 visualize_flow.HIGH = 14
             elif name == 'fishtoxi':
-                mat = np.loadtxt(open(f"{path}/qsar_fish_toxicity.csv", "rb"), delimiter=";")
+                if fulldata:
+                    name += '_fulldata'
+                    import pandas as pd
+                    mat = pd.read_excel(f'{path}/qsar_fish_toxicity_fulldata.xlsx', engine='openpyxl')
+                    mat = np.array(mat)
 
-                X = mat[:, :-1]
-                labels = mat[:, -1]
-                std = np.std(X, axis=0)
-                mean = X.mean(axis=0)
-                X = ((X - mean) / std)
+                    X = mat[np.where(mat[:, 2] == 'train'), 4:].squeeze().astype(np.float64)
+                    labels = mat[np.where(mat[:, 2] == 'train'), 3].squeeze().astype(np.float64)
+                    X_test = mat[np.where(mat[:, 2] == 'test'), 4:].squeeze().astype(np.float64)
+                    y_test = mat[np.where(mat[:, 2] == 'test'), 3].squeeze().astype(np.float64)
+                    std = np.std(X, axis=0)
+                    mean = X.mean(axis=0)
+                    X = ((X - mean) / std)
+                    X_test = ((X_test - mean) / std)
+
+                    test_dataset = (X_test, y_test)
+                    np.save(f'{path}/{name}_testdata.npy', X_test)
+                    np.save(f'{path}/{name}_testlabels.npy', y_test)
+                else:
+                    mat = np.loadtxt(open(f"{path}/qsar_fish_toxicity.csv", "rb"), delimiter=";")
+
+                    X = mat[:, :-1]
+                    labels = mat[:, -1]
+                    std = np.std(X, axis=0)
+                    mean = X.mean(axis=0)
+                    X = ((X - mean) / std)
                 visualize_flow.LOW = -6
                 visualize_flow.HIGH = 14
             elif name == 'trafficflow':
@@ -562,6 +613,93 @@ class ImDataset(BaseDataset):
             assert False, 'unknown dataset'
 
         return dset
+
+    def is_regression_dataset(self):
+        return self.dataset_name in REGRESSION_DATASETS
+
+
+class GraphDataset(BaseDataset):
+    def __init__(self, dataset_name, transform=None):
+        self.dataset_name = dataset_name
+        self.label_type = np.int if self.dataset_name not in REGRESSION_DATASETS else np.float
+        self.transform = transform
+        ori_X, ori_true_labels, test_dataset = self.load_dataset(dataset_name)
+        super().__init__(ori_X, ori_true_labels, test_dataset)
+        print('Z and K are not initialized in constructor')
+        self.im_size = ori_X.shape[-1]
+
+        self.current_mode = 'XY'
+        self.get_func = self.get_XY_item
+
+        if self.is_regression_dataset():
+            self.label_mindist = self.init_labelmin()
+
+    def __getitem__(self, idx):
+        return self.get_func(idx)
+
+    def init_labelmin(self):
+        # mat = scipy.spatial.distance.cdist(np.expand_dims(self.true_labels, axis=1),
+        #                                    np.expand_dims(self.true_labels, axis=1))
+        # mat[np.where(mat == 0)] = 1
+        # label_mindist = mat.min()
+
+        a = np.sort(self.true_labels)
+        max_dist_neig = 0
+        sum_dist_neig = 0
+        for i in range(a.shape[0] - 1):
+            sum_dist_neig += a[i + 1] - a[i]
+            if a[i + 1] - a[i] > max_dist_neig:
+                max_dist_neig = a[i + 1] - a[i]
+        mean_dist_neig = sum_dist_neig / (a.shape[0] - 1)
+
+        return mean_dist_neig
+        # return label_mindist
+
+    def get_XY_item(self, idx):
+        input = self.X[idx]
+        if self.transform is not None:
+            input = torch.from_numpy(input)
+            input = self.transform(input)
+        return input, (self.true_labels[idx]).astype(self.label_type)
+
+    def reduce_dataset(self, reduce_type, label=None, how_many=None, reduce_from_ori=True):
+        assert self.dataset_name not in REGRESSION_DATASETS, "the dataset can\'t be reduced (regression dataset)"
+        return self.reduce_dataset(reduce_type, label, how_many, reduce_from_ori)
+
+    @staticmethod
+    def load_dataset(name):
+        path = './datasets'
+        exist_dataset = os.path.exists(f'{path}/{name}_data.npy') if path is not None else False
+        test_dataset = None
+        if exist_dataset:
+            X = np.load(f'{path}/{name}_data.npy')
+            labels = np.load(f'{path}/{name}_labels.npy')
+            if name == 'single_moon':
+                print('TODO')
+
+        else:
+            if name == 'single_moon':
+                # TODO
+                print('TODO')
+            else:
+                assert False, 'unknown dataset'
+
+            # np.save(f'{path}/{name}_data.npy', X)
+            # np.save(f'{path}/{name}_labels.npy', labels)
+
+        return X, labels, test_dataset
+
+    @staticmethod
+    def format_data(input, n_bits, n_bins):
+        return input.float()
+
+    def format_loss(self, log_p, logdet, n_bins):
+        loss = logdet + log_p
+        return -loss.mean(), log_p.mean(), logdet.mean()
+
+    @staticmethod
+    def rescale(x):
+        return x
 
     def is_regression_dataset(self):
         return self.dataset_name in REGRESSION_DATASETS

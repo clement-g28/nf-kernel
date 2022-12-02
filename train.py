@@ -73,11 +73,11 @@ def train(args, model_single, add_path, gaussian_params, train_dataset, val_data
                 loss = model_single.upstream_process(loss)
 
                 model.zero_grad()
-                loss.backward()
+                # loss.backward()
 
-                # loss.backward(retain_graph=True)
-                # loss2 = torch.pow(log_det, 2)
-                # loss2.backward()
+                loss.backward(retain_graph=True)
+                loss2 = torch.pow(log_det, 2)
+                loss2.backward()
 
                 # warmup_lr = args.lr * min(1, i * batch_size / (50000 * 10))
                 warmup_lr = args.lr
@@ -169,7 +169,7 @@ if __name__ == "__main__":
     args, _ = training_arguments().parse_known_args()
     print(args)
 
-    set_seed(0)
+    # set_seed(0)
 
     if args.dataset == 'mnist':
         transform = [

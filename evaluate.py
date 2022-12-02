@@ -17,6 +17,7 @@ from utils.density import construct_covariance
 from utils.testing import learn_or_load_modelhyperparams, generate_sample, project_inZ, testing_arguments, noise_data
 from utils.testing import project_between
 from utils.training import ffjord_arguments
+from sklearn.metrics.pairwise import rbf_kernel
 
 from sklearn.decomposition import PCA, KernelPCA
 from sklearn.kernel_ridge import KernelRidge
@@ -707,6 +708,12 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
         zridge_mse_score = np.power(zlinridge.predict(val_inZ) - elabels, 2).mean()
         print(f'Our approach R2: {zridge_r2_score}, MSE: {zridge_mse_score}, MAE: {zridge_mae_score}')
 
+        # See on train
+        t_zridge_r2_score = zlinridge.score(Z, tlabels)
+        t_zridge_mae_score = np.abs(zlinridge.predict(Z) - tlabels).mean()
+        t_zridge_mse_score = np.power(zlinridge.predict(Z) - tlabels, 2).mean()
+        print(f'(On train) Our approach R2: {t_zridge_r2_score}, MSE: {t_zridge_mse_score}, MAE: {t_zridge_mae_score}')
+
     X_train = train_dataset.X.reshape(train_dataset.X.shape[0], -1)
     labels_train = train_dataset.true_labels
 
@@ -729,13 +736,12 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
     print(f"time to fit linear ridge : {str(end - start)}")
 
     # krr_types = ['linear', 'poly', 'rbf', 'sigmoid', 'cosine']
-    krr_types = ['rbf', 'poly']
-    # , 'sigmoid']
+    krr_types = ['rbf', 'poly', 'sigmoid']
     krr_params = [
         {'Ridge__kernel': ['rbf'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__alpha': np.logspace(-5, 2, 11)},
         {'Ridge__kernel': ['poly'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__degree': np.linspace(1, 4, 4),
          'Ridge__alpha': np.logspace(-5, 2, 11)},
-        # {'Ridge__kernel': ['sigmoid'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__alpha': np.logspace(-5, 2, 11)}
+        {'Ridge__kernel': ['sigmoid'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__alpha': np.logspace(-5, 2, 11)}
     ]
     # krr_params = [
     #     {'Ridge__kernel': ['rbf'], 'Ridge__alpha': np.linspace(0, 10, 11)},
@@ -783,6 +789,7 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
 
     print(f'Our approach (projection) MSE: {projection_mse_score}, MAE: {projection_mae_score}')
     print(f'Our approach R2: {zridge_r2_score}, MSE: {zridge_mse_score}, MAE: {zridge_mae_score}')
+    print(f'(On train) Our approach R2: {t_zridge_r2_score}, MSE: {t_zridge_mse_score}, MAE: {t_zridge_mae_score}')
 
 
 def create_figures_XZ(model, train_dataset, save_path, device, std_noise=0.1):
@@ -847,6 +854,8 @@ def evaluate_regression_preimage(model, val_dataset, device):
 if __name__ == "__main__":
     choices = ['classification', 'projection', 'generation', 'regression']
     best_model_choices = ['classification', 'projection', 'regression']
+    for choice in best_model_choices.copy():
+        best_model_choices.append(choice +'_train')
     parser = testing_arguments()
     parser.add_argument('--eval_type', type=str, default='classification', choices=choices, help='evaluation type')
     parser.add_argument('--model_to_use', type=str, default='classification', choices=best_model_choices,
@@ -1076,5 +1085,5 @@ if __name__ == "__main__":
     elif eval_type == 'regression':
         assert dataset.is_regression_dataset(), 'the dataset is not made for regression purposes'
         evaluate_regression(model, train_dataset, val_dataset, save_dir, device)
-        create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1)
-        evaluate_regression_preimage(model, val_dataset, device)
+        # create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1)
+        # evaluate_regression_preimage(model, val_dataset, device)

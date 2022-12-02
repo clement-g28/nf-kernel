@@ -23,7 +23,7 @@ from utils.training import ffjord_arguments
 from utils.toy_models import load_seqflow_model, load_ffjord_model
 
 
-def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_dataset, save_dir, device):
+def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_dataset, save_dir, device, with_train=False):
     zridge_scores = []
 
     # Our approach
@@ -125,9 +125,16 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
         print(
             f'Our approach ({i}) : {zridge_score}, (train score : {zridge_score_train}), (projection) : {projection_score}')
         # if zridge_score >= best_score:
-        if zridge_score <= best_score:
-            best_score = zridge_score
-            best_i = i
+        if with_train:
+            if zridge_score_train <= best_score:
+                best_score = zridge_score_train
+                best_i = i
+                print(f'New best ({i}).')
+        else:
+            if zridge_score <= best_score:
+                best_score = zridge_score
+                best_i = i
+                print(f'New best ({i}).')
 
     model_loading_params = t_model_params[best_i]
     if model_loading_params['model'] == 'cglow':
@@ -150,10 +157,11 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
     else:
         assert False, 'unknown model type!'
 
+    c_str = '_train' if with_train else ''
     model_single = WrappedModel(model_single)
     model_single.load_state_dict(torch.load(model_loading_params['loading_path'], map_location=device))
     torch.save(
-        model_single.state_dict(), f"{save_dir}/best_regression_model.pth"
+        model_single.state_dict(), f"{save_dir}/best_regression{c_str}_model.pth"
     )
 
     return best_i
@@ -408,7 +416,7 @@ if __name__ == '__main__':
     create_folder(save_dir)
 
     best_i = evaluate_regression(t_model_params, train_dataset, val_dataset, full_dataset=dataset, save_dir=save_dir,
-                                 device=device)
+                                 device=device, with_train=True)
 
     model_loading_params = t_model_params[best_i]
     if model_loading_params['model'] == 'cglow':
@@ -437,4 +445,4 @@ if __name__ == '__main__':
     model = model_single.module
     model = model.to(device)
     model.eval()
-    visualize_dataset(dataset, train_dataset, val_dataset, model, save_dir)
+    # visualize_dataset(dataset, train_dataset, val_dataset, model, save_dir)
