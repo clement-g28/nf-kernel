@@ -7,9 +7,9 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision import transforms, utils
 
 from utils.custom_glow import CGlow
-from utils.toy_models import load_seqflow_model, load_ffjord_model
-from utils.training import training_arguments, ffjord_arguments, AddGaussianNoise, calc_loss
-from utils.dataset import ImDataset, SimpleDataset
+from utils.toy_models import load_seqflow_model, load_ffjord_model, load_moflow_model
+from utils.training import training_arguments, ffjord_arguments, moflow_arguments, AddGaussianNoise, calc_loss
+from utils.dataset import ImDataset, SimpleDataset, GraphDataset
 from utils.density import construct_covariance
 from utils.utils import write_dict_to_tensorboard, set_seed, create_folder, AverageMeter, initialize_gaussian_params, \
     initialize_regression_gaussian_params, initialize_tmp_regression_gaussian_params
@@ -34,7 +34,7 @@ def train(args, model_single, add_path, gaussian_params, train_dataset, val_data
     n_bins = 2.0 ** args.n_bits
 
     beta = args.beta
-    z_shape = model_single.calc_last_z_shape(dataset.im_size)
+    # z_shape = model_single.calc_last_z_shape(dataset.im_size)
 
     # TEST with weighted sampler
     train_loader = train_dataset.get_loader(args.batch_size, shuffle=True, drop_last=True, sampler=True)
@@ -49,10 +49,9 @@ def train(args, model_single, add_path, gaussian_params, train_dataset, val_data
                 model_single.downstream_process()
                 itr = epoch * loader_size + i
                 input, label = data
-                input = input.to(device)
-                label = label.to(device)
 
-                input = dataset.format_data(input, args.n_bits, n_bins)
+                input = dataset.format_data(input, args.n_bits, n_bins, device)
+                label = label.to(device)
 
                 if itr == 0:
                     with torch.no_grad():
@@ -73,11 +72,11 @@ def train(args, model_single, add_path, gaussian_params, train_dataset, val_data
                 loss = model_single.upstream_process(loss)
 
                 model.zero_grad()
-                # loss.backward()
+                loss.backward()
 
-                loss.backward(retain_graph=True)
-                loss2 = torch.pow(log_det, 2)
-                loss2.backward()
+                # loss.backward(retain_graph=True)
+                # loss2 = torch.pow(log_det, 2)
+                # loss2.backward()
 
                 # warmup_lr = args.lr * min(1, i * batch_size / (50000 * 10))
                 warmup_lr = args.lr
@@ -104,7 +103,7 @@ def train(args, model_single, add_path, gaussian_params, train_dataset, val_data
 
                     with torch.no_grad():
                         model.eval()
-                        model_single.sample_evaluation(itr, train_dataset, val_dataset, z_shape, save_dir,
+                        model_single.sample_evaluation(itr, train_dataset, val_dataset, save_dir,
                                                        writer=writer)
                         model.train()
 
@@ -120,10 +119,9 @@ def train(args, model_single, add_path, gaussian_params, train_dataset, val_data
                 with torch.no_grad():
                     for data in val_loader:
                         input, label = data
-                        input = input.to(device)
-                        label = label.to(device)
 
-                        input = dataset.format_data(input, args.n_bits, n_bins)
+                        input = dataset.format_data(input, args.n_bits, n_bins, device)
+                        label = label.to(device)
 
                         log_p, distloss, logdet, z = model(input, label)
 
@@ -197,6 +195,8 @@ if __name__ == "__main__":
 
     if args.dataset == 'mnist':
         dataset = ImDataset(dataset_name=args.dataset, transform=transform)
+    elif args.dataset in ['qm7', 'qm9']:
+        dataset = GraphDataset(dataset_name=args.dataset, transform=None)
     else:
         dataset = SimpleDataset(dataset_name=args.dataset, transform=transform)
 
@@ -231,9 +231,7 @@ if __name__ == "__main__":
 
     device = 'cuda:0'
 
-    n_dim = dataset.X[0].shape[0]
-    for sh in dataset.X[0].shape[1:]:
-        n_dim *= sh
+    n_dim = dataset.get_n_dim()
 
     # initialize gaussian params
     if not dataset.is_regression_dataset():
@@ -317,6 +315,10 @@ if __name__ == "__main__":
         model_single = load_ffjord_model(args_ffjord, dataset.im_size, gaussian_params=gaussian_params,
                                          learn_mean=not args.fix_mean, reg_use_var=args.reg_use_var, dataset=dataset)
         folder_path += f'b{args.n_block}'
+    elif args.model == 'moflow':
+        args_moflow, _ = moflow_arguments().parse_known_args()
+        model_single = load_moflow_model(args_moflow, gaussian_params=gaussian_params,
+                                         learn_mean=not args.fix_mean, reg_use_var=args.reg_use_var, dataset=dataset)
     else:
         assert False, 'unknown model type'
 
@@ -325,8 +327,8 @@ if __name__ == "__main__":
     folder_path += f'_nfkernel{lmean_str}{isotrope_str}{eigval_str}{noise_str}' \
                    f'{redclass_str}{redlabel_str}_dimperlab{dim_per_label}{reg_use_var_str}'
 
-    # TEST
-    # folder_path += '_test'
+    folder_path += '_test2'
+
     create_folder(f'./checkpoint/{folder_path}')
 
     path = f'./checkpoint/{folder_path}/train_idx'

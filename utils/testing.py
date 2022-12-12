@@ -36,7 +36,7 @@ def testing_arguments():
 
 
 def learn_or_load_modelhyperparams(X_train, tlabels, kernel_name, param_grid, save_dir, model_type, scaler=False,
-                                   scorer=None):
+                                   scorer=None, save=True):
     # Example of use : pca = learn_or_load_modelhyperparams(X_lab, None, kernel_name, param_gridlin, save_dir,
     # model_type=('PCA', KernelPCA()), scaler=scaler, scorer=my_scorer)
     # model_type should be ('name', model)
@@ -53,8 +53,9 @@ def learn_or_load_modelhyperparams(X_train, tlabels, kernel_name, param_grid, sa
         ind_step = 0 if not scaler else 1
         learned_params = {k: eval(f'{str(model.best_estimator_.steps[ind_step][1])}.{k}') for k in keys}
         # kernel_name = learned_params['kernel']
-        with open(f'{save_dir}/params_{model_type[0]}_{kernel_name}.pkl', 'wb') as f:
-            pickle.dump(learned_params, f)
+        if save:
+            with open(f'{save_dir}/params_{model_type[0]}_{kernel_name}.pkl', 'wb') as f:
+                pickle.dump(learned_params, f)
         print(f'Learned hyperparams : {learned_params}')
     else:
         with open(f'{save_dir}/params_{model_type[0]}_{kernel_name}.pkl', 'rb') as f:

@@ -3,7 +3,55 @@ import math
 import torch
 
 import ffjord_lib.layers.odefunc as odefunc
-from utils.dataset import DATASETS, REGRESSION_DATASETS
+from utils.dataset import DATASETS, REGRESSION_DATASETS, GRAPH_DATASETS
+
+
+def strtobool(val):
+    """Convert a string representation of truth to true (1) or false (0).
+
+    True values are 'y', 'yes', 't', 'true', 'on', and '1'; false values
+    are 'n', 'no', 'f', 'false', 'off', and '0'.  Raises ValueError if
+    'val' is anything else.
+    """
+    val = val.lower()
+    if val in ('y', 'yes', 't', 'true', 'on', '1'):
+        return 1
+    elif val in ('n', 'no', 'f', 'false', 'off', '0'):
+        return 0
+    else:
+        raise ValueError("invalid truth value %r" % (val,))
+
+
+def moflow_arguments():
+    parser = argparse.ArgumentParser(description="MoFlow Arguments")
+
+    # For bonds
+    parser.add_argument('--b_n_flow', type=int, default=10,
+                        help='Number of masked glow coupling layers per block for bond tensor')
+    parser.add_argument('--b_n_block', type=int, default=1, help='Number of glow blocks for bond tensor')
+    parser.add_argument('--b_hidden_ch', type=str, default="128,128",
+                        help='Hidden channel list for bonds tensor, delimited list input ')
+    parser.add_argument('--b_conv_lu', type=int, default=1, choices=[0, 1, 2],
+                        help='0: InvConv2d for 1*1 conv, 1:InvConv2dLU for 1*1 conv, 2: No 1*1 conv, '
+                             'swap updating in the coupling layer')
+    # For atoms
+    parser.add_argument('--a_n_flow', type=int, default=27,
+                        help='Number of masked flow coupling layers per block for atom matrix')
+    parser.add_argument('--a_n_block', type=int, default=1, help='Number of flow blocks for atom matrix')
+    parser.add_argument('--a_hidden_gnn', type=str, default="64,",
+                        help='Hidden dimension list for graph convolution for atoms matrix, delimited list input ')
+    parser.add_argument('--a_hidden_lin', type=str, default="128,64",
+                        help='Hidden dimension list for linear transformation for atoms, delimited list input ')
+    parser.add_argument('--mask_row_size_list', type=str, default="1,",
+                        help='Mask row size list for atom matrix, delimited list input ')
+    parser.add_argument('--mask_row_stride_list', type=str, default="1,",
+                        help='Mask row stride list for atom matrix, delimited list input')
+    # General
+    parser.add_argument('-s', '--seed', type=int, default=1, help='Random seed to use')
+    parser.add_argument('--learn_dist', type=strtobool, default='true', help='learn the distribution of feature matrix')
+    parser.add_argument('--noise_scale', type=float, default=0.6, help='x + torch.rand(x.shape) * noise_scale')
+
+    return parser
 
 
 def ffjord_arguments():
@@ -48,8 +96,8 @@ def ffjord_arguments():
 
 def training_arguments():
     parser = argparse.ArgumentParser(description="CGlow trainer")
-    MODELS = ['cglow', 'seqflow', 'ffjord']
-    parser.add_argument("--dataset", type=str, default='mnist', choices=DATASETS + REGRESSION_DATASETS,
+    MODELS = ['cglow', 'seqflow', 'ffjord', 'moflow']
+    parser.add_argument("--dataset", type=str, default='mnist', choices=DATASETS + REGRESSION_DATASETS + GRAPH_DATASETS,
                         help="Dataset to use")
     parser.add_argument("--batch_size", default=16, type=int, help="batch size")
     parser.add_argument("--n_epoch", default=1000, type=int, help="number of epoch")

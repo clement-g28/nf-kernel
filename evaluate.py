@@ -11,12 +11,12 @@ from utils.utils import set_seed, create_folder, save_every_pic, initialize_gaus
     initialize_regression_gaussian_params, save_fig, initialize_tmp_regression_gaussian_params
 
 from utils.custom_glow import CGlow, WrappedModel
-from utils.toy_models import load_seqflow_model, load_ffjord_model
-from utils.dataset import ImDataset, SimpleDataset
+from utils.toy_models import load_seqflow_model, load_ffjord_model, load_moflow_model
+from utils.dataset import ImDataset, SimpleDataset, GraphDataset
 from utils.density import construct_covariance
 from utils.testing import learn_or_load_modelhyperparams, generate_sample, project_inZ, testing_arguments, noise_data
 from utils.testing import project_between
-from utils.training import ffjord_arguments
+from utils.training import ffjord_arguments, moflow_arguments
 from sklearn.metrics.pairwise import rbf_kernel
 
 from sklearn.decomposition import PCA, KernelPCA
@@ -642,8 +642,9 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
         model.eval()
         with torch.no_grad():
             for j, data in enumerate(loader):
-                inp = data[0].float().to(device)
-                labels = data[1].to(device)
+                inp, labels = data
+                inp = dataset.format_data(inp, None, None, device)
+                labels = labels.to(device)
                 log_p, distloss, logdet, out = model(inp, labels)
                 Z.append(out.detach().cpu().numpy())
                 tlabels.append(labels.detach().cpu().numpy())
@@ -662,7 +663,7 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
             # param_gridlin = [{'Ridge__kernel': [kernel_name], 'Ridge__alpha': np.logspace(-5, 2, 11)}]
             param_gridlin = [{'Ridge__alpha': np.logspace(-5, 2, 11)}]
             zlinridge = learn_or_load_modelhyperparams(Z, tlabels, kernel_name, param_gridlin, save_dir,
-                                                       model_type=('Ridge', Ridge()), scaler=False)
+                                                       model_type=('Ridge', Ridge()), scaler=False, save=False)
         else:
             # linridge = make_pipeline(StandardScaler(), KernelRidge(kernel=kernel_name))
             zlinridge = make_pipeline(StandardScaler(), Ridge(alpha=0.1))
@@ -682,8 +683,9 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
         elabels = []
         with torch.no_grad():
             for j, data in enumerate(val_loader):
-                inp = data[0].float().to(device)
-                labels = data[1].to(device)
+                inp, labels = data
+                inp = dataset.format_data(inp, None, None, device)
+                labels = labels.to(device)
                 log_p, distloss, logdet, out = model(inp, labels)
                 val_inZ.append(out.detach().cpu().numpy())
                 elabels.append(labels.detach().cpu().numpy())
@@ -703,18 +705,23 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
         projection_mae_score = np.abs((pred - elabels)).mean()
         print(f'Our approach (projection) MSE: {projection_mse_score}, MAE: {projection_mae_score}')
 
+        pred = zlinridge.predict(val_inZ)
         zridge_r2_score = zlinridge.score(val_inZ, elabels)
-        zridge_mae_score = np.abs(zlinridge.predict(val_inZ) - elabels).mean()
-        zridge_mse_score = np.power(zlinridge.predict(val_inZ) - elabels, 2).mean()
-        print(f'Our approach R2: {zridge_r2_score}, MSE: {zridge_mse_score}, MAE: {zridge_mae_score}')
+        zridge_mae_score = np.abs(pred - elabels).mean()
+        zridge_mse_score = np.power(pred - elabels, 2).mean()
+        q2_ext = 1 - (np.sum(np.power(elabels - pred, 2)) / elabels.shape[0]) / (
+                np.sum(np.power(tlabels - np.mean(tlabels), 2)) / tlabels.shape[0])
+        print(f'Our approach R2: {zridge_r2_score}, MSE: {zridge_mse_score}, MAE: {zridge_mae_score}, q2_ext: {q2_ext}')
 
         # See on train
+        pred = zlinridge.predict(Z)
         t_zridge_r2_score = zlinridge.score(Z, tlabels)
-        t_zridge_mae_score = np.abs(zlinridge.predict(Z) - tlabels).mean()
-        t_zridge_mse_score = np.power(zlinridge.predict(Z) - tlabels, 2).mean()
+        t_zridge_mae_score = np.abs(pred - tlabels).mean()
+        t_zridge_mse_score = np.power(pred - tlabels, 2).mean()
         print(f'(On train) Our approach R2: {t_zridge_r2_score}, MSE: {t_zridge_mse_score}, MAE: {t_zridge_mae_score}')
 
-    X_train = train_dataset.X.reshape(train_dataset.X.shape[0], -1)
+    X_train = train_dataset.get_flattened_X()
+    # X_train = train_dataset.X.reshape(train_dataset.X.shape[0], -1)
     labels_train = train_dataset.true_labels
 
     start = time.time()
@@ -763,7 +770,8 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
         end = time.time()
         print(f"time to fit {krr_type} ridge : {str(end - start)}")
 
-    X_val = val_dataset.X.reshape(val_dataset.X.shape[0], -1)
+    X_val = val_dataset.get_flattened_X()
+    # X_val = val_dataset.X.reshape(val_dataset.X.shape[0], -1)
     labels_val = val_dataset.true_labels
 
     krr_scores = []
@@ -788,7 +796,7 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
         print(f'KernelRidge ({krr_type}) R2: {krr_r2_score}, MSE: {krr_mse_score}, MAE: {krr_mae_score}')
 
     print(f'Our approach (projection) MSE: {projection_mse_score}, MAE: {projection_mae_score}')
-    print(f'Our approach R2: {zridge_r2_score}, MSE: {zridge_mse_score}, MAE: {zridge_mae_score}')
+    print(f'Our approach R2: {zridge_r2_score}, MSE: {zridge_mse_score}, MAE: {zridge_mae_score}, q2_ext: {q2_ext}')
     print(f'(On train) Our approach R2: {t_zridge_r2_score}, MSE: {t_zridge_mse_score}, MAE: {t_zridge_mae_score}')
 
 
@@ -855,7 +863,7 @@ if __name__ == "__main__":
     choices = ['classification', 'projection', 'generation', 'regression']
     best_model_choices = ['classification', 'projection', 'regression']
     for choice in best_model_choices.copy():
-        best_model_choices.append(choice +'_train')
+        best_model_choices.append(choice + '_train')
     parser = testing_arguments()
     parser.add_argument('--eval_type', type=str, default='classification', choices=choices, help='evaluation type')
     parser.add_argument('--model_to_use', type=str, default='classification', choices=best_model_choices,
@@ -870,11 +878,14 @@ if __name__ == "__main__":
     if dataset_name == 'mnist':
         dataset = ImDataset(dataset_name=dataset_name)
         n_channel = dataset.n_channel
+    elif dataset_name in ['qm7', 'qm9']:
+        dataset = GraphDataset(dataset_name=dataset_name)
+        n_channel = -1
     else:
         dataset = SimpleDataset(dataset_name=dataset_name)
         n_channel = 1
 
-    img_size = dataset.im_size
+    # img_size = dataset.im_size
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -972,9 +983,7 @@ if __name__ == "__main__":
             # _, train_dataset = train_dataset.split_dataset(0.1, stratified=True)
         # val_dataset = ImDataset(dataset_name=dataset_name, test=True)
 
-    n_dim = dataset.X[0].shape[0]
-    for sh in dataset.X[0].shape[1:]:
-        n_dim *= sh
+    n_dim = dataset.get_n_dim()
 
     if not dim_per_label:
         if not dataset.is_regression_dataset():
@@ -1035,10 +1044,15 @@ if __name__ == "__main__":
         args_ffjord.n_block = n_block
         model_single = load_ffjord_model(args_ffjord, n_dim, gaussian_params=gaussian_params,
                                          learn_mean='lmean' in folder_name, reg_use_var=reg_use_var, dataset=dataset)
-
+    elif model_type == 'moflow':
+        args_moflow, _ = moflow_arguments().parse_known_args()
+        model_single = load_moflow_model(args_moflow,
+                                         gaussian_params=gaussian_params,
+                                         learn_mean='lmean' in folder_name, reg_use_var=reg_use_var,
+                                         dataset=dataset)
     else:
         assert False, 'unknown model type!'
-    z_shape = model_single.calc_last_z_shape(img_size)
+    # z_shape = model_single.calc_last_z_shape(img_size)
     model_single = WrappedModel(model_single)
     model_single.load_state_dict(torch.load(flow_path, map_location=device))
     model = model_single.module
@@ -1085,5 +1099,5 @@ if __name__ == "__main__":
     elif eval_type == 'regression':
         assert dataset.is_regression_dataset(), 'the dataset is not made for regression purposes'
         evaluate_regression(model, train_dataset, val_dataset, save_dir, device)
-        # create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1)
-        # evaluate_regression_preimage(model, val_dataset, device)
+        create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1)
+        evaluate_regression_preimage(model, val_dataset, device)

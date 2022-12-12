@@ -126,9 +126,7 @@ def initialize_gaussian_params(dataset, al_list, isotrope=False, dim_per_label=3
 
 
 def initialize_regression_gaussian_params(dataset, al_list, isotrope=False, dim_per_label=30, fixed_eigval=None):
-    n_dim = dataset.X[0].shape[0]
-    for sh in dataset.X[0].shape[1:]:
-        n_dim *= sh
+    n_dim = dataset.get_n_dim()
     gaussian_params = []
     if isotrope:
         for i in range(2):

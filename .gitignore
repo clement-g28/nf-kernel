@@ -4,6 +4,7 @@
 datasets/MNIST
 datasets/water_quality_prediciton
 datasets/cifar-10-batches-py
+datasets/qm7-featurized
 datasets/*.csv
 datasets/*.xlsx
 datasets/*.npy

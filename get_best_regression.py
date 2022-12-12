@@ -6,7 +6,7 @@ import os
 import re
 
 from utils.custom_glow import CGlow, WrappedModel
-from utils.dataset import ImDataset, SimpleDataset
+from utils.dataset import ImDataset, SimpleDataset, GraphDataset
 
 from utils.utils import set_seed, create_folder, initialize_gaussian_params, initialize_regression_gaussian_params, \
     save_fig, initialize_tmp_regression_gaussian_params
@@ -18,21 +18,22 @@ from sklearn.linear_model import Ridge
 
 from utils.testing import testing_arguments
 from utils.testing import learn_or_load_modelhyperparams
-from utils.training import ffjord_arguments
+from utils.training import ffjord_arguments, moflow_arguments
 
-from utils.toy_models import load_seqflow_model, load_ffjord_model
+from utils.toy_models import load_seqflow_model, load_ffjord_model, load_moflow_model
 
 
 def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_dataset, save_dir, device, with_train=False):
     zridge_scores = []
 
     # Our approach
-    best_score = 0
     best_score = math.inf
     best_i = 0
+    best_score_train = math.inf
+    best_i_train = 0
 
-    save_fig(train_dataset.X, train_dataset.true_labels, size=10, save_path=f'{save_dir}/X_space')
-    save_fig(val_dataset.X, val_dataset.true_labels, size=10, save_path=f'{save_dir}/X_space_val')
+    # save_fig(train_dataset.X, train_dataset.true_labels, size=10, save_path=f'{save_dir}/X_space')
+    # save_fig(val_dataset.X, val_dataset.true_labels, size=10, save_path=f'{save_dir}/X_space_val')
     # Get z_val for zpca
     for i, model_loading_params in enumerate(t_model_params):
         if model_loading_params['model'] == 'cglow':
@@ -51,7 +52,12 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
             model_single = load_ffjord_model(model_loading_params['ffjord_args'], model_loading_params['n_dim'],
                                              gaussian_params=model_loading_params['gaussian_params'],
                                              learn_mean=model_loading_params['learn_mean'], dataset=full_dataset)
-
+        elif model_loading_params['model'] == 'moflow':
+            args_moflow, _ = moflow_arguments().parse_known_args()
+            model_single = load_moflow_model(model_loading_params['moflow_args'],
+                                             gaussian_params=model_loading_params['gaussian_params'],
+                                             learn_mean=model_loading_params['learn_mean'], reg_use_var=reg_use_var,
+                                             dataset=dataset)
         else:
             assert False, 'unknown model type!'
         model_single = WrappedModel(model_single)
@@ -68,8 +74,9 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
         model.eval()
         with torch.no_grad():
             for j, data in enumerate(loader):
-                inp = data[0].float().to(device)
-                labels = data[1].to(device)
+                inp, labels = data
+                inp = dataset.format_data(inp, None, None, device)
+                labels = labels.to(device)
                 log_p, distloss, logdet, out = model(inp, labels)
                 Z.append(out.detach().cpu().numpy())
                 tlabels.append(labels.detach().cpu().numpy())
@@ -91,8 +98,10 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
         elabels = []
         with torch.no_grad():
             for j, data in enumerate(val_loader):
-                inp = data[0].float().to(device)
-                labels = data[1].to(device)
+                inp, labels = data
+
+                inp = dataset.format_data(inp, None, None, device)
+                labels = labels.to(device)
                 log_p, distloss, logdet, out = model(inp, labels)
                 val_inZ.append(out.detach().cpu().numpy())
                 elabels.append(labels.detach().cpu().numpy())
@@ -125,16 +134,14 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
         print(
             f'Our approach ({i}) : {zridge_score}, (train score : {zridge_score_train}), (projection) : {projection_score}')
         # if zridge_score >= best_score:
-        if with_train:
-            if zridge_score_train <= best_score:
-                best_score = zridge_score_train
-                best_i = i
-                print(f'New best ({i}).')
-        else:
-            if zridge_score <= best_score:
-                best_score = zridge_score
-                best_i = i
-                print(f'New best ({i}).')
+        if zridge_score_train <= best_score_train:
+            best_score_train = zridge_score_train
+            best_i_train = i
+            print(f'New best train ({i}).')
+        if zridge_score <= best_score:
+            best_score = zridge_score
+            best_i = i
+            print(f'New best ({i}).')
 
     model_loading_params = t_model_params[best_i]
     if model_loading_params['model'] == 'cglow':
@@ -157,12 +164,39 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
     else:
         assert False, 'unknown model type!'
 
-    c_str = '_train' if with_train else ''
     model_single = WrappedModel(model_single)
     model_single.load_state_dict(torch.load(model_loading_params['loading_path'], map_location=device))
     torch.save(
-        model_single.state_dict(), f"{save_dir}/best_regression{c_str}_model.pth"
+        model_single.state_dict(), f"{save_dir}/best_regression_model.pth"
     )
+
+    if with_train:
+        model_loading_params = t_model_params[best_i_train]
+        if model_loading_params['model'] == 'cglow':
+            # Load model
+            model_single = CGlow(model_loading_params['n_channel'], model_loading_params['n_flow'],
+                                 model_loading_params['n_block'], affine=model_loading_params['affine'],
+                                 conv_lu=model_loading_params['conv_lu'],
+                                 gaussian_params=model_loading_params['gaussian_params'],
+                                 device=model_loading_params['device'], learn_mean=model_loading_params['learn_mean'])
+        elif model_loading_params['model'] == 'seqflow':
+            model_single = load_seqflow_model(model_loading_params['n_dim'], model_loading_params['n_flow'],
+                                              gaussian_params=model_loading_params['gaussian_params'],
+                                              learn_mean=model_loading_params['learn_mean'], dataset=full_dataset)
+
+        elif model_loading_params['model'] == 'ffjord':
+            model_single = load_ffjord_model(model_loading_params['ffjord_args'], model_loading_params['n_dim'],
+                                             gaussian_params=model_loading_params['gaussian_params'],
+                                             learn_mean=model_loading_params['learn_mean'], dataset=full_dataset)
+
+        else:
+            assert False, 'unknown model type!'
+
+        model_single = WrappedModel(model_single)
+        model_single.load_state_dict(torch.load(model_loading_params['loading_path'], map_location=device))
+        torch.save(
+            model_single.state_dict(), f"{save_dir}/best_regression_train_model.pth"
+        )
 
     return best_i
 
@@ -243,11 +277,12 @@ if __name__ == '__main__':
     if dataset_name == 'mnist':
         dataset = ImDataset(dataset_name=dataset_name)
         n_channel = dataset.n_channel
+    elif dataset_name in ['qm7', 'qm9']:
+        dataset = GraphDataset(dataset_name=dataset_name)
+        n_channel = -1
     else:
         dataset = SimpleDataset(dataset_name=dataset_name)
         n_channel = 1
-
-    img_size = dataset.im_size
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -348,9 +383,7 @@ if __name__ == '__main__':
             train_dataset, val_dataset = dataset.split_dataset(0)
         # val_dataset = ImDataset(dataset_name=dataset_name, test=True)
 
-    n_dim = dataset.X[0].shape[0]
-    for sh in dataset.X[0].shape[1:]:
-        n_dim *= sh
+    n_dim = dataset.get_n_dim()
 
     if not dim_per_label:
         if not dataset.is_regression_dataset():
@@ -409,6 +442,9 @@ if __name__ == '__main__':
             args_ffjord, _ = ffjord_arguments().parse_known_args()
             args_ffjord.n_block = n_block
             model_loading_params['ffjord_args'] = args_ffjord
+        elif model_type == 'moflow':
+            args_moflow, _ = moflow_arguments().parse_known_args()
+            model_loading_params['moflow_args'] = args_moflow
 
         t_model_params.append(model_loading_params)
 
@@ -434,6 +470,12 @@ if __name__ == '__main__':
 
     elif model_loading_params['model'] == 'ffjord':
         model_single = load_ffjord_model(model_loading_params['ffjord_args'], model_loading_params['n_dim'],
+                                         gaussian_params=model_loading_params['gaussian_params'],
+                                         learn_mean=model_loading_params['learn_mean'], reg_use_var=reg_use_var,
+                                         dataset=dataset)
+    elif model_loading_params['model'] == 'moflow':
+        args_moflow, _ = moflow_arguments().parse_known_args()
+        model_single = load_moflow_model(model_loading_params['moflow_args'],
                                          gaussian_params=model_loading_params['gaussian_params'],
                                          learn_mean=model_loading_params['learn_mean'], reg_use_var=reg_use_var,
                                          dataset=dataset)

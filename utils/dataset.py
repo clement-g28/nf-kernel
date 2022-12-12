@@ -21,6 +21,7 @@ from utils import visualize_flow
 
 DATASETS = ['single_moon', 'double_moon', 'iris', 'bcancer', 'mnist']
 REGRESSION_DATASETS = ['swissroll', 'diabetes', 'waterquality', 'aquatoxi', 'fishtoxi', 'trafficflow']
+GRAPH_DATASETS = ['qm7', 'qm9']
 
 
 # abstract base kernel dataset class
@@ -39,6 +40,15 @@ class BaseDataset(Dataset):
 
     def __len__(self):
         return len(self.X)
+
+    def get_flattened_X(self):
+        return self.X.reshape(self.X.shape[0], -1)
+
+    def get_n_dim(self):
+        n_dim = self.X[0].shape[0]
+        for sh in self.X[0].shape[1:]:
+            n_dim *= sh
+        return n_dim
 
     def get_loader(self, batch_size, shuffle=True, drop_last=True, pin_memory=True, sampler=False):
         if sampler:
@@ -464,8 +474,8 @@ class SimpleDataset(BaseDataset):
         return X, labels, test_dataset
 
     @staticmethod
-    def format_data(input, n_bits, n_bins):
-        return input.float()
+    def format_data(input, n_bits, n_bins, device):
+        return input.float().to(device)
 
     def format_loss(self, log_p, logdet, n_bins):
         loss = logdet + log_p
@@ -536,7 +546,7 @@ class ImDataset(BaseDataset):
             return img, target
 
     @staticmethod
-    def format_data(input, n_bits, n_bins):
+    def format_data(input, n_bits, n_bins, device):
         input = input * 255
 
         if n_bits < 8:
@@ -544,6 +554,7 @@ class ImDataset(BaseDataset):
 
         input = input / n_bins - 0.5
         input = input + torch.rand_like(input) / n_bins
+        input = input.to(device)
         return input
 
     def format_loss(self, log_p, logdet, n_bins):
@@ -618,24 +629,230 @@ class ImDataset(BaseDataset):
         return self.dataset_name in REGRESSION_DATASETS
 
 
-class GraphDataset(BaseDataset):
-    def __init__(self, dataset_name, transform=None):
-        self.dataset_name = dataset_name
-        self.label_type = np.int if self.dataset_name not in REGRESSION_DATASETS else np.float
-        self.transform = transform
-        ori_X, ori_true_labels, test_dataset = self.load_dataset(dataset_name)
-        super().__init__(ori_X, ori_true_labels, test_dataset)
-        print('Z and K are not initialized in constructor')
-        self.im_size = ori_X.shape[-1]
+import networkx as nx
+from utils.graphs.files_manager import DataLoader
+from utils.graphs.molecular_graph_utils import get_molecular_dataset_mp
+from utils.graphs.utils_datasets import transform_graph_permutation
+import multiprocessing
+import itertools
 
-        self.current_mode = 'XY'
-        self.get_func = self.get_XY_item
+ATOMIC_NUM_MAP = {'C': 6, 'N': 7, 'O': 8, 'F': 9, 'P': 15, 'S': 16}
+
+
+def chunks(lst, n):
+    for i in range(0, len(lst), int(len(lst) / n)):
+        yield lst[i:i + int(len(lst) / n)]
+
+
+def mp_create_graph_func(input_args):
+    # input_args is a tuple of ([(x,adj),(x2,adj2),...],label_names dict, create_graph_function)
+    chunk, label_names, create_graph_fun = input_args
+    return [create_graph_fun(*chunk[i], label_names=label_names, i=i) for i in range(len(chunk))]
+
+
+class GraphDataset(BaseDataset):
+    def __init__(self, dataset_name, transform=None, edge_to_node=False):
+        self.dataset_name = dataset_name
+        # self.label_type = np.int if self.dataset_name not in REGRESSION_DATASETS else np.float
+
+        (train_dataset, test_dataset), self.label_map = self.load_dataset(dataset_name)
+        if len(train_dataset) == 3:
+            xs, adjs, y = train_dataset
+            xs_test, adjs_test, y_test = test_dataset
+        else:
+            xs, adjs, self.smiles, y = train_dataset
+            xs_test, adjs_test, self.smiles_test, y_test = test_dataset
+        y = np.concatenate(y)
+        test_dataset = (list(zip(xs_test, adjs_test)), np.concatenate(y_test))
+
+        self.transform = transform_graph_permutation if transform == 'permutation' else None
+        self.atomic_num_list = [ATOMIC_NUM_MAP[label] for label, _ in self.label_map.items()] + [0]
+        graphs = list(zip(xs, adjs))
+
+        # Graphs for tests
+        self.label_names = {'node_labels': ['atom_type'], 'node_attrs': ['atom_type'], 'edge_labels': ['bond_type'],
+                            'edge_attrs': ['bond_type']}
+        self.node_labels = self.label_names['node_labels']
+        self.node_attrs = self.label_names['node_attrs']
+        self.edge_labels = self.label_names['edge_labels']
+        self.edge_attrs = self.label_names['edge_attrs']
+
+        # Type of graph creation
+        self.create_graph = self.create_node_labeled_only_graph if edge_to_node \
+            else self.create_node_and_edge_labeled_graph
+
+        super().__init__(graphs, y, test_dataset)
+        # self.Gn = self.init_graphs_mp()
+
+        print('Z and K are not initialized in constructor')
+        self.im_size = -1
 
         if self.is_regression_dataset():
             self.label_mindist = self.init_labelmin()
 
+    def get_flattened_X(self):
+        x, adj = list(zip(*self.X))
+        x = np.concatenate([np.expand_dims(v, axis=0) for v in x], axis=0)
+        x = x.reshape(x.shape[0], -1)
+        adj = np.concatenate([np.expand_dims(v, axis=0) for v in adj], axis=0)
+        adj = adj.reshape(adj.shape[0], -1)
+        return np.concatenate((x, adj), axis=1)
+
+    def get_n_dim(self):
+        x, adj = self.X[0]
+        n_x = x.shape[0]
+        for sh in x.shape[1:]:
+            n_x *= sh
+        n_adj = adj.shape[0]
+        for sh in adj.shape[1:]:
+            n_adj *= sh
+        return n_x + n_adj
+
+    def get_dataset_params(self):
+        if self.dataset_name == 'qm7':
+            atom_type_list = ['C', 'N', 'S', 'O']
+            b_n_type = 4
+            # b_n_squeeze = 1
+            b_n_squeeze = 7
+            a_n_node = 7
+            a_n_type = len(atom_type_list) + 1  # 5
+        else:
+            atom_type_list = ['C', 'N', 'O', 'F']
+            b_n_type = 4
+            # b_n_squeeze = 1
+            b_n_squeeze = 3
+            a_n_node = 9
+            a_n_type = len(atom_type_list) + 1  # 5
+        result = {'atom_type_list': atom_type_list, 'b_n_type': b_n_type, 'b_n_squeeze': b_n_squeeze,
+                  'a_n_node': a_n_node, 'a_n_type': a_n_type}
+        return result
+
+    def init_graphs_mp(self):
+        pool = multiprocessing.Pool()
+        returns = pool.map(mp_create_graph_func, [(chunk, self.label_names, self.create_graph) for chunk in
+                                                  chunks(self.X, os.cpu_count())])
+        pool.close()
+        return list(itertools.chain.from_iterable(returns))
+
+    def create_node_and_edge_labeled_graph(self, x, full_adj, label_names=None, i=None):
+        # i: int used as the graph's name
+        if label_names is None:
+            label_names = self.label_names
+
+        gr = nx.Graph(name=str(i),
+                      node_labels=label_names['node_labels'],
+                      node_attrs=label_names['node_attrs'],
+                      edge_labels=label_names['edge_labels'],
+                      edge_attrs=label_names['edge_attrs'])
+
+        # normalise all channels except the no bond channel
+        adj = np.sum(full_adj[:-1], axis=0)
+        rows, cols = np.where(adj == 1)
+        edges = zip(rows.tolist(), cols.tolist())
+        gr.add_edges_from(edges)
+
+        # NaN check (wrong output), return empty graph
+        if len(gr.nodes) == 0 or math.isnan(x[0][0]):
+            gr.clear()
+            return gr
+
+        virtual_nodes = []
+        # node attributes
+        for i_node in gr.nodes:
+            attr_node = np.where(x[i_node] == np.max(x, axis=1)[i_node])[0][0]
+
+            # virtual node check (normally not used if the model has been trained)
+            if attr_node == x.shape[1] - 1:
+                virtual_nodes.append(i_node)
+
+            gr.nodes[i_node]['attributes'] = [str(attr_node)]
+            # node_label
+            for i, a_name in enumerate(gr.graph['node_labels']):
+                gr.nodes[i_node][a_name] = str(attr_node)
+            for i, a_name in enumerate(gr.graph['node_attrs']):
+                gr.nodes[i_node][a_name] = str(attr_node)
+            for edge in gr.edges(data=True):
+                edge[2][label_names['edge_labels'][0]] = np.where(full_adj[:, edge[0], edge[1]])[0][0]
+
+        for node in virtual_nodes:
+            gr.remove_node(node)
+        return gr
+
+    def create_node_labeled_only_graph(self, x, full_adj, label_names=None, i=None):
+        # i: int used as the graph's name
+        if label_names is None:
+            label_names = self.label_names
+
+        gr = nx.Graph(name=str(i),
+                      node_labels=label_names['node_labels'],
+                      node_attrs=label_names['node_attrs'],
+                      edge_labels=label_names['edge_labels'],
+                      edge_attrs=label_names['edge_attrs'])
+
+        # normalise all channels except the no bond channel
+        adj = np.sum(full_adj[:-1], axis=0)
+        rows, cols = np.where(adj == 1)
+        edges = zip(rows.tolist(), cols.tolist())
+        # create node for each edge
+        i_node = len(x)
+        n_edges = []
+        edges_labels = {}
+        # list to avoid the two nodes for one edge
+        edge_done = []
+        for row, col in edges:
+            if (row, col) not in edge_done:
+                edge_done += [(row, col), (col, row)]
+                n_edges.append((row, i_node))
+                n_edges.append((i_node, col))
+                edges_labels[i_node] = x.shape[1] + np.where(full_adj[:, row, col])[0][0]
+                i_node += 1
+
+        gr.add_edges_from(n_edges)
+
+        # NaN check (wrong output), return empty graph
+        if len(gr.nodes) == 0 or math.isnan(x[0][0]):
+            gr.clear()
+            return gr
+
+        virtual_nodes = []
+        # node attributes
+        for i_node in gr.nodes:
+            # real nodes
+            if i_node < x.shape[0]:
+                attr_node = np.where(x[i_node] == np.max(x, axis=1)[i_node])[0][0]
+            else:  # edges transformed into nodes
+                attr_node = edges_labels[i_node]
+
+            # virtual node check (normally not used if the model has been trained)
+            if attr_node == x.shape[1] - 1:
+                virtual_nodes.append(i_node)
+
+            gr.nodes[i_node]['attributes'] = [str(attr_node)]
+            for i, a_name in enumerate(gr.graph['node_labels']):
+                gr.nodes[i_node][a_name] = str(attr_node)
+            for i, a_name in enumerate(gr.graph['node_attrs']):
+                gr.nodes[i_node][a_name] = str(attr_node)
+
+        for node in virtual_nodes:
+            gr.remove_node(node)
+            # remove node corresponding to edges connected to the virtual node, note that we can directly remove the
+            # node because nodes can only be linked to a node corresponding to an edge (in this function case)
+            for (n1, n2) in n_edges:
+                if n1 == node:
+                    gr.remove_node(n2)
+                elif n2 == node:
+                    gr.remove_node(n1)
+        return gr
+
     def __getitem__(self, idx):
-        return self.get_func(idx)
+        sample = self.X[idx]
+        y = self.true_labels[idx]
+        if self.transform:
+            sample = self.transform(*sample)
+
+        # sample = tuple([*sample, self.y[idx]])
+
+        return sample, y
 
     def init_labelmin(self):
         # mat = scipy.spatial.distance.cdist(np.expand_dims(self.true_labels, axis=1),
@@ -655,13 +872,6 @@ class GraphDataset(BaseDataset):
         return mean_dist_neig
         # return label_mindist
 
-    def get_XY_item(self, idx):
-        input = self.X[idx]
-        if self.transform is not None:
-            input = torch.from_numpy(input)
-            input = self.transform(input)
-        return input, (self.true_labels[idx]).astype(self.label_type)
-
     def reduce_dataset(self, reduce_type, label=None, how_many=None, reduce_from_ori=True):
         assert self.dataset_name not in REGRESSION_DATASETS, "the dataset can\'t be reduced (regression dataset)"
         return self.reduce_dataset(reduce_type, label, how_many, reduce_from_ori)
@@ -669,29 +879,16 @@ class GraphDataset(BaseDataset):
     @staticmethod
     def load_dataset(name):
         path = './datasets'
-        exist_dataset = os.path.exists(f'{path}/{name}_data.npy') if path is not None else False
-        test_dataset = None
-        if exist_dataset:
-            X = np.load(f'{path}/{name}_data.npy')
-            labels = np.load(f'{path}/{name}_labels.npy')
-            if name == 'single_moon':
-                print('TODO')
 
-        else:
-            if name == 'single_moon':
-                # TODO
-                print('TODO')
-            else:
-                assert False, 'unknown dataset'
+        results = get_molecular_dataset_mp(name=name, data_path=path)
 
-            # np.save(f'{path}/{name}_data.npy', X)
-            # np.save(f'{path}/{name}_labels.npy', labels)
-
-        return X, labels, test_dataset
+        return results
 
     @staticmethod
-    def format_data(input, n_bits, n_bins):
-        return input.float()
+    def format_data(input, n_bits, n_bins, device):
+        for i in range(len(input)):
+            input[i] = input[i].float().to(device)
+        return input
 
     def format_loss(self, log_p, logdet, n_bins):
         loss = logdet + log_p
@@ -702,4 +899,4 @@ class GraphDataset(BaseDataset):
         return x
 
     def is_regression_dataset(self):
-        return self.dataset_name in REGRESSION_DATASETS
+        return True

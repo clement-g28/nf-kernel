@@ -17,6 +17,9 @@ from utils.ffjord_model import build_model_tabular, create_regularization_fns, a
     get_regularization, spectral_norm_power_iteration
 from utils.seqflow_model import load_flow_model
 
+from utils.graphs.hyperparams import Hyperparameters
+from utils.graphs.model import MoFlow, rescale_adj
+
 
 # abstract NF class
 class NF(nn.Module):
@@ -177,7 +180,7 @@ class NF(nn.Module):
     def get_transforms(model):
         raise NotImplementedError
 
-    def sample_evaluation(self, itr, train_dataset, val_dataset, z_shape, save_dir, writer=None,
+    def sample_evaluation(self, itr, train_dataset, val_dataset, save_dir, writer=None,
                           batch_size=200):
         raise NotImplementedError
 
@@ -219,7 +222,7 @@ class NF(nn.Module):
         # variance = variance * (means[1] - means[0]).abs() *100
         # variance[np.where(variance <= 0)] = 1
         # variance = torch.where(variance <= 0, torch.ones_like(variance)*0.1, variance)
-        variance = torch.ones_like(means[0])*0.1
+        variance = torch.ones_like(means[0]) * 0.1
         if (means[1] - means[0]).abs().mean() > 6:
             variance = self.label_mindist / (self.label_max - self.label_min)
             variance = variance * (means[1] - means[0]).abs()
@@ -304,7 +307,7 @@ class SeqFlow(NF):
 
         return sample_fn, density_fn
 
-    def sample_evaluation(self, itr, train_dataset, val_dataset, z_shape, save_dir, writer=None,
+    def sample_evaluation(self, itr, train_dataset, val_dataset, save_dir, writer=None,
                           batch_size=200):
         idx = np.random.randint(0, val_dataset.X.shape[0], batch_size)
         p_samples, y = val_dataset[idx]
@@ -407,7 +410,7 @@ class FFJORD(NF):
 
         return sample_fn, density_fn
 
-    def sample_evaluation(self, itr, train_dataset, val_dataset, z_shape, save_dir, writer=None,
+    def sample_evaluation(self, itr, train_dataset, val_dataset, save_dir, writer=None,
                           batch_size=200):
         idx = np.random.randint(0, val_dataset.X.shape[0], batch_size)
         p_samples, y = val_dataset[idx]
@@ -436,6 +439,152 @@ class FFJORD(NF):
         add_col = [int(np.max(val_dataset.true_labels)) + i + 1 for i in range(np_means.shape[0])]
         y = np.concatenate((y, np.array(add_col)), axis=0)
         ax2.scatter(z[:, 0], z[:, 1], c=y)
+
+        fig_filename = os.path.join(save_dir, 'figs', 'z_{:04d}.jpg'.format(itr))
+        create_folder(os.path.dirname(fig_filename))
+        means_title = str(np.around(np_means, 2).tolist())
+        means_dist = str(torch.cdist(self.means, self.means).mean().detach().cpu().numpy().item())
+        plt.title(means_title + ', d=' + means_dist)
+        plt.savefig(fig_filename)
+        plt.close()
+
+
+def load_moflow_model(args_moflow, gaussian_params, learn_mean=True, device='cuda:0', reg_use_var=False, dataset=None,
+                      print=False):
+    b_hidden_ch = [int(d) for d in args_moflow.b_hidden_ch.strip(',').split(',')]
+    a_hidden_gnn = [int(d) for d in args_moflow.a_hidden_gnn.strip(',').split(',')]
+    a_hidden_lin = [int(d) for d in args_moflow.a_hidden_lin.strip(',').split(',')]
+    mask_row_size_list = [int(d) for d in args_moflow.mask_row_size_list.strip(',').split(',')]
+    mask_row_stride_list = [int(d) for d in args_moflow.mask_row_stride_list.strip(',').split(',')]
+    dset_params = dataset.get_dataset_params()
+    model_params = Hyperparameters(b_n_type=dset_params['b_n_type'],  # 4,
+                                   b_n_flow=args_moflow.b_n_flow,
+                                   b_n_block=args_moflow.b_n_block,
+                                   b_n_squeeze=dset_params['b_n_squeeze'],
+                                   b_hidden_ch=b_hidden_ch,
+                                   b_affine=True,
+                                   b_conv_lu=args_moflow.b_conv_lu,
+                                   a_n_node=dset_params['a_n_node'],
+                                   a_n_type=dset_params['a_n_type'],
+                                   a_hidden_gnn=a_hidden_gnn,
+                                   a_hidden_lin=a_hidden_lin,
+                                   a_n_flow=args_moflow.a_n_flow,
+                                   a_n_block=args_moflow.a_n_block,
+                                   mask_row_size_list=mask_row_size_list,
+                                   mask_row_stride_list=mask_row_stride_list,
+                                   a_affine=True,
+                                   learn_dist=args_moflow.learn_dist,
+                                   seed=args_moflow.seed,
+                                   noise_scale=args_moflow.noise_scale
+                                   )
+    if print:
+        model_params.print()
+    model = MoFlow(model_params)
+    model = CMoFlow(model, gaussian_params, learn_mean=learn_mean, device=device, reg_use_var=reg_use_var,
+                    dataset=dataset)
+    return model
+
+
+class CMoFlow(NF):
+    def __init__(self, model, gaussian_params=None, device='cuda:0', learn_mean=True, reg_use_var=False, dataset=None):
+        super().__init__(model, gaussian_params, device, learn_mean, reg_use_var, dataset)
+        self.device = device
+
+    def calc_last_z_shape(self, input_size):
+        return (input_size,)
+
+    def downstream_process(self):
+        return -1
+
+    def upstream_process(self, loss):
+        return loss
+
+    def forward(self, input, label, pair_with_noise=False):
+        x, adj = input
+        adj_normalized = rescale_adj(adj).to(self.device)
+        output = self.model(adj, x, adj_normalized)
+        z, sum_log_det_jacs = output
+
+        # compute distance loss
+        distloss = torch.log(1 + torch.cdist(self.means, self.means).mean())
+        # compute log q(z)
+        # means = torch.empty_like(self.means).copy_(self.means)
+        flat_z = torch.cat([zi.reshape(zi.shape[0], -1) for zi in z], dim=1)
+        log_p = self.calculate_log_p(flat_z, label, self.means, self.gaussian_params)
+
+        sum_log_det_jacs = torch.sum(torch.cat([logdet.unsqueeze(1) for logdet in sum_log_det_jacs], dim=1), dim=1)
+        return log_p, distloss, sum_log_det_jacs, flat_z
+
+    def reverse(self, z, reconstruct=False):
+        adj, x = self.model.reverse(z, true_adj=None)
+
+        return adj, x
+
+    @staticmethod
+    def get_transforms(model):
+        def sample_fn(z, logpz=None):
+            res = model.reverse(z, true_adj=None)
+            if logpz is not None:
+                # return res, logp
+                return res, None
+            else:
+                return res
+
+        def density_fn(input, logpx=None):
+            x, adj = input
+            adj_normalized = rescale_adj(adj).to(x.device)
+            # res, logp = model(x)
+            output = model(adj, x, adj_normalized)
+            res, logp = output
+            if logpx is not None:
+                return res, logp
+            else:
+                return res
+
+        return sample_fn, density_fn
+
+    def sample_evaluation(self, itr, train_dataset, val_dataset, save_dir, writer=None,
+                          batch_size=200):
+        idx = np.random.randint(0, len(val_dataset.X), batch_size)
+        p_samples, y = list(zip(*[val_dataset[i] for i in idx]))
+
+        # sample_fn, density_fn = self.get_transforms(self.model)
+
+        # plt.figure(figsize=(9, 3))
+        # visualize_transform(
+        #     p_samples, self.sample_from_distrib, self.vis_log_p_calcul, transform=sample_fn,
+        #     inverse_transform=density_fn, samples=True, npts=100, device=self.device
+        # )
+        # fig_filename = os.path.join(save_dir, 'figs', '{:04d}.jpg'.format(itr))
+        # create_folder(os.path.dirname(fig_filename))
+        # plt.savefig(fig_filename)
+        # plt.close()
+        y = np.concatenate([y], axis=0)
+        p_samples = list(zip(*p_samples))
+        inp = []
+        for i in range(len(p_samples)):
+            inp.append(np.concatenate([np.expand_dims(v, axis=0) for v in p_samples[i]], axis=0))
+            inp[i] = torch.from_numpy(inp[i]).float().to(self.device)
+
+        # p_samples = torch.from_numpy(p_samples).float().to(self.device)
+        x, adj = inp
+        adj_normalized = rescale_adj(adj).to(self.device)
+        output = self.model(adj, x, adj_normalized)
+        z, sum_log_det_jacs = output
+        z = torch.cat([zi.reshape(zi.shape[0], -1) for zi in z], dim=1)
+        # z, _ = self.model(p_samples)
+        fig, (ax1, ax2) = plt.subplots(nrows=1, ncols=2)
+        x = inp[0].reshape(inp[0].shape[0], -1).detach().cpu().numpy()
+        z = z.detach().cpu().numpy()
+        np_means = self.means.detach().cpu().numpy()
+        z = np.concatenate((z, np_means), axis=0)
+        lab_min = np.min(val_dataset.true_labels)
+        lab_max = np.max(val_dataset.true_labels)
+        ax1.scatter(x[:, 0], x[:, 1], c=y, vmin=lab_min, vmax=lab_max)
+        # add_col = [int(np.max(val_dataset.true_labels)) + i + 1 for i in range(np_means.shape[0])]
+        add_col = [lab_min, lab_max]
+        y = np.concatenate((y, np.array(add_col)), axis=0)
+        ax2.scatter(z[:, 0], z[:, 1], c=y, vmin=lab_min, vmax=lab_max)
 
         fig_filename = os.path.join(save_dir, 'figs', 'z_{:04d}.jpg'.format(itr))
         create_folder(os.path.dirname(fig_filename))
