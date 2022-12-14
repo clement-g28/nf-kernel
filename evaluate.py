@@ -18,6 +18,7 @@ from utils.testing import learn_or_load_modelhyperparams, generate_sample, proje
 from utils.testing import project_between
 from utils.training import ffjord_arguments, moflow_arguments
 from sklearn.metrics.pairwise import rbf_kernel
+from utils.graphs.kernels import compute_wl_kernel, compute_sp_kernel, compute_mslap_kernel, compute_hadcode_kernel
 
 from sklearn.decomposition import PCA, KernelPCA
 from sklearn.kernel_ridge import KernelRidge
@@ -756,7 +757,6 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
     #      'Ridge__alpha': np.linspace(0, 10, 11)},
     #     {'Ridge__kernel': ['sigmoid'], 'Ridge__alpha': np.linspace(0, 10, 11)}
     # ]
-
     krrs = [None] * len(krr_types)
     for i, krr_type in enumerate(krr_types):
         start = time.time()
@@ -789,6 +789,59 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
         # krr_score = np.abs(krr.predict(X_val) - labels_val).mean()
         krr_scores[i].append((krr_r2_score, krr_mae_score, krr_mse_score))
 
+    if isinstance(train_dataset, GraphDataset):
+        def compute_kernel(name, dataset, edge_to_node, normalize, wl_height=10):
+            if name == 'wl':
+                K = compute_wl_kernel(dataset, wl_height=wl_height, edge_to_node=edge_to_node,
+                                      normalize=normalize)
+            elif name == 'sp':
+                K = compute_sp_kernel(dataset, normalize=normalize, edge_to_node=edge_to_node)
+            elif name == 'mslap':
+                K = compute_mslap_kernel(dataset, normalize=normalize, edge_to_node=edge_to_node)
+            elif name == 'hadcode':
+                K = compute_hadcode_kernel(dataset, normalize=normalize, edge_to_node=edge_to_node)
+            else:
+                assert False, f'unknown graph kernel: {graph_kernel}'
+            return K
+
+        wl_height = 15
+        edge_to_node = True
+        normalize = False
+        graph_kernel_names = ['wl', 'sp', 'hadcode']
+        graph_kernels = []
+        graph_krr_params = []
+        for graph_kernel in graph_kernel_names:
+            K = compute_kernel(graph_kernel, train_dataset, edge_to_node=edge_to_node, normalize=normalize,
+                               wl_height=wl_height)
+            graph_kernels.append(('precomputed', K, graph_kernel))
+            graph_krr_params.append({'Ridge__kernel': ['precomputed'], 'Ridge__alpha': np.logspace(-5, 2, 11)})
+
+        graph_krrs = [None] * len(graph_kernels)
+        for i, (krr_type, K, name) in enumerate(graph_kernels):
+            start = time.time()
+            if fithyperparam:
+                graph_krrs[i] = learn_or_load_modelhyperparams(K, labels_train, name, [graph_krr_params[i]],
+                                                               save_dir,
+                                                               model_type=('Ridge', KernelRidge()), scaler=False)
+            else:
+                graph_krrs[i] = make_pipeline(StandardScaler(), KernelRidge(kernel=name))
+                graph_krrs[i].fit(K, labels_train)
+                print(f'Fitting done.')
+            end = time.time()
+            print(f"time to fit {krr_type} ridge : {str(end - start)}")
+
+        for i, graph_krr in enumerate(graph_krrs):
+            K_val = compute_kernel(graph_kernels[i][2], (val_dataset, train_dataset), edge_to_node=edge_to_node,
+                                   normalize=normalize, wl_height=wl_height)
+            # K_val = compute_wl_kernel((val_dataset, train_dataset), wl_height=wl_height, edge_to_node=edge_to_node,
+            #                           normalize=normalize)
+            graph_krr_r2_score = graph_krr.score(K_val, labels_val)
+            graph_krr_mae_score = np.abs(graph_krr.predict(K_val) - labels_val).mean()
+            graph_krr_mse_score = np.power(graph_krr.predict(K_val) - labels_val, 2).mean()
+
+            print(f'GraphKernelRidge ({graph_kernels[i][2]}) R2: {graph_krr_r2_score}, '
+                  f'MSE: {graph_krr_mae_score}, MAE: {graph_krr_mse_score}')
+
     print('Predictions scores :')
     print(f'Ridge R2: {ridge_r2_score}, MSE: {ridge_mse_score}, MAE: {ridge_mae_score}')
     for j, krr_type in enumerate(krr_types):
@@ -800,7 +853,7 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
     print(f'(On train) Our approach R2: {t_zridge_r2_score}, MSE: {t_zridge_mse_score}, MAE: {t_zridge_mae_score}')
 
 
-def create_figures_XZ(model, train_dataset, save_path, device, std_noise=0.1):
+def create_figures_XZ(model, train_dataset, save_path, device, std_noise=0.1, only_Z=False):
     size_pt_fig = 5
 
     batch_size = 20
@@ -812,28 +865,37 @@ def create_figures_XZ(model, train_dataset, save_path, device, std_noise=0.1):
     model.eval()
     with torch.no_grad():
         for j, data in enumerate(loader):
-            inp = (data[0] + np.random.randn(*data[0].shape) * std_noise).float().to(device)
-            labels = data[1].to(device)
+            inp, labels = data
+            inp = dataset.format_data(inp, None, None, device)
+            if isinstance(inp, list):
+                for i in range(len(inp)):
+                    inp[i] = (inp[i] + torch.from_numpy(np.random.randn(*inp[i].shape)).float().to(device) * std_noise)
+            labels = labels.to(device)
+            # inp = (data[0] + np.random.randn(*data[0].shape) * std_noise).float().to(device)
+            # labels = data[1].to(device)
             log_p, distloss, logdet, out = model(inp, labels)
-            X.append(inp.detach().cpu().numpy())
+            if not only_Z:
+                X.append(inp.detach().cpu().numpy())
             Z.append(out.detach().cpu().numpy())
             tlabels.append(labels.detach().cpu().numpy())
-    X = np.concatenate(X, axis=0).reshape(len(train_dataset), -1)
-    Z = np.concatenate(Z, axis=0).reshape(len(train_dataset), -1)
     tlabels = np.concatenate(tlabels, axis=0)
+    if not only_Z:
+        X = np.concatenate(X, axis=0).reshape(len(train_dataset), -1)
+        save_fig(X, tlabels, size=size_pt_fig, save_path=f'{save_path}/X_space')
 
-    save_fig(X, tlabels, size=size_pt_fig, save_path=f'{save_path}/X_space')
+    Z = np.concatenate(Z, axis=0).reshape(len(train_dataset), -1)
     save_fig(Z, tlabels, size=size_pt_fig, save_path=f'{save_path}/Z_space')
 
 
-def evaluate_regression_preimage(model, val_dataset, device):
+def evaluate_regression_preimage(model, val_dataset, device, save_dir):
     batch_size = 20
 
     y_min = model.label_min
     y_max = model.label_max
     model_means = model.means[:2].detach().cpu().numpy()
     samples = []
-    true_X = val_dataset.X
+    # true_X = val_dataset.X
+    true_X = val_dataset.get_flattened_X()
     for i, y in enumerate(val_dataset.true_labels):
         # mean, cov = model.get_regression_gaussian_sampling_parameters(y)
         alpha_y = (y - y_min) / (y_max - y_min)
@@ -855,8 +917,24 @@ def evaluate_regression_preimage(model, val_dataset, device):
     all_res = np.concatenate(all_res, axis=0)
 
     distance = np.mean(np.power(all_res - true_X, 2))
-
     print(f'Pre-image distance :{distance}')
+
+    # For mols
+    if isinstance(val_dataset, GraphDataset):
+        x_shape = val_dataset.X[0][0].shape
+        adj_shape = val_dataset.X[0][1].shape
+        x_sh = x_shape[0]
+        for v in x_shape[1:]:
+            x_sh *= v
+        x = all_res[:, :x_sh].reshape(all_res.shape[0], *x_shape)
+        adj = all_res[:, x_sh:].reshape(all_res.shape[0], *adj_shape)
+        from utils.graphs.mol_utils import check_validity, save_mol_png
+        atomic_num_list = dataset.atomic_num_list
+        valid_mols = check_validity(adj, x, atomic_num_list)['valid_mols']
+        mol_dir = os.path.join(save_dir, 'generated')
+        os.makedirs(mol_dir, exist_ok=True)
+        for ind, mol in enumerate(valid_mols):
+            save_mol_png(mol, os.path.join(mol_dir, '{}.png'.format(ind)))
 
 
 if __name__ == "__main__":
@@ -884,8 +962,6 @@ if __name__ == "__main__":
     else:
         dataset = SimpleDataset(dataset_name=dataset_name)
         n_channel = 1
-
-    # img_size = dataset.im_size
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -1052,7 +1128,6 @@ if __name__ == "__main__":
                                          dataset=dataset)
     else:
         assert False, 'unknown model type!'
-    # z_shape = model_single.calc_last_z_shape(img_size)
     model_single = WrappedModel(model_single)
     model_single.load_state_dict(torch.load(flow_path, map_location=device))
     model = model_single.module
@@ -1074,11 +1149,15 @@ if __name__ == "__main__":
         assert dataset_name in dataset_name_eval, f'Generation can only be evaluated on {dataset_name_eval}'
         # GENERATION
         how_much = [1, 10, 30, 50, 78]
+        img_size = dataset.im_size
+        z_shape = model_single.calc_last_z_shape(img_size)
         for n in how_much:
             test_generation_on_eigvec(model, gaussian_params=gaussian_params, z_shape=z_shape, how_much_dim=n,
                                       device=device, sample_per_label=10, save_dir=save_dir)
         generate_meanclasses(model, train_dataset, device)
     elif eval_type == 'projection':
+        img_size = dataset.im_size
+        z_shape = model_single.calc_last_z_shape(img_size)
         # PROJECTIONS
         if dataset_name == 'mnist':
             noise_types = ['gaussian', 'speckle', 'poisson', 's&p']
@@ -1099,5 +1178,6 @@ if __name__ == "__main__":
     elif eval_type == 'regression':
         assert dataset.is_regression_dataset(), 'the dataset is not made for regression purposes'
         evaluate_regression(model, train_dataset, val_dataset, save_dir, device)
-        create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1)
-        evaluate_regression_preimage(model, val_dataset, device)
+        create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
+                          only_Z=isinstance(dataset, GraphDataset))
+        evaluate_regression_preimage(model, val_dataset, device, save_dir)

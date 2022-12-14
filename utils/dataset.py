@@ -677,10 +677,6 @@ class GraphDataset(BaseDataset):
         self.edge_labels = self.label_names['edge_labels']
         self.edge_attrs = self.label_names['edge_attrs']
 
-        # Type of graph creation
-        self.create_graph = self.create_node_labeled_only_graph if edge_to_node \
-            else self.create_node_and_edge_labeled_graph
-
         super().__init__(graphs, y, test_dataset)
         # self.Gn = self.init_graphs_mp()
 
@@ -727,9 +723,13 @@ class GraphDataset(BaseDataset):
                   'a_n_node': a_n_node, 'a_n_type': a_n_type}
         return result
 
-    def init_graphs_mp(self):
+    def get_nx_graphs(self, edge_to_node=False):
+        function = self.create_node_labeled_only_graph if edge_to_node else self.create_node_and_edge_labeled_graph
+        return self.init_graphs_mp(function)
+
+    def init_graphs_mp(self, function):
         pool = multiprocessing.Pool()
-        returns = pool.map(mp_create_graph_func, [(chunk, self.label_names, self.create_graph) for chunk in
+        returns = pool.map(mp_create_graph_func, [(chunk, self.label_names, function) for chunk in
                                                   chunks(self.X, os.cpu_count())])
         pool.close()
         return list(itertools.chain.from_iterable(returns))

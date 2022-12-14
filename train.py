@@ -337,5 +337,16 @@ if __name__ == "__main__":
         path = f'./checkpoint/{folder_path}/val_idx'
         val_dataset.save_split(path)
 
+    restart = args.restart
+    if restart:
+        from utils.custom_glow import CGlow, WrappedModel
+
+        flow_path = f'./checkpoint/{folder_path}/restart.pth'
+        model_single = WrappedModel(model_single)
+        model_single.load_state_dict(torch.load(flow_path, map_location=device))
+        model_single = model_single.module
+        folder_path += '/restart'
+        create_folder(f'./checkpoint/{folder_path}')
+
     train(args, model_single, folder_path, gaussian_params=gaussian_params, train_dataset=train_dataset,
           val_dataset=val_dataset)

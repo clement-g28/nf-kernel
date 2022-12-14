@@ -516,9 +516,10 @@ class CMoFlow(NF):
         return log_p, distloss, sum_log_det_jacs, flat_z
 
     def reverse(self, z, reconstruct=False):
-        adj, x = self.model.reverse(z, true_adj=None)
+        adj, x = self.model.reverse(z, true_adj=None)  # (adj, x)
+        flat_x = torch.cat([x.reshape(x.shape[0], -1), adj.reshape(adj.shape[0], -1)], dim=1)
 
-        return adj, x
+        return flat_x
 
     @staticmethod
     def get_transforms(model):

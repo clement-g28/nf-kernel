@@ -151,6 +151,9 @@ def training_arguments():
     # METHOD SELECTION ARG
     parser.add_argument("--method", default=0, type=int, help='select between [0,1,2]')
 
+    parser.add_argument("--restart", action="store_true",
+                        help='restart from the restart.pth model')
+
     return parser
 
 
