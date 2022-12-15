@@ -33,7 +33,7 @@ val_dataset = None
 dim_per_label = None
 
 
-def init_model(var):
+def init_model(var, noise):
     fixed_eigval = None
     eigval_list = [var for i in range(dim_per_label)]
 
@@ -60,6 +60,7 @@ def init_model(var):
         folder_path += f'b{args.n_block}'
     elif args.model == 'moflow':
         args_moflow, _ = moflow_arguments().parse_known_args()
+        args_moflow['noise_scale'] = noise
         model_single = load_moflow_model(args_moflow, gaussian_params=gaussian_params,
                                          learn_mean=not args.fix_mean, reg_use_var=args.reg_use_var, dataset=dataset)
     else:
@@ -70,7 +71,7 @@ def init_model(var):
 
 def train_opti(config):
     # Init model
-    model = init_model(config["var"])
+    model = init_model(config["var"], config["noise"])
 
     device = "cpu"
     if torch.cuda.is_available():
@@ -300,6 +301,7 @@ if __name__ == "__main__":
     config = {
         "var": tune.uniform(0.09, 0.11),
         "beta": tune.randint(49, 51),
+        "noise": tune.uniform(0,1),
         "lr": tune.loguniform(1e-3, 1e-2),
         "batch_size": tune.choice([10, 20, 30, 40])
     }
