@@ -651,7 +651,7 @@ def mp_create_graph_func(input_args):
 
 
 class GraphDataset(BaseDataset):
-    def __init__(self, dataset_name, transform=None, edge_to_node=False):
+    def __init__(self, dataset_name, transform=None):
         self.dataset_name = dataset_name
         # self.label_type = np.int if self.dataset_name not in REGRESSION_DATASETS else np.float
 
