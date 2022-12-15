@@ -1,3 +1,4 @@
+import ray.tune
 from tqdm import tqdm
 import numpy as np
 import math
@@ -24,6 +25,37 @@ import torchvision
 from ray import tune
 from ray.tune import CLIReporter
 from ray.tune.schedulers import ASHAScheduler
+from typing import Dict, Optional
+from collections import defaultdict, deque
+import numpy as np
+
+from ray.tune import Stopper
+
+
+def nan_stopper(trial_id: str, result: Dict):
+    metric_result = result.get('accuracy')
+    return math.isnan(metric_result) or math.isinf(metric_result)
+
+
+class NaNStopper(Stopper):
+    """Early stop single trials when NaN or inf
+
+    Args:
+        metric: Metric to check for NaN or inf
+    """
+
+    def __init__(self, metric: str):
+        super().__init__()
+        self._metric = metric
+
+    def __call__(self, trial_id: str, result: Dict):
+        metric_result = result.get(self._metric)
+
+        return math.isnan(metric_result) or math.isinf(metric_result)
+
+    def stop_all(self):
+        return False
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -60,7 +92,7 @@ def init_model(var, noise):
         folder_path += f'b{args.n_block}'
     elif args.model == 'moflow':
         args_moflow, _ = moflow_arguments().parse_known_args()
-        args_moflow['noise_scale'] = noise
+        args_moflow.noise_scale = noise
         model_single = load_moflow_model(args_moflow, gaussian_params=gaussian_params,
                                          learn_mean=not args.fix_mean, reg_use_var=args.reg_use_var, dataset=dataset)
     else:
@@ -299,11 +331,11 @@ if __name__ == "__main__":
         val_dataset.save_split(path)
 
     config = {
-        "var": tune.uniform(0.09, 0.11),
-        "beta": tune.randint(49, 51),
-        "noise": tune.uniform(0,1),
-        "lr": tune.loguniform(1e-3, 1e-2),
-        "batch_size": tune.choice([10, 20, 30, 40])
+        "var": tune.uniform(0.01, 1.0),
+        "beta": tune.randint(1, 200),
+        "noise": tune.uniform(0, 1),
+        "lr": tune.loguniform(1e-4, 0.005),
+        "batch_size": tune.choice([10, 20, 30, 40, 50])
     }
     scheduler = ASHAScheduler(
         metric="accuracy",
@@ -316,11 +348,12 @@ if __name__ == "__main__":
         metric_columns=["loss", "accuracy", "logp", "logdet", "distloss", "training_iteration"])
     result = tune.run(
         partial(train_opti),
-        resources_per_trial={"cpu": 2, "gpu": 0.25},
+        resources_per_trial={"cpu": 4, "gpu": 0.25},
         config=config,
-        num_samples=10,
+        num_samples=500,
         scheduler=scheduler,
-        progress_reporter=reporter)
+        progress_reporter=reporter,
+        stop=nan_stopper)
 
     best_trial = result.get_best_trial("accuracy", "min", "last")
     print("Best trial config: {}".format(best_trial.config))
