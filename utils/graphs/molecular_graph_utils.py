@@ -129,6 +129,9 @@ def get_molecular_dataset_mp(name='qm7', data_path=None, categorical_values=Fals
         dupe_filter = True
         label_map = {'O': 1, 'N': 2, 'C': 3, 'S': 4}
         max_num_nodes = 7
+        train_y = train_dataset.y
+        val_y = valid_dataset.y
+        test_y = test_dataset.y
     elif 'qm9' in name:
         tasks, (train_dataset, valid_dataset, test_dataset), transformers = dc.molnet.load_qm9(featurizer='Raw',
                                                                                                data_dir=data_path,
@@ -136,15 +139,23 @@ def get_molecular_dataset_mp(name='qm7', data_path=None, categorical_values=Fals
         dupe_filter = False
         label_map = {'C': 1, 'O': 2, 'N': 3, 'F': 4}
         max_num_nodes = 9
+
+        # select property (atomisation energy at 0K -> 8
+        train_y = train_dataset.y[:, 8].squeeze()
+        val_y = valid_dataset.y[:, 8].squeeze()
+        test_y = test_dataset.y[:, 8].squeeze()
     else:
         assert False, 'unknown dataset'
 
+    train_mols = train_dataset.X
+    val_mols = valid_dataset.X
+    test_mols = test_dataset.X
     # all_mol = np.concatenate((train_dataset.X, valid_dataset.X, test_dataset.X), axis=0)
     # all_y = np.concatenate((train_dataset.y, valid_dataset.y, test_dataset.y), axis=0).astype(np.float)
 
-    train_data = (np.concatenate((train_dataset.X, valid_dataset.X), axis=0),
-                  np.concatenate((train_dataset.y, valid_dataset.y), axis=0))
-    test_data = (test_dataset.X, test_dataset.y)
+    train_data = (np.concatenate((train_mols, val_mols), axis=0),
+                  np.concatenate((train_y, val_y), axis=0))
+    test_data = (test_mols, test_y)
     results, label_map = process_mols(name, train_data, test_data, max_num_nodes, label_map, dupe_filter,
                                       categorical_values, return_smiles)
 

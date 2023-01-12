@@ -222,29 +222,29 @@ class SimpleDataset(BaseDataset):
         self.current_mode = 'XY'
         self.get_func = self.get_XY_item
 
-        if self.is_regression_dataset():
-            self.label_mindist = self.init_labelmin()
+        # if self.is_regression_dataset():
+        #     self.label_mindist = self.init_labelmin()
 
     def __getitem__(self, idx):
         return self.get_func(idx)
 
-    def init_labelmin(self):
-        # mat = scipy.spatial.distance.cdist(np.expand_dims(self.true_labels, axis=1),
-        #                                    np.expand_dims(self.true_labels, axis=1))
-        # mat[np.where(mat == 0)] = 1
-        # label_mindist = mat.min()
-
-        a = np.sort(self.true_labels)
-        max_dist_neig = 0
-        sum_dist_neig = 0
-        for i in range(a.shape[0] - 1):
-            sum_dist_neig += a[i + 1] - a[i]
-            if a[i + 1] - a[i] > max_dist_neig:
-                max_dist_neig = a[i + 1] - a[i]
-        mean_dist_neig = sum_dist_neig / (a.shape[0] - 1)
-
-        return mean_dist_neig
-        # return label_mindist
+    # def init_labelmin(self):
+    #     # mat = scipy.spatial.distance.cdist(np.expand_dims(self.true_labels, axis=1),
+    #     #                                    np.expand_dims(self.true_labels, axis=1))
+    #     # mat[np.where(mat == 0)] = 1
+    #     # label_mindist = mat.min()
+    #
+    #     a = np.sort(self.true_labels)
+    #     max_dist_neig = 0
+    #     sum_dist_neig = 0
+    #     for i in range(a.shape[0] - 1):
+    #         sum_dist_neig += a[i + 1] - a[i]
+    #         if a[i + 1] - a[i] > max_dist_neig:
+    #             max_dist_neig = a[i + 1] - a[i]
+    #     mean_dist_neig = sum_dist_neig / (a.shape[0] - 1)
+    #
+    #     return mean_dist_neig
+    #     # return label_mindist
 
     def get_XY_item(self, idx):
         input = self.X[idx]
@@ -683,8 +683,8 @@ class GraphDataset(BaseDataset):
         print('Z and K are not initialized in constructor')
         self.im_size = -1
 
-        if self.is_regression_dataset():
-            self.label_mindist = self.init_labelmin()
+        # if self.is_regression_dataset():
+        #     self.label_mindist = self.init_labelmin()
 
     def get_flattened_X(self):
         x, adj = list(zip(*self.X))
@@ -719,13 +719,15 @@ class GraphDataset(BaseDataset):
             b_n_squeeze = 11
             a_n_node = 22
             a_n_type = len(atom_type_list) + 1  # 5
-        else:
+        elif self.dataset_name == 'qm9':
             atom_type_list = ['C', 'N', 'O', 'F']
             b_n_type = 4
             # b_n_squeeze = 1
             b_n_squeeze = 3
             a_n_node = 9
             a_n_type = len(atom_type_list) + 1  # 5
+        else:
+            assert False, 'unknown dataset'
         result = {'atom_type_list': atom_type_list, 'b_n_type': b_n_type, 'b_n_squeeze': b_n_squeeze,
                   'a_n_node': a_n_node, 'a_n_type': a_n_type}
         return result
@@ -861,23 +863,23 @@ class GraphDataset(BaseDataset):
 
         return sample, y
 
-    def init_labelmin(self):
-        # mat = scipy.spatial.distance.cdist(np.expand_dims(self.true_labels, axis=1),
-        #                                    np.expand_dims(self.true_labels, axis=1))
-        # mat[np.where(mat == 0)] = 1
-        # label_mindist = mat.min()
-
-        a = np.sort(self.true_labels)
-        max_dist_neig = 0
-        sum_dist_neig = 0
-        for i in range(a.shape[0] - 1):
-            sum_dist_neig += a[i + 1] - a[i]
-            if a[i + 1] - a[i] > max_dist_neig:
-                max_dist_neig = a[i + 1] - a[i]
-        mean_dist_neig = sum_dist_neig / (a.shape[0] - 1)
-
-        return mean_dist_neig
-        # return label_mindist
+    # def init_labelmin(self):
+    #     # mat = scipy.spatial.distance.cdist(np.expand_dims(self.true_labels, axis=1),
+    #     #                                    np.expand_dims(self.true_labels, axis=1))
+    #     # mat[np.where(mat == 0)] = 1
+    #     # label_mindist = mat.min()
+    #
+    #     a = np.sort(self.true_labels)
+    #     max_dist_neig = 0
+    #     sum_dist_neig = 0
+    #     for i in range(a.shape[0] - 1):
+    #         sum_dist_neig += a[i + 1] - a[i]
+    #         if a[i + 1] - a[i] > max_dist_neig:
+    #             max_dist_neig = a[i + 1] - a[i]
+    #     mean_dist_neig = sum_dist_neig / (a.shape[0] - 1)
+    #
+    #     return mean_dist_neig
+    #     # return label_mindist
 
     def reduce_dataset(self, reduce_type, label=None, how_many=None, reduce_from_ori=True):
         assert self.dataset_name not in REGRESSION_DATASETS, "the dataset can\'t be reduced (regression dataset)"
@@ -887,7 +889,7 @@ class GraphDataset(BaseDataset):
     def load_dataset(name):
         path = './datasets'
 
-        if name == 'qm7':
+        if name in ['qm7', 'qm9']:
             results, label_map = get_molecular_dataset_mp(name=name, data_path=path)
         else:
             # exist_dataset = os.path.exists(f'{path}/{name}_data.npy') if path is not None else False
