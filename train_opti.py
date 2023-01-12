@@ -243,7 +243,7 @@ if __name__ == "__main__":
     if args.dataset == 'mnist':
         dataset = ImDataset(dataset_name=args.dataset, transform=transform)
     elif args.dataset in ['qm7', 'qm9']:
-        dataset = GraphDataset(dataset_name=args.dataset, transform=None)
+        dataset = GraphDataset(dataset_name=args.dataset, transform='permutation')
     else:
         dataset = SimpleDataset(dataset_name=args.dataset, transform=transform)
 
@@ -331,9 +331,9 @@ if __name__ == "__main__":
         val_dataset.save_split(path)
 
     config = {
-        "var": tune.uniform(0.01, 1.0),
-        "beta": tune.randint(1, 200),
-        "noise": tune.uniform(0, 1),
+        "var": tune.uniform(0.09, 1.0),
+        "beta": tune.randint(50, 200),
+        "noise": tune.uniform(0.2, 0.9),
         "lr": tune.loguniform(1e-4, 0.005),
         "batch_size": tune.choice([10, 20, 30, 40, 50])
     }
@@ -350,7 +350,7 @@ if __name__ == "__main__":
         partial(train_opti),
         resources_per_trial={"cpu": 4, "gpu": 0.25},
         config=config,
-        num_samples=500,
+        num_samples=2,
         scheduler=scheduler,
         progress_reporter=reporter,
         stop=nan_stopper)

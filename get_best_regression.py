@@ -1,3 +1,4 @@
+import numpy
 import numpy as np
 import math
 import torch
@@ -18,12 +19,14 @@ from sklearn.linear_model import Ridge
 
 from utils.testing import testing_arguments
 from utils.testing import learn_or_load_modelhyperparams
+from utils.testing import save_modelhyperparams
 from utils.training import ffjord_arguments, moflow_arguments
 
 from utils.toy_models import load_seqflow_model, load_ffjord_model, load_moflow_model
+from utils.toy_models import IMAGE_MODELS, SIMPLE_MODELS, GRAPH_MODELS
 
-
-def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_dataset, save_dir, device, with_train=False):
+def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_dataset, save_dir, device, with_train=False,
+                        reg_use_var=False, cus_load_func=None):
     zridge_scores = []
 
     # Our approach
@@ -31,6 +34,8 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
     best_i = 0
     best_score_train = math.inf
     best_i_train = 0
+    best_score_str_train = ''
+    best_score_str = ''
 
     # save_fig(train_dataset.X, train_dataset.true_labels, size=10, save_path=f'{save_dir}/X_space')
     # save_fig(val_dataset.X, val_dataset.true_labels, size=10, save_path=f'{save_dir}/X_space_val')
@@ -57,12 +62,15 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
             model_single = load_moflow_model(model_loading_params['moflow_args'],
                                              gaussian_params=model_loading_params['gaussian_params'],
                                              learn_mean=model_loading_params['learn_mean'], reg_use_var=reg_use_var,
-                                             dataset=dataset)
+                                             dataset=full_dataset)
         else:
             assert False, 'unknown model type!'
-        model_single = WrappedModel(model_single)
-        model_single.load_state_dict(torch.load(model_loading_params['loading_path'], map_location=device))
-        model = model_single.module
+        if not cus_load_func:
+            model_single = WrappedModel(model_single)
+            model_single.load_state_dict(torch.load(model_loading_params['loading_path'], map_location=device))
+            model = model_single.module
+        else:
+            model = cus_load_func(model_single, model_loading_params['loading_path'])
         model = model.to(device)
         model.eval()
 
@@ -71,11 +79,10 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
 
         Z = []
         tlabels = []
-        model.eval()
         with torch.no_grad():
             for j, data in enumerate(loader):
                 inp, labels = data
-                inp = dataset.format_data(inp, None, None, device)
+                inp = train_dataset.format_data(inp, None, None, device)
                 labels = labels.to(device)
                 log_p, distloss, logdet, out = model(inp, labels)
                 Z.append(out.detach().cpu().numpy())
@@ -85,8 +92,13 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
 
         # Learn Ridge
         # zlinridge = make_pipeline(StandardScaler(), KernelRidge(kernel='linear', alpha=0.1))
-        zlinridge = Ridge(alpha=1.0)
-        zlinridge.fit(Z, tlabels)
+        # zlinridge = Ridge(alpha=1.0)
+        # zlinridge.fit(Z, tlabels)
+        param_gridlin = [{'Ridge__alpha': np.concatenate((np.logspace(-5, 2, 11), np.array([1])))}]
+        model_type = ('Ridge', Ridge())
+        scaler = False
+        zlinridge = learn_or_load_modelhyperparams(Z, tlabels, 'zlinear', param_gridlin, save_dir,
+                                                   model_type=model_type, scaler=scaler, save=False, force_train=True)
         # kernel_name = 'linear'
         # param_gridlin = [{'Ridge__kernel': [kernel_name], 'Ridge__alpha': np.linspace(0, 10, 11)}]
         # zlinridge = learn_or_load_modelhyperparams(Z, tlabels, kernel_name, param_gridlin, save_dir,
@@ -100,7 +112,7 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
             for j, data in enumerate(val_loader):
                 inp, labels = data
 
-                inp = dataset.format_data(inp, None, None, device)
+                inp = eval_dataset.format_data(inp, None, None, device)
                 labels = labels.to(device)
                 log_p, distloss, logdet, out = model(inp, labels)
                 val_inZ.append(out.detach().cpu().numpy())
@@ -112,6 +124,13 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
         y_pred = zlinridge.predict(val_inZ)
         zridge_score = (np.power((y_pred - elabels), 2)).mean()
         zridge_scores.append(zridge_score)
+
+        # TEST #
+        # if i == 47:
+        #     numpy.save(f'{save_dir}/test_save_Z', Z)
+        #     numpy.save(f'{save_dir}/test_save_valinZ', val_inZ)
+        #     numpy.save(f'{save_dir}/test_save_y', elabels)
+        #     numpy.save(f'{save_dir}/test_save_predy', y_pred)
 
         # Train score
         # zridge_score_train = zlinridge.score(Z, tlabels)
@@ -130,18 +149,21 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
         # pred = pred.mean(axis=1)
         pred = dot_val.squeeze() * (model.label_max - model.label_min) + model.label_min
         projection_score = np.power((pred - elabels), 2).mean()
-
-        print(
-            f'Our approach ({i}) : {zridge_score}, (train score : {zridge_score_train}), (projection) : {projection_score}')
+        score_str = f'Our approach ({i}) : {zridge_score}, (train score : {zridge_score_train}), (projection) : {projection_score}'
+        print(score_str)
         # if zridge_score >= best_score:
         if zridge_score_train <= best_score_train:
             best_score_train = zridge_score_train
             best_i_train = i
             print(f'New best train ({i}).')
+            best_score_str_train = score_str
+            save_modelhyperparams(zlinridge, param_gridlin, save_dir, model_type, 'zlinear_train', scaler_used=False)
         if zridge_score <= best_score:
             best_score = zridge_score
             best_i = i
             print(f'New best ({i}).')
+            best_score_str = score_str
+            save_modelhyperparams(zlinridge, param_gridlin, save_dir, model_type, 'zlinear', scaler_used=False)
 
     model_loading_params = t_model_params[best_i]
     if model_loading_params['model'] == 'cglow':
@@ -160,15 +182,28 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
         model_single = load_ffjord_model(model_loading_params['ffjord_args'], model_loading_params['n_dim'],
                                          gaussian_params=model_loading_params['gaussian_params'],
                                          learn_mean=model_loading_params['learn_mean'], dataset=full_dataset)
-
+    elif model_loading_params['model'] == 'moflow':
+        args_moflow, _ = moflow_arguments().parse_known_args()
+        model_single = load_moflow_model(model_loading_params['moflow_args'],
+                                         gaussian_params=model_loading_params['gaussian_params'],
+                                         learn_mean=model_loading_params['learn_mean'], reg_use_var=reg_use_var,
+                                         dataset=full_dataset)
     else:
-        assert False, 'unknown model type!'
+        umodel_type = model_loading_params['model']
+        assert False, f'unknown model type! ({umodel_type})'
 
-    model_single = WrappedModel(model_single)
-    model_single.load_state_dict(torch.load(model_loading_params['loading_path'], map_location=device))
+    if not cus_load_func:
+        model = WrappedModel(model_single)
+        model.load_state_dict(torch.load(model_loading_params['loading_path'], map_location=device))
+    else:
+        model = cus_load_func(model_single, model_loading_params['loading_path'])
     torch.save(
-        model_single.state_dict(), f"{save_dir}/best_regression_model.pth"
+        model.state_dict(), f"{save_dir}/best_regression_model.pth"
     )
+
+    lines = [best_score_str, '\n', best_score_str_train]
+    with open(f"{save_dir}/res.txt", 'w') as f:
+        f.writelines(lines)
 
     if with_train:
         model_loading_params = t_model_params[best_i_train]
@@ -188,14 +223,23 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
             model_single = load_ffjord_model(model_loading_params['ffjord_args'], model_loading_params['n_dim'],
                                              gaussian_params=model_loading_params['gaussian_params'],
                                              learn_mean=model_loading_params['learn_mean'], dataset=full_dataset)
-
+        elif model_loading_params['model'] == 'moflow':
+            args_moflow, _ = moflow_arguments().parse_known_args()
+            model_single = load_moflow_model(model_loading_params['moflow_args'],
+                                             gaussian_params=model_loading_params['gaussian_params'],
+                                             learn_mean=model_loading_params['learn_mean'], reg_use_var=reg_use_var,
+                                             dataset=full_dataset)
         else:
-            assert False, 'unknown model type!'
+            model_type = model_loading_params['model']
+            assert False, f'unknown model type! ({model_type})'
 
-        model_single = WrappedModel(model_single)
-        model_single.load_state_dict(torch.load(model_loading_params['loading_path'], map_location=device))
+        if not cus_load_func:
+            model = WrappedModel(model_single)
+            model.load_state_dict(torch.load(model_loading_params['loading_path'], map_location=device))
+        else:
+            model = cus_load_func(model_single, model_loading_params['loading_path'])
         torch.save(
-            model_single.state_dict(), f"{save_dir}/best_regression_train_model.pth"
+            model.state_dict(), f"{save_dir}/best_regression_train_model.pth"
         )
 
     return best_i
@@ -274,10 +318,10 @@ if __name__ == '__main__':
 
     dataset_name, model_type, folder_name = args.folder.split('/')[-3:]
     # DATASET #
-    if dataset_name == 'mnist':
+    if model_type in IMAGE_MODELS:
         dataset = ImDataset(dataset_name=dataset_name)
         n_channel = dataset.n_channel
-    elif dataset_name in ['qm7', 'qm9']:
+    elif model_type in GRAPH_MODELS:
         dataset = GraphDataset(dataset_name=dataset_name)
         n_channel = -1
     else:
@@ -452,7 +496,7 @@ if __name__ == '__main__':
     create_folder(save_dir)
 
     best_i = evaluate_regression(t_model_params, train_dataset, val_dataset, full_dataset=dataset, save_dir=save_dir,
-                                 device=device, with_train=True)
+                                 device=device, with_train=True, reg_use_var=reg_use_var)
 
     model_loading_params = t_model_params[best_i]
     if model_loading_params['model'] == 'cglow':

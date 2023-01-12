@@ -52,7 +52,7 @@ def save_every_pic(path, numpy_pics, methods, labels, add_str=None, clamp_min=0,
         im.save(f'{path}/{name}')
 
 
-def save_fig(X, labels, save_path, limits=None, size=7, rangelabels=None):
+def save_fig(X, labels, save_path, limits=None, size=7, rangelabels=None, eps=False):
     if rangelabels is not None:
         vmin = rangelabels[0]
         vmax = rangelabels[-1]
@@ -67,7 +67,8 @@ def save_fig(X, labels, save_path, limits=None, size=7, rangelabels=None):
         plt.xlim([x_xmin - 1, x_xmax + 1])
         plt.ylim([x_ymin - 1, x_ymax + 1])
 
-    # plt.savefig(fname=f'{save_path}.eps', format='eps')
+    if eps:
+        plt.savefig(fname=f'{save_path}.eps', format='eps')
     plt.savefig(fname=f'{save_path}.png', format='png')
 
     plt.close()

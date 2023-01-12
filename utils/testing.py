@@ -36,11 +36,11 @@ def testing_arguments():
 
 
 def learn_or_load_modelhyperparams(X_train, tlabels, kernel_name, param_grid, save_dir, model_type, scaler=False,
-                                   scorer=None, save=True):
+                                   scorer=None, save=True, force_train=False):
     # Example of use : pca = learn_or_load_modelhyperparams(X_lab, None, kernel_name, param_gridlin, save_dir,
     # model_type=('PCA', KernelPCA()), scaler=scaler, scorer=my_scorer)
     # model_type should be ('name', model)
-    if not os.path.exists(f'{save_dir}/params_{model_type[0]}_{kernel_name}.pkl'):
+    if not os.path.exists(f'{save_dir}/params_{model_type[0]}_{kernel_name}.pkl') or force_train:
         pipeline_li = [('scaler', StandardScaler())] if scaler else []
         pipeline_li += [model_type]
         pipeline_linsvc = Pipeline(pipeline_li)
@@ -53,10 +53,10 @@ def learn_or_load_modelhyperparams(X_train, tlabels, kernel_name, param_grid, sa
         ind_step = 0 if not scaler else 1
         learned_params = {k: eval(f'{str(model.best_estimator_.steps[ind_step][1])}.{k}') for k in keys}
         # kernel_name = learned_params['kernel']
+        print(f'Learned hyperparams : {learned_params}')
         if save:
             with open(f'{save_dir}/params_{model_type[0]}_{kernel_name}.pkl', 'wb') as f:
                 pickle.dump(learned_params, f)
-        print(f'Learned hyperparams : {learned_params}')
     else:
         with open(f'{save_dir}/params_{model_type[0]}_{kernel_name}.pkl', 'rb') as f:
             learned_params = pickle.load(f)
@@ -71,6 +71,15 @@ def learn_or_load_modelhyperparams(X_train, tlabels, kernel_name, param_grid, sa
             model.fit(X_train)
     print(f'Fitting done.')
     return model
+
+
+def save_modelhyperparams(model, param_grid, save_dir, model_type, kernel_name, scaler_used=False):
+    keys = [k.split('__')[-1] for k, v in param_grid[0].items()]
+    ind_step = 0 if not scaler_used else 1
+    learned_params = {k: eval(f'{str(model.best_estimator_.steps[ind_step][1])}.{k}') for k in keys}
+    with open(f'{save_dir}/params_{model_type[0]}_{kernel_name}.pkl', 'wb') as f:
+        pickle.dump(learned_params, f)
+    print(f'Model saved.')
 
 
 def generate_sample(mean, covariance, nb_sample):

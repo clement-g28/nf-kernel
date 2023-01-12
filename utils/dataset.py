@@ -636,7 +636,7 @@ from utils.graphs.utils_datasets import transform_graph_permutation
 import multiprocessing
 import itertools
 
-ATOMIC_NUM_MAP = {'C': 6, 'N': 7, 'O': 8, 'F': 9, 'P': 15, 'S': 16}
+ATOMIC_NUM_MAP = {'C': 6, 'N': 7, 'O': 8, 'F': 9, 'P': 15, 'S': 16, 'Cl': 17, 'Br': 35, 'I': 53}
 
 
 def chunks(lst, n):
@@ -662,8 +662,8 @@ class GraphDataset(BaseDataset):
         else:
             xs, adjs, self.smiles, y = train_dataset
             xs_test, adjs_test, self.smiles_test, y_test = test_dataset
-        y = np.concatenate(y)
-        test_dataset = (list(zip(xs_test, adjs_test)), np.concatenate(y_test))
+        y = np.array(y).squeeze()
+        test_dataset = (list(zip(xs_test, adjs_test)), np.array(y_test).squeeze())
 
         self.transform = transform_graph_permutation if transform == 'permutation' else None
         self.atomic_num_list = [ATOMIC_NUM_MAP[label] for label, _ in self.label_map.items()] + [0]
@@ -711,6 +711,13 @@ class GraphDataset(BaseDataset):
             # b_n_squeeze = 1
             b_n_squeeze = 7
             a_n_node = 7
+            a_n_type = len(atom_type_list) + 1  # 5
+        elif self.dataset_name == 'fishtoxi':
+            atom_type_list = ['Cl', 'C', 'O', 'N', 'Br', 'S', 'P', 'I', 'F']
+            b_n_type = 4
+            # b_n_squeeze = 1
+            b_n_squeeze = 11
+            a_n_node = 22
             a_n_type = len(atom_type_list) + 1  # 5
         else:
             atom_type_list = ['C', 'N', 'O', 'F']
@@ -880,9 +887,74 @@ class GraphDataset(BaseDataset):
     def load_dataset(name):
         path = './datasets'
 
-        results = get_molecular_dataset_mp(name=name, data_path=path)
+        if name == 'qm7':
+            results, label_map = get_molecular_dataset_mp(name=name, data_path=path)
+        else:
+            # exist_dataset = os.path.exists(f'{path}/{name}_data.npy') if path is not None else False
+            # test_dataset = None
+            # fulldata = True
+            # name_c = name
+            # if fulldata and name in ['aquatoxi', 'fishtoxi']:
+            #     name_c = f'{name}_graph_fulldata'
+            #     exist_dataset = os.path.exists(f'{path}/{name_c}_data.npy')
 
-        return results
+            if name == 'fishtoxi':
+                # if exist_dataset:
+                #     X = np.load(f'{path}/{name_c}_data.npy')
+                #     labels = np.load(f'{path}/{name_c}_labels.npy')
+                #     if fulldata:
+                #         X_test = np.load(f'{path}/{name_c}_testdata.npy')
+                #         labels_test = np.load(f'{path}/{name_c}_testlabels.npy')
+                #         test_dataset = (X_test, labels_test)
+
+                name += '_graph_fulldata'
+                import pandas as pd
+                from rdkit import Chem
+                from utils.graphs.molecular_graph_utils import get_atoms_adj_from_mol, process_mols
+                mat = pd.read_excel(f'{path}/qsar_fish_toxicity_fulldata.xlsx', engine='openpyxl')
+                mat = np.array(mat)
+
+                smiles = mat[np.where(mat[:, 2] == 'train'), 1].squeeze()
+                labels = mat[np.where(mat[:, 2] == 'train'), 3].squeeze().astype(np.float64)
+                smiles_test = mat[np.where(mat[:, 2] == 'test'), 1].squeeze()
+                y_test = mat[np.where(mat[:, 2] == 'test'), 3].squeeze().astype(np.float64)
+                mols = []
+                mols_test = []
+                n_atoms = []
+                nsmiles = []
+                nsmiles_test = []
+                filter_n_atom = 22
+                for smile in smiles:
+                    mol = Chem.MolFromSmiles(smile)
+                    if mol.GetNumAtoms() <= filter_n_atom:
+                        mols.append(mol)
+                        n_atoms.append(mol.GetNumAtoms())
+                        nsmiles.append(Chem.MolToSmiles(mol))
+                for smile in smiles_test:
+                    mol = Chem.MolFromSmiles(smile)
+                    if mol.GetNumAtoms() <= filter_n_atom:
+                        mols_test.append(mol)
+                        n_atoms.append(mol.GetNumAtoms())
+                        nsmiles_test.append(Chem.MolToSmiles(mol))
+
+                label_map = {}
+                for mol in mols + mols_test:
+                    for atom in mol.GetAtoms():
+                        symbol = atom.GetSymbol()
+                        if symbol not in label_map:
+                            label_map[symbol] = len(label_map) + 1
+
+                results, label_map = process_mols(name, (mols, labels), (mols_test, y_test), max(n_atoms), label_map,
+                                                  dupe_filter=False, categorical_values=False,
+                                                  return_smiles=False)
+
+                # test_dataset = (X_test, y_test)
+                # np.save(f'{path}/{name}_testdata.npy', X_test)
+                # np.save(f'{path}/{name}_testlabels.npy', y_test)
+            else:
+                assert False, 'unknown dataset'
+
+        return results, label_map
 
     @staticmethod
     def format_data(input, n_bits, n_bins, device):

@@ -117,6 +117,11 @@ def get_molecular_dataset(name='qm7', data_path=None):
     return xs, adjs, label_map
 
 
+def chunks(lst, n):
+    for i in range(0, len(lst), int(len(lst) / n)):
+        yield lst[i:i + int(len(lst) / n)]
+
+
 def get_molecular_dataset_mp(name='qm7', data_path=None, categorical_values=False, return_smiles=False):
     if 'qm7' in name:
         tasks, (train_dataset, valid_dataset, test_dataset), transformers = dc.molnet.load_qm7_from_mat(
@@ -134,21 +139,27 @@ def get_molecular_dataset_mp(name='qm7', data_path=None, categorical_values=Fals
     else:
         assert False, 'unknown dataset'
 
-    def chunks(lst, n):
-        for i in range(0, len(lst), int(len(lst) / n)):
-            yield lst[i:i + int(len(lst) / n)]
-
     # all_mol = np.concatenate((train_dataset.X, valid_dataset.X, test_dataset.X), axis=0)
     # all_y = np.concatenate((train_dataset.y, valid_dataset.y, test_dataset.y), axis=0).astype(np.float)
 
-    results = []
-    train_data = (np.concatenate((train_dataset.X, valid_dataset.X), axis=0), np.concatenate((train_dataset.y, valid_dataset.y), axis=0))
+    train_data = (np.concatenate((train_dataset.X, valid_dataset.X), axis=0),
+                  np.concatenate((train_dataset.y, valid_dataset.y), axis=0))
     test_data = (test_dataset.X, test_dataset.y)
+    results, label_map = process_mols(name, train_data, test_data, max_num_nodes, label_map, dupe_filter,
+                                      categorical_values, return_smiles)
+
+    return results, label_map
+
+
+def process_mols(name, train_data, test_data, max_num_nodes, label_map, dupe_filter, categorical_values=False,
+                 return_smiles=False):
+    results = []
     for mols, y in (train_data, test_data):
 
         pool = multiprocessing.Pool()
         returns = pool.map(multiprocessing_func,
-                           [(chunk, i, max_num_nodes, label_map, name, categorical_values, return_smiles) for i, chunk in
+                           [(chunk, i, max_num_nodes, label_map, name, categorical_values, return_smiles) for i, chunk
+                            in
                             enumerate(chunks(list(zip(mols, y)), os.cpu_count()))])
         pool.close()
         returns = list(itertools.chain.from_iterable(returns))
@@ -166,10 +177,10 @@ def get_molecular_dataset_mp(name='qm7', data_path=None, categorical_values=Fals
             res = returns
 
         if return_smiles:
-            xs, adjs, smiles,y2 = map(list, zip(*res))
+            xs, adjs, smiles, y2 = map(list, zip(*res))
             results.append((xs, adjs, smiles, y2))
         else:
-            xs, adjs,y2 = map(list, zip(*res))
+            xs, adjs, y2 = map(list, zip(*res))
             results.append((xs, adjs, y2))
     return results, label_map
 
@@ -190,9 +201,9 @@ def multiprocessing_func(input_args):
             atoms = atoms_to_one_hot(atoms, label_map)
         if return_smiles:
             smiles = Chem.MolToSmiles(mol)
-            res.append([atoms, adj, smiles,y])
+            res.append([atoms, adj, smiles, y])
         else:
-            res.append([atoms, adj,y])
+            res.append([atoms, adj, y])
 
     return res
 

@@ -12,6 +12,7 @@ from utils.utils import set_seed, create_folder, save_every_pic, initialize_gaus
 
 from utils.custom_glow import CGlow, WrappedModel
 from utils.toy_models import load_seqflow_model, load_ffjord_model, load_moflow_model
+from utils.toy_models import IMAGE_MODELS, SIMPLE_MODELS, GRAPH_MODELS
 from utils.dataset import ImDataset, SimpleDataset, GraphDataset
 from utils.density import construct_covariance
 from utils.testing import learn_or_load_modelhyperparams, generate_sample, project_inZ, testing_arguments, noise_data
@@ -19,6 +20,7 @@ from utils.testing import project_between
 from utils.training import ffjord_arguments, moflow_arguments
 from sklearn.metrics.pairwise import rbf_kernel
 from utils.graphs.kernels import compute_wl_kernel, compute_sp_kernel, compute_mslap_kernel, compute_hadcode_kernel
+from utils.graphs.mol_utils import valid_mol, construct_mol
 
 from sklearn.decomposition import PCA, KernelPCA
 from sklearn.kernel_ridge import KernelRidge
@@ -644,7 +646,7 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
         with torch.no_grad():
             for j, data in enumerate(loader):
                 inp, labels = data
-                inp = dataset.format_data(inp, None, None, device)
+                inp = train_dataset.format_data(inp, None, None, device)
                 labels = labels.to(device)
                 log_p, distloss, logdet, out = model(inp, labels)
                 Z.append(out.detach().cpu().numpy())
@@ -662,12 +664,12 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
             # linridge = learn_or_load_modelhyperparams(X_train, labels_train, kernel_name, param_gridlin, save_dir,
             #                                           model_type=('Ridge', KernelRidge()), scaler=True)
             # param_gridlin = [{'Ridge__kernel': [kernel_name], 'Ridge__alpha': np.logspace(-5, 2, 11)}]
-            param_gridlin = [{'Ridge__alpha': np.logspace(-5, 2, 11)}]
+            param_gridlin = [{'Ridge__alpha': np.concatenate((np.logspace(-5, 2, 11), np.array([1])))}]
             zlinridge = learn_or_load_modelhyperparams(Z, tlabels, kernel_name, param_gridlin, save_dir,
                                                        model_type=('Ridge', Ridge()), scaler=False, save=False)
         else:
             # linridge = make_pipeline(StandardScaler(), KernelRidge(kernel=kernel_name))
-            zlinridge = make_pipeline(StandardScaler(), Ridge(alpha=0.1))
+            zlinridge = make_pipeline(StandardScaler(), Ridge(alpha=1.0))
             zlinridge.fit(Z, tlabels)
             print(f'Fitting done.')
         # zlinridge = make_pipeline(StandardScaler(), KernelRidge(kernel='linear', alpha=0.1))
@@ -685,7 +687,7 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
         with torch.no_grad():
             for j, data in enumerate(val_loader):
                 inp, labels = data
-                inp = dataset.format_data(inp, None, None, device)
+                inp = val_dataset.format_data(inp, None, None, device)
                 labels = labels.to(device)
                 log_p, distloss, logdet, out = model(inp, labels)
                 val_inZ.append(out.detach().cpu().numpy())
@@ -694,17 +696,6 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
         elabels = np.concatenate(elabels, axis=0)
         end = time.time()
         print(f"time to get Z_val from X_val : {str(end - start)}")
-
-        # TEST project between the means
-        means = model.means.detach().cpu().numpy()
-        proj, dot_val = project_between(val_inZ, means[0], means[1])
-        # pred = ((proj - means[1]) / (means[0] - means[1])) * (
-        #         model.label_max - model.label_min) + model.label_min
-        # pred = pred.mean(axis=1)
-        pred = dot_val.squeeze() * (model.label_max - model.label_min) + model.label_min
-        projection_mse_score = np.power((pred - elabels), 2).mean()
-        projection_mae_score = np.abs((pred - elabels)).mean()
-        print(f'Our approach (projection) MSE: {projection_mse_score}, MAE: {projection_mae_score}')
 
         pred = zlinridge.predict(val_inZ)
         zridge_r2_score = zlinridge.score(val_inZ, elabels)
@@ -720,6 +711,17 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
         t_zridge_mae_score = np.abs(pred - tlabels).mean()
         t_zridge_mse_score = np.power(pred - tlabels, 2).mean()
         print(f'(On train) Our approach R2: {t_zridge_r2_score}, MSE: {t_zridge_mse_score}, MAE: {t_zridge_mae_score}')
+
+        # TEST project between the means
+        means = model.means.detach().cpu().numpy()
+        proj, dot_val = project_between(val_inZ, means[0], means[1])
+        # pred = ((proj - means[1]) / (means[0] - means[1])) * (
+        #         model.label_max - model.label_min) + model.label_min
+        # pred = pred.mean(axis=1)
+        pred = dot_val.squeeze() * (model.label_max - model.label_min) + model.label_min
+        projection_mse_score = np.power((pred - elabels), 2).mean()
+        projection_mae_score = np.abs((pred - elabels)).mean()
+        print(f'Our approach (projection) MSE: {projection_mse_score}, MAE: {projection_mae_score}')
 
     X_train = train_dataset.get_flattened_X()
     # X_train = train_dataset.X.reshape(train_dataset.X.shape[0], -1)
@@ -866,10 +868,12 @@ def create_figures_XZ(model, train_dataset, save_path, device, std_noise=0.1, on
     with torch.no_grad():
         for j, data in enumerate(loader):
             inp, labels = data
-            inp = dataset.format_data(inp, None, None, device)
+            inp = train_dataset.format_data(inp, None, None, device)
             if isinstance(inp, list):
                 for i in range(len(inp)):
                     inp[i] = (inp[i] + torch.from_numpy(np.random.randn(*inp[i].shape)).float().to(device) * std_noise)
+            else:
+                inp = inp + torch.from_numpy(np.random.randn(*inp.shape)).float().to(device) * std_noise
             labels = labels.to(device)
             # inp = (data[0] + np.random.randn(*data[0].shape) * std_noise).float().to(device)
             # labels = data[1].to(device)
@@ -882,9 +886,12 @@ def create_figures_XZ(model, train_dataset, save_path, device, std_noise=0.1, on
     if not only_Z:
         X = np.concatenate(X, axis=0).reshape(len(train_dataset), -1)
         save_fig(X, tlabels, size=size_pt_fig, save_path=f'{save_path}/X_space')
+    else :
+        X = None
 
     Z = np.concatenate(Z, axis=0).reshape(len(train_dataset), -1)
     save_fig(Z, tlabels, size=size_pt_fig, save_path=f'{save_path}/Z_space')
+    return X, Z
 
 
 def evaluate_regression_preimage(model, val_dataset, device, save_dir):
@@ -903,7 +910,7 @@ def evaluate_regression_preimage(model, val_dataset, device, save_dir):
         samples.append(np.expand_dims(mean, axis=0))
     samples = np.concatenate(samples, axis=0)
 
-    z_shape = model.calc_last_z_shape(dataset.im_size)
+    z_shape = model.calc_last_z_shape(val_dataset.im_size)
     nb_batch = math.ceil(samples.shape[0] / batch_size)
     all_res = []
     samples = torch.from_numpy(samples)
@@ -929,12 +936,173 @@ def evaluate_regression_preimage(model, val_dataset, device, save_dir):
         x = all_res[:, :x_sh].reshape(all_res.shape[0], *x_shape)
         adj = all_res[:, x_sh:].reshape(all_res.shape[0], *adj_shape)
         from utils.graphs.mol_utils import check_validity, save_mol_png
-        atomic_num_list = dataset.atomic_num_list
+        atomic_num_list = val_dataset.atomic_num_list
         valid_mols = check_validity(adj, x, atomic_num_list)['valid_mols']
         mol_dir = os.path.join(save_dir, 'generated')
         os.makedirs(mol_dir, exist_ok=True)
         for ind, mol in enumerate(valid_mols):
             save_mol_png(mol, os.path.join(mol_dir, '{}.png'.format(ind)))
+
+
+def evaluate_regression_preimage2(model, val_dataset, device, save_dir):
+    batch_size = 20
+
+    y_min = model.label_min
+    y_max = model.label_max
+    ys = np.linspace(y_min, y_max, 50)
+    model_means = model.means[:2].detach().cpu().numpy()
+    covariance_matrix = construct_covariance(model.eigvecs.cpu()[0].squeeze(), model.eigvals.cpu()[0].squeeze())
+    samples = []
+    for i, y in enumerate(ys):
+        # mean, cov = model.get_regression_gaussian_sampling_parameters(y)
+        alpha_y = (y - y_min) / (y_max - y_min)
+        mean = alpha_y * model_means[0] + (1 - alpha_y) * model_means[1]
+        z = np.random.multivariate_normal(mean, covariance_matrix, 20)
+        # samples.append(np.expand_dims(mean, axis=0))
+        samples.append(z)
+    samples = np.concatenate(samples, axis=0)
+
+    z_shape = model.calc_last_z_shape(val_dataset.im_size)
+    nb_batch = math.ceil(samples.shape[0] / batch_size)
+    all_res = []
+    samples = torch.from_numpy(samples)
+    with torch.no_grad():
+        for j in range(nb_batch):
+            size = samples[j * batch_size:(j + 1) * batch_size].shape[0]
+            input = samples[j * batch_size:(j + 1) * batch_size].reshape(size, *z_shape).float().to(device)
+
+            res = model.reverse(input)
+            all_res.append(res.detach().cpu().numpy())
+    all_res = np.concatenate(all_res, axis=0)
+
+    if val_dataset.get_n_dim() == 2:
+        save_fig(all_res, ys, size=5, save_path=f'{save_dir}/pre_images_inX', eps=True)
+        save_fig(samples.detach().cpu().numpy(), ys, size=5, save_path=f'{save_dir}/pre_images_inZ', eps=True)
+
+    # For mols
+    if isinstance(val_dataset, GraphDataset):
+        x_shape = val_dataset.X[0][0].shape
+        adj_shape = val_dataset.X[0][1].shape
+        x_sh = x_shape[0]
+        for v in x_shape[1:]:
+            x_sh *= v
+        x = all_res[:, :x_sh].reshape(all_res.shape[0], *x_shape)
+        adj = all_res[:, x_sh:].reshape(all_res.shape[0], *adj_shape)
+        from utils.graphs.mol_utils import check_validity, save_mol_png
+        atomic_num_list = val_dataset.atomic_num_list
+        valid_mols = check_validity(adj, x, atomic_num_list)['valid_mols']
+        mol_dir = os.path.join(save_dir, 'generated')
+        os.makedirs(mol_dir, exist_ok=True)
+        for ind, mol in enumerate(valid_mols):
+            save_mol_png(mol, os.path.join(mol_dir, '{}.png'.format(ind)))
+
+
+def evaluate_interpolations(model, val_dataset, device, save_dir, Z=None):
+
+    # si Z est donné, PCA sur 2 dimensions
+    if Z is not None:
+        pca = PCA(n_components=2)
+        pca.fit(Z)
+        pca_Z = pca.transform(Z)
+
+        create_folder(f'{save_dir}/generated_interp')
+
+    batch_size = 2
+
+    loader = val_dataset.get_loader(batch_size, shuffle=True, drop_last=True, pin_memory=False)
+
+    all_res = []
+    n_interpolation = 20
+    with torch.no_grad():
+        for j, data in enumerate(loader):
+            inp, labels = data
+            inp = val_dataset.format_data(inp, None, None, device)
+            labels = labels.to(device)
+            log_p, distloss, logdet, out = model(inp, labels)
+
+            d = out[1] - out[0]
+            z_list = [(out[0] + i * 1.0 / (n_interpolation + 1) * d).unsqueeze(0) for i in range(n_interpolation + 2)]
+
+            z_array = torch.cat(z_list, dim=0)
+
+            res = model.reverse(z_array)
+            all_res.append(res.detach().cpu().numpy())
+
+            if Z is not None:
+                pca_interp = pca.transform(z_array.detach().cpu().numpy())
+                data = np.concatenate((pca_Z, pca_interp), axis=0)
+                lab = np.zeros(data.shape[0])
+                lab[-(batch_size+n_interpolation):] = 1
+                save_fig(data, lab, size=5, save_path=f'{save_dir}/generated_interp/{str(j).zfill(4)}_res_pca')
+
+    all_res = np.concatenate(all_res, axis=0)
+
+    # For mols
+    if isinstance(val_dataset, GraphDataset):
+        x_shape = val_dataset.X[0][0].shape
+        adj_shape = val_dataset.X[0][1].shape
+        x_sh = x_shape[0]
+        for v in x_shape[1:]:
+            x_sh *= v
+        x = all_res[:, :x_sh].reshape(all_res.shape[0], *x_shape)
+        adj = all_res[:, x_sh:].reshape(all_res.shape[0], *adj_shape)
+        atomic_num_list = val_dataset.atomic_num_list
+
+        from rdkit import Chem, DataStructs
+        from rdkit.Chem import Draw, AllChem, Descriptors
+        from ordered_set import OrderedSet
+
+        # Interps
+        for n in range(int(all_res.shape[0] / (n_interpolation+batch_size))):
+            xm = x[n * (n_interpolation+batch_size):(n + 1) * (n_interpolation+batch_size)]
+            adjm = adj[n * (n_interpolation+batch_size):(n + 1) * (n_interpolation+batch_size)]
+
+            interpolation_mols = [valid_mol(construct_mol(x_elem, adj_elem, atomic_num_list))
+                                  for x_elem, adj_elem in zip(xm, adjm)]
+            valid_mols = [mol for mol in interpolation_mols if mol is not None]
+            valid_mols_smiles = [Chem.MolToSmiles(mol) for mol in valid_mols]
+
+            valid_mols_smiles_unique = list(OrderedSet(valid_mols_smiles))
+            valid_mols_unique = [Chem.MolFromSmiles(s) for s in valid_mols_smiles_unique]
+            valid_mols_smiles_unique_label = []
+
+            mol0 = valid_mols[0]
+            mol1 = valid_mols[-1]
+            smile0 = valid_mols_smiles[0]
+            smile1 = valid_mols_smiles[-1]
+            fp0 = AllChem.GetMorganFingerprint(mol0, 2)
+
+            for s, m in zip(valid_mols_smiles_unique, valid_mols_unique):
+                fp = AllChem.GetMorganFingerprint(m, 2)
+                sim = DataStructs.TanimotoSimilarity(fp, fp0)
+                s = '{:.2f}\n'.format(sim) + s
+                if s == smile0:
+                    s = '***[' + s + ']***'
+                valid_mols_smiles_unique_label.append(s)
+
+            print('interpolation_mols valid {} / {}'
+                  .format(len(valid_mols), len(interpolation_mols)))
+
+            psize = (200, 200)
+            with_seeds = [mol0] + valid_mols_unique + [mol1]
+            legends_with_seed = [smile0] + valid_mols_smiles_unique + [smile1]
+            # if display_property == 'plogp':
+            legends_with_seed = [smile + ', logP:' + str(round(Descriptors.MolLogP(mol), 2)) for mol, smile in
+                                 zip(with_seeds, legends_with_seed)]
+            img = Draw.MolsToGridImage(with_seeds, legends=legends_with_seed, molsPerRow=int((n_interpolation+batch_size) / 4),
+                                       subImgSize=psize)
+
+            if not os.path.exists(f'{save_dir}/generated_interp'):
+                os.makedirs(f'{save_dir}/generated_interp')
+            img.save(f'{save_dir}/generated_interp/{str(n).zfill(4)}_res_grid.png')
+
+        # from utils.graphs.mol_utils import check_validity, save_mol_png
+        # atomic_num_list = val_dataset.atomic_num_list
+        # valid_mols = check_validity(adj, x, atomic_num_list)['valid_mols']
+        # mol_dir = os.path.join(save_dir, 'generated_interp')
+        # os.makedirs(mol_dir, exist_ok=True)
+        # for ind, mol in enumerate(valid_mols):
+        #     save_mol_png(mol, os.path.join(mol_dir, '{}.png'.format(ind)))
 
 
 if __name__ == "__main__":
@@ -953,10 +1121,10 @@ if __name__ == "__main__":
 
     dataset_name, model_type, folder_name = args.folder.split('/')[-3:]
     # DATASET #
-    if dataset_name == 'mnist':
+    if model_type in IMAGE_MODELS:
         dataset = ImDataset(dataset_name=dataset_name)
         n_channel = dataset.n_channel
-    elif dataset_name in ['qm7', 'qm9']:
+    elif model_type in GRAPH_MODELS:
         dataset = GraphDataset(dataset_name=dataset_name)
         n_channel = -1
     else:
@@ -1181,3 +1349,4 @@ if __name__ == "__main__":
         create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
                           only_Z=isinstance(dataset, GraphDataset))
         evaluate_regression_preimage(model, val_dataset, device, save_dir)
+        evaluate_regression_preimage2(model, val_dataset, device, save_dir)

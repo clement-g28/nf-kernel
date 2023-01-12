@@ -20,6 +20,10 @@ from utils.seqflow_model import load_flow_model
 from utils.graphs.hyperparams import Hyperparameters
 from utils.graphs.model import MoFlow, rescale_adj
 
+GRAPH_MODELS = ['moflow']
+IMAGE_MODELS = ['cglow']
+SIMPLE_MODELS = ['seqflow', 'ffjord']
+
 
 # abstract NF class
 class NF(nn.Module):
@@ -589,8 +593,9 @@ class CMoFlow(NF):
 
         fig_filename = os.path.join(save_dir, 'figs', 'z_{:04d}.jpg'.format(itr))
         create_folder(os.path.dirname(fig_filename))
-        means_title = str(np.around(np_means, 2).tolist())
+        # means_title = str(np.around(np_means, 2).tolist())
         means_dist = str(torch.cdist(self.means, self.means).mean().detach().cpu().numpy().item())
-        plt.title(means_title + ', d=' + means_dist)
+        # plt.title(means_title + ', d=' + means_dist)
+        plt.title('d=' + means_dist)
         plt.savefig(fig_filename)
         plt.close()
