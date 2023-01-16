@@ -9,6 +9,7 @@ from torchvision import transforms, utils
 
 from utils.custom_glow import CGlow
 from utils.toy_models import load_seqflow_model, load_ffjord_model, load_moflow_model
+from utils.toy_models import IMAGE_MODELS, SIMPLE_MODELS, GRAPH_MODELS
 from utils.training import training_arguments, ffjord_arguments, moflow_arguments, AddGaussianNoise, calc_loss
 from utils.dataset import ImDataset, SimpleDataset, GraphDataset
 from utils.density import construct_covariance
@@ -240,9 +241,9 @@ if __name__ == "__main__":
 
     transform = transforms.Compose(transform)
 
-    if args.dataset == 'mnist':
+    if args.model in IMAGE_MODELS:
         dataset = ImDataset(dataset_name=args.dataset, transform=transform)
-    elif args.dataset in ['qm7', 'qm9']:
+    elif args.model in GRAPH_MODELS:
         dataset = GraphDataset(dataset_name=args.dataset, transform='permutation')
     else:
         dataset = SimpleDataset(dataset_name=args.dataset, transform=transform)
@@ -350,7 +351,7 @@ if __name__ == "__main__":
         partial(train_opti),
         resources_per_trial={"cpu": 4, "gpu": 0.25},
         config=config,
-        num_samples=2,
+        num_samples=100,
         scheduler=scheduler,
         progress_reporter=reporter,
         stop=nan_stopper)
