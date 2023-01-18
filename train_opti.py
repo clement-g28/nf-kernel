@@ -74,37 +74,37 @@ def get_val_dataset():
     return ray.get(val_dataset_id)
 
 
-def init_model(var, noise):
+def init_model(var, noise, dataset):
     fixed_eigval = None
     eigval_list = [var for i in range(dim_per_label)]
 
-    gaussian_params = initialize_regression_gaussian_params(get_train_dataset(), eigval_list,
+    gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list,
                                                             isotrope=args.isotrope_gaussian,
                                                             dim_per_label=dim_per_label,
                                                             fixed_eigval=fixed_eigval)
 
     folder_path = f'{args.dataset}/{args.model}/'
     if args.model == 'cglow':
-        n_channel = get_train_dataset().n_channel
+        n_channel = dataset.n_channel
         model_single = CGlow(n_channel, args.n_flow, args.n_block, affine=args.affine, conv_lu=not args.no_lu,
                              gaussian_params=gaussian_params, device=device, learn_mean=not args.fix_mean)
         folder_path += f'b{args.n_block}_f{args.n_flow}'
     elif args.model == 'seqflow':
-        model_single = load_seqflow_model(get_train_dataset().im_size, args.n_flow, gaussian_params=gaussian_params,
+        model_single = load_seqflow_model(dataset.im_size, args.n_flow, gaussian_params=gaussian_params,
                                           learn_mean=not args.fix_mean, reg_use_var=args.reg_use_var,
-                                          dataset=get_train_dataset())
+                                          dataset=dataset)
         folder_path += f'f{args.n_flow}'
     elif args.model == 'ffjord':
         args_ffjord, _ = ffjord_arguments().parse_known_args()
         args_ffjord.n_block = args.n_block
-        model_single = load_ffjord_model(args_ffjord, get_train_dataset().im_size, gaussian_params=gaussian_params,
-                                         learn_mean=not args.fix_mean, reg_use_var=args.reg_use_var, dataset=get_train_dataset())
+        model_single = load_ffjord_model(args_ffjord, dataset.im_size, gaussian_params=gaussian_params,
+                                         learn_mean=not args.fix_mean, reg_use_var=args.reg_use_var, dataset=dataset)
         folder_path += f'b{args.n_block}'
     elif args.model == 'moflow':
         args_moflow, _ = moflow_arguments().parse_known_args()
         args_moflow.noise_scale = noise
         model_single = load_moflow_model(args_moflow, gaussian_params=gaussian_params,
-                                         learn_mean=not args.fix_mean, reg_use_var=args.reg_use_var, dataset=get_train_dataset())
+                                         learn_mean=not args.fix_mean, reg_use_var=args.reg_use_var, dataset=dataset)
     else:
         assert False, 'unknown model type'
 
@@ -112,8 +112,11 @@ def init_model(var, noise):
 
 
 def train_opti(config):
+
+    train_dataset = get_train_dataset()
+    val_dataset = get_val_dataset()
     # Init model
-    model = init_model(config["var"], config["noise"])
+    model = init_model(config["var"], config["noise"], train_dataset)
 
     device = "cpu"
     if torch.cuda.is_available():
@@ -130,7 +133,7 @@ def train_opti(config):
     beta = config["beta"]
 
     # TEST with weighted sampler
-    train_loader = get_train_dataset().get_loader(args.batch_size, shuffle=True, drop_last=True, sampler=True)
+    train_loader = train_dataset.get_loader(args.batch_size, shuffle=True, drop_last=True, sampler=True)
     val_loader = get_val_dataset().get_loader(args.batch_size, shuffle=True, drop_last=True)
     loader_size = len(train_loader)
 
@@ -146,12 +149,12 @@ def train_opti(config):
             itr = epoch * loader_size + i
             input, label = data
 
-            input = get_train_dataset().format_data(input, args.n_bits, n_bins, device)
+            input = train_dataset.format_data(input, args.n_bits, n_bins, device)
             label = label.to(device)
 
             log_p, distloss, logdet, o = model(input, label)
 
-            nll_loss, log_p, log_det = get_train_dataset().format_loss(log_p, logdet, n_bins)
+            nll_loss, log_p, log_det = train_dataset.format_loss(log_p, logdet, n_bins)
             loss = nll_loss - beta * distloss
 
             loss = model.upstream_process(loss)
@@ -188,14 +191,14 @@ def train_opti(config):
             for data in val_loader:
                 input, label = data
 
-                input = get_val_dataset().format_data(input, args.n_bits, n_bins, device)
+                input = val_dataset.format_data(input, args.n_bits, n_bins, device)
                 label = label.to(device)
 
                 log_p, distloss, logdet, z = model(input, label)
 
                 logdet = logdet.mean()
 
-                nll_loss, log_p, log_det = get_val_dataset().format_loss(log_p, logdet, n_bins)
+                nll_loss, log_p, log_det = val_dataset.format_loss(log_p, logdet, n_bins)
                 loss = nll_loss - beta * distloss
                 val_loss += loss.cpu().numpy()
                 val_steps += 1
