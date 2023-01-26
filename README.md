@@ -11,6 +11,9 @@ The implementation of the different models are based on existing codes:
 ## Training
 
 ### Toy datasets
+
+#### Classifications & Denoising
+
 Single Moon:
 ```
 python train.py --dataset single_moon --model seqflow --batch_size 100 --lr 0.01 --use_tb --validation 0.1 --set_eigval_manually [50,0.002] --with_noise .1 --fix_mean
@@ -39,6 +42,40 @@ python train.py --dataset bcancer --model seqflow --batch 50 --lr 0.005 --use_tb
 ```
 python train.py --dataset bcancer --model ffjord --n_block 1 --dims 64-64-64 --layer_type concatsquash --batch 50 --lr 0.005 --use_tb --validation 0.1 --uniform_eigval --mean_of_eigval 10 --with_noise .2
 ```
+
+#### Regression
+Swiss roll:
+```
+python train.py --dataset swissroll --model seqflow --batch_size 20 --lr 0.01 --use_tb --validation 0.1 --uniform_eigval --isotrope_gaussian --beta 50 --mean_of_eigval 10 --with_noise 0.1 
+```
+```
+python train.py --dataset swissroll --model ffjord --n_block 1 --dims 64-64-64 --layer_type concatsquash --batch_size 20 --lr 0.01 --use_tb --validation 0.1 --uniform_eigval --isotrope_gaussian --beta 50 --mean_of_eigval 10 --with_noise 0.1 
+```
+
+Diabetes:
+```
+python train.py --dataset diabetes --model seqflow --batch_size 20 --lr 0.01 --use_tb --validation 0.1 --uniform_eigval --isotrope_gaussian --beta 50 --mean_of_eigval 0.1
+```
+```
+python train.py --dataset diabetes --model ffjord --n_block 1 --dims 64-64-64 --layer_type concatsquash --batch_size 20 --lr 0.01 --use_tb --validation 0.1 --uniform_eigval --isotrope_gaussian --beta 50 --mean_of_eigval 0.1
+```
+
+QSAR aquatic toxicity:
+```
+python train.py --dataset aquatoxi --model seqflow --batch_size 20 --lr 0.001 --use_tb --validation 0.1 --uniform_eigval --isotrope_gaussian --beta 200 --mean_of_eigval 0.01
+```
+```
+python train.py --dataset aquatoxi --model ffjord --n_block 1 --dims 64-64-64 --layer_type concatsquash --batch_size 20 --lr 0.001 --use_tb --validation 0.1 --uniform_eigval --isotrope_gaussian --beta 50 --mean_of_eigval 0.1
+```
+
+QSAR fish toxicity:
+```
+python train.py --dataset fishtoxi --model seqflow --batch_size 20 --lr 0.001 --use_tb --validation 0.1 --uniform_eigval --isotrope_gaussian --beta 50 --mean_of_eigval 0.1
+```
+```
+python train.py --dataset fishtoxi --model ffjord --n_block 1 --dims 64-64-64 --layer_type concatsquash --batch_size 20 --lr 0.001 --use_tb --validation 0.1 --uniform_eigval --isotrope_gaussian --beta 50 --mean_of_eigval 0.1
+```
+
 ### Image datasets
 MNIST:
 ```
