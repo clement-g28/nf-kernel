@@ -171,11 +171,31 @@ class BaseDataset(Dataset):
 
             else:
                 val_idx = random.sample(range(0, self.X.shape[0]), k=math.floor(self.X.shape[0] * validation))
-            val_dataset.X = self.X[val_idx]
+
+            if isinstance(self.X, list):  # Graphs
+                train_idx = [idx for idx in range(len(self.X)) if idx not in val_idx]
+                x, adj = list(zip(*self.X))
+                x = np.array(x)
+                adj = np.array(adj)
+                val_x = x[val_idx]
+                val_adj = adj[val_idx]
+                val_X = []
+                for i in range(len(val_idx)):
+                    val_X.append((val_x[i], val_adj[i]))
+                val_dataset.X = val_X
+                train_x = x[train_idx]
+                train_adj = adj[train_idx]
+                train_X = []
+                for i in range(len(train_idx)):
+                    train_X.append((train_x[i], train_adj[i]))
+                train_dataset.X = train_X
+
+            else:
+                val_dataset.X = self.X[val_idx]
+                train_idx = [idx for idx in range(self.X.shape[0]) if idx not in val_idx]
+                train_dataset.X = self.X[train_idx]
             val_dataset.true_labels = self.true_labels[val_idx]
 
-            train_idx = [idx for idx in range(self.X.shape[0]) if idx not in val_idx]
-            train_dataset.X = self.X[train_idx]
             train_dataset.true_labels = self.true_labels[train_idx]
 
             if self.idx is None:
@@ -186,6 +206,41 @@ class BaseDataset(Dataset):
                 train_dataset.idx = self.idx[train_idx]
 
         return train_dataset, val_dataset
+
+    def reduce_regression_dataset(self, ratio, stratified=True):
+        if stratified:
+            class_sample_count = np.histogram(self.true_labels)[0]
+            idxs = np.argsort(self.true_labels)
+
+            done = 0
+            n_idx = []
+            for i in range(len(class_sample_count)):
+                nb_idx = math.floor(class_sample_count[i] * ratio)
+                if nb_idx == 0 and class_sample_count[i] > 1:
+                    nb_idx = 1
+                n_idx += random.sample(list(idxs[done:done + class_sample_count[i]]), k=nb_idx)
+                done += class_sample_count[i]
+        else:
+            n_idx = random.sample(range(0, self.X.shape[0]), k=math.floor(self.X.shape[0] * ratio))
+
+        if isinstance(self.X, list):  # Graphs
+            x, adj = list(zip(*self.X))
+            x = np.array(x)
+            adj = np.array(adj)
+            n_x = x[n_idx]
+            n_adj = adj[n_idx]
+            n_X = []
+            for i in range(len(n_idx)):
+                n_X.append((n_x[i], n_adj[i]))
+            self.X = n_X
+        else:
+            self.X = self.X[n_idx]
+        self.true_labels = self.true_labels[n_idx]
+
+        if self.idx is None:
+            self.idx = n_idx
+        else:
+            self.idx = self.idx[n_idx]
 
     def duplicate(self):
         return copy.deepcopy(self)

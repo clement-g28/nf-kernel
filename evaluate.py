@@ -636,7 +636,7 @@ def evaluate_distances(model, train_dataset, val_dataset, gaussian_params, z_sha
 def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fithyperparam=True):
     # Compute results with our approach if not None
     if model is not None:
-        batch_size = 20
+        batch_size = 200
         loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
 
         start = time.time()
@@ -745,8 +745,8 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
     end = time.time()
     print(f"time to fit linear ridge : {str(end - start)}")
 
-    # krr_types = ['linear', 'poly', 'rbf', 'sigmoid', 'cosine']
     krr_types = ['rbf', 'poly', 'sigmoid']
+    # krr_types = ['rbf']
     krr_params = [
         {'Ridge__kernel': ['rbf'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__alpha': np.logspace(-5, 2, 11)},
         {'Ridge__kernel': ['poly'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__degree': np.linspace(1, 4, 4),
@@ -810,6 +810,7 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
         edge_to_node = True
         normalize = False
         graph_kernel_names = ['wl', 'sp', 'hadcode']
+        # graph_kernel_names = ['wl', 'sp']
         graph_kernels = []
         graph_krr_params = []
         for graph_kernel in graph_kernel_names:
@@ -886,7 +887,7 @@ def create_figures_XZ(model, train_dataset, save_path, device, std_noise=0.1, on
     if not only_Z:
         X = np.concatenate(X, axis=0).reshape(len(train_dataset), -1)
         save_fig(X, tlabels, size=size_pt_fig, save_path=f'{save_path}/X_space')
-    else :
+    else:
         X = None
 
     Z = np.concatenate(Z, axis=0).reshape(len(train_dataset), -1)
@@ -997,8 +998,7 @@ def evaluate_regression_preimage2(model, val_dataset, device, save_dir):
             save_mol_png(mol, os.path.join(mol_dir, '{}.png'.format(ind)))
 
 
-def evaluate_interpolations(model, val_dataset, device, save_dir, Z=None):
-
+def evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=20, n_interpolation=20, Z=None):
     # si Z est donné, PCA sur 2 dimensions
     if Z is not None:
         pca = PCA(n_components=2)
@@ -1007,17 +1007,37 @@ def evaluate_interpolations(model, val_dataset, device, save_dir, Z=None):
 
         create_folder(f'{save_dir}/generated_interp')
 
-    batch_size = 2
+    def get_data(dataset, idx):
+        sample = dataset.X[idx]
+        y = dataset.true_labels[idx]
+        if dataset.transform:
+            sample = dataset.transform(*sample)
+        return sample, y
 
-    loader = val_dataset.get_loader(batch_size, shuffle=True, drop_last=True, pin_memory=False)
+    # batch_size = 2
+    # loader = val_dataset.get_loader(batch_size, shuffle=True, drop_last=True, pin_memory=False)
 
+    y_min = model.label_min
+    y_max = model.label_max
+    y_margin = (y_max - y_min) / 3
     all_res = []
-    n_interpolation = 20
     with torch.no_grad():
-        for j, data in enumerate(loader):
-            inp, labels = data
+        for j in range(n_sample):
+            i_pt0 = np.random.randint(0, len(val_dataset))
+            i_pt1 = i_pt0
+            while abs(val_dataset.true_labels[i_pt1] - val_dataset.true_labels[i_pt0]) < y_margin:
+                i_pt1 = np.random.randint(0, len(val_dataset))
+            pt0, y0 = get_data(val_dataset, i_pt0)
+            pt1, y1 = get_data(val_dataset, i_pt1)
+            inp = []
+            for i in range(len(pt0)):
+                inp.append(torch.from_numpy(
+                    np.concatenate([np.expand_dims(pt0[i], axis=0), np.expand_dims(pt1[i], axis=0)], axis=0)))
             inp = val_dataset.format_data(inp, None, None, device)
-            labels = labels.to(device)
+            labels = torch.from_numpy(
+                np.concatenate([np.expand_dims(y0, axis=0), np.expand_dims(y1, axis=0)], axis=0)).to(
+                device)
+
             log_p, distloss, logdet, out = model(inp, labels)
 
             d = out[1] - out[0]
@@ -1032,8 +1052,30 @@ def evaluate_interpolations(model, val_dataset, device, save_dir, Z=None):
                 pca_interp = pca.transform(z_array.detach().cpu().numpy())
                 data = np.concatenate((pca_Z, pca_interp), axis=0)
                 lab = np.zeros(data.shape[0])
-                lab[-(batch_size+n_interpolation):] = 1
+                lab[-(2 + n_interpolation):] = 1
                 save_fig(data, lab, size=5, save_path=f'{save_dir}/generated_interp/{str(j).zfill(4)}_res_pca')
+
+    # with torch.no_grad():
+    #     for j, data in enumerate(loader):
+    #         inp, labels = data
+    #         inp = val_dataset.format_data(inp, None, None, device)
+    #         labels = labels.to(device)
+    #         log_p, distloss, logdet, out = model(inp, labels)
+    #
+    #         d = out[1] - out[0]
+    #         z_list = [(out[0] + i * 1.0 / (n_interpolation + 1) * d).unsqueeze(0) for i in range(n_interpolation + 2)]
+    #
+    #         z_array = torch.cat(z_list, dim=0)
+    #
+    #         res = model.reverse(z_array)
+    #         all_res.append(res.detach().cpu().numpy())
+    #
+    #         if Z is not None:
+    #             pca_interp = pca.transform(z_array.detach().cpu().numpy())
+    #             data = np.concatenate((pca_Z, pca_interp), axis=0)
+    #             lab = np.zeros(data.shape[0])
+    #             lab[-(batch_size + n_interpolation):] = 1
+    #             save_fig(data, lab, size=5, save_path=f'{save_dir}/generated_interp/{str(j).zfill(4)}_res_pca')
 
     all_res = np.concatenate(all_res, axis=0)
 
@@ -1053,9 +1095,9 @@ def evaluate_interpolations(model, val_dataset, device, save_dir, Z=None):
         from ordered_set import OrderedSet
 
         # Interps
-        for n in range(int(all_res.shape[0] / (n_interpolation+batch_size))):
-            xm = x[n * (n_interpolation+batch_size):(n + 1) * (n_interpolation+batch_size)]
-            adjm = adj[n * (n_interpolation+batch_size):(n + 1) * (n_interpolation+batch_size)]
+        for n in range(int(all_res.shape[0] / (n_interpolation + 2))):
+            xm = x[n * (n_interpolation + 2):(n + 1) * (n_interpolation + 2)]
+            adjm = adj[n * (n_interpolation + 2):(n + 1) * (n_interpolation + 2)]
 
             interpolation_mols = [valid_mol(construct_mol(x_elem, adj_elem, atomic_num_list))
                                   for x_elem, adj_elem in zip(xm, adjm)]
@@ -1089,12 +1131,14 @@ def evaluate_interpolations(model, val_dataset, device, save_dir, Z=None):
             # if display_property == 'plogp':
             legends_with_seed = [smile + ', logP:' + str(round(Descriptors.MolLogP(mol), 2)) for mol, smile in
                                  zip(with_seeds, legends_with_seed)]
-            img = Draw.MolsToGridImage(with_seeds, legends=legends_with_seed, molsPerRow=int((n_interpolation+batch_size) / 4),
+            img = Draw.MolsToGridImage(with_seeds, legends=legends_with_seed,
+                                       molsPerRow=int((n_interpolation + 2) / 4),
                                        subImgSize=psize)
 
             if not os.path.exists(f'{save_dir}/generated_interp'):
                 os.makedirs(f'{save_dir}/generated_interp')
-            img.save(f'{save_dir}/generated_interp/{str(n).zfill(4)}_res_grid.png')
+            img.save(
+                f'{save_dir}/generated_interp/{str(n).zfill(4)}_res_grid_valid{len(valid_mols)}_{len(interpolation_mols)}.png')
 
         # from utils.graphs.mol_utils import check_validity, save_mol_png
         # atomic_num_list = val_dataset.atomic_num_list
@@ -1227,6 +1271,10 @@ if __name__ == "__main__":
             # _, train_dataset = train_dataset.split_dataset(0.1, stratified=True)
         # val_dataset = ImDataset(dataset_name=dataset_name, test=True)
 
+    # reduce train dataset size (fitting too long)
+    # print('Train dataset reduced in order to accelerate. (stratified)')
+    # train_dataset.reduce_regression_dataset(0.1, stratified=True)
+
     n_dim = dataset.get_n_dim()
 
     if not dim_per_label:
@@ -1346,7 +1394,8 @@ if __name__ == "__main__":
     elif eval_type == 'regression':
         assert dataset.is_regression_dataset(), 'the dataset is not made for regression purposes'
         evaluate_regression(model, train_dataset, val_dataset, save_dir, device)
-        create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
-                          only_Z=isinstance(dataset, GraphDataset))
+        _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
+                                 only_Z=isinstance(dataset, GraphDataset))
         evaluate_regression_preimage(model, val_dataset, device, save_dir)
         evaluate_regression_preimage2(model, val_dataset, device, save_dir)
+        evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z)

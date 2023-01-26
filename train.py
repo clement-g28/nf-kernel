@@ -328,7 +328,7 @@ if __name__ == "__main__":
     folder_path += f'_nfkernel{lmean_str}{isotrope_str}{eigval_str}{noise_str}' \
                    f'{redclass_str}{redlabel_str}_dimperlab{dim_per_label}{reg_use_var_str}'
 
-    folder_path += '_test3'
+    folder_path += '_test4'
 
     create_folder(f'./checkpoint/{folder_path}')
 

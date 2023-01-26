@@ -25,6 +25,7 @@ from utils.training import ffjord_arguments, moflow_arguments
 from utils.toy_models import load_seqflow_model, load_ffjord_model, load_moflow_model
 from utils.toy_models import IMAGE_MODELS, SIMPLE_MODELS, GRAPH_MODELS
 
+
 def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_dataset, save_dir, device, with_train=False,
                         reg_use_var=False, cus_load_func=None):
     zridge_scores = []
@@ -39,8 +40,13 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
 
     # save_fig(train_dataset.X, train_dataset.true_labels, size=10, save_path=f'{save_dir}/X_space')
     # save_fig(val_dataset.X, val_dataset.true_labels, size=10, save_path=f'{save_dir}/X_space_val')
-    # Get z_val for zpca
+
+    # TEST
+    start_from = None
+    # start_from = 289
     for i, model_loading_params in enumerate(t_model_params):
+        if start_from is not None and i < start_from:
+            continue
         if model_loading_params['model'] == 'cglow':
             # Load model
             model_single = CGlow(model_loading_params['n_channel'], model_loading_params['n_flow'],
@@ -65,16 +71,20 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
                                              dataset=full_dataset)
         else:
             assert False, 'unknown model type!'
-        if not cus_load_func:
-            model_single = WrappedModel(model_single)
-            model_single.load_state_dict(torch.load(model_loading_params['loading_path'], map_location=device))
-            model = model_single.module
-        else:
-            model = cus_load_func(model_single, model_loading_params['loading_path'])
+        try:
+            if not cus_load_func:
+                model_single = WrappedModel(model_single)
+                model_single.load_state_dict(torch.load(model_loading_params['loading_path'], map_location=device))
+                model = model_single.module
+            else:
+                model = cus_load_func(model_single, model_loading_params['loading_path'])
+        except:
+            print(f'Exception while loading model {i}.')
+            continue
         model = model.to(device)
         model.eval()
 
-        batch_size = 20
+        batch_size = 200
         loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
 
         Z = []
@@ -125,6 +135,26 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
         zridge_score = (np.power((y_pred - elabels), 2)).mean()
         zridge_scores.append(zridge_score)
 
+        # Analytic predictions:
+        # device_p = device
+        # device_p = 'cpu'
+        # Zt = torch.from_numpy(Z).to(device_p)
+        # val_inZt = torch.from_numpy(val_inZ).to(device_p)
+        # tlabelst = torch.from_numpy(tlabels).float().to(device_p)
+        # norm_Z = Zt / torch.sum(Zt, dim=1, keepdim=True)
+        # norm_val_inZ = val_inZt / torch.sum(val_inZt, dim=1, keepdim=True)
+        # alphas = torch.matmul(
+        #     torch.inverse(torch.matmul(norm_Z, norm_Z.transpose(1, 0)) + 0.01 * torch.eye(Zt.shape[0]).to(device_p)),
+        #     tlabelst)
+        # pred = torch.matmul(torch.sum(alphas.unsqueeze(1) * norm_Z, dim=0),
+        #                     norm_val_inZ.transpose(1, 0)).detach().cpu().numpy()
+        # test analytic phi
+        # A = torch.pow(norm_Z, 2) + 0.1
+        # left_inv = torch.matmul(torch.inverse(torch.matmul(A.transpose(1, 0), A)), A.transpose(1, 0))
+        # weights = left_inv @ (2 * tlabelst.unsqueeze(1) * (norm_Z @ torch.ones((norm_Z.shape[1], 1))))
+        # pred = torch.matmul(norm_val_inZ, weights).detach().cpu().numpy()
+        # score = (np.power((pred - elabels), 2)).mean()
+
         # TEST #
         # if i == 47:
         #     numpy.save(f'{save_dir}/test_save_Z', Z)
@@ -149,6 +179,7 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
         # pred = pred.mean(axis=1)
         pred = dot_val.squeeze() * (model.label_max - model.label_min) + model.label_min
         projection_score = np.power((pred - elabels), 2).mean()
+        # score_str = f'Our approach ({i}) : {zridge_score}, (train score : {zridge_score_train}), (projection) : {projection_score}, (analytic pred): {score}'
         score_str = f'Our approach ({i}) : {zridge_score}, (train score : {zridge_score_train}), (projection) : {projection_score}'
         print(score_str)
         # if zridge_score >= best_score:
@@ -426,6 +457,11 @@ if __name__ == '__main__':
         else:
             train_dataset, val_dataset = dataset.split_dataset(0)
         # val_dataset = ImDataset(dataset_name=dataset_name, test=True)
+
+    # reduce train dataset size (fitting too long)
+    # print('Train dataset reduced in order to accelerate. (stratified)')
+    # train_dataset.reduce_regression_dataset(0.2, stratified=True)
+    # val_dataset.reduce_regression_dataset(0.5, stratified=True)
 
     n_dim = dataset.get_n_dim()
 
