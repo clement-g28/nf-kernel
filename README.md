@@ -1,4 +1,4 @@
-# nf-kernel
+# Machine Learning/Regression without the pre-image problem thanks to normalizing flow
 
 ## Model codes
 
