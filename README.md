@@ -1,5 +1,7 @@
 # Machine learning without the pre-image problem thanks to normalizing flows
 
+Codes for regression paper (Regression learning without the pre-image problem thanks to normalizing flows) is available on the branch 'regression'.
+
 ## Model codes
 
 The implementation of the different models are based on existing codes:
