@@ -1,4 +1,4 @@
-# nf-kernel
+# Machine Learning/Regression without the pre-image problem thanks to normalizing flow
 
 ## Model codes
 
@@ -10,7 +10,10 @@ The implementation of the different models are based on existing codes:
 
 ## Training
 
-### Toy datasets
+### Classifications & Denoising
+
+#### Toy datasets
+
 Single Moon:
 ```
 python train.py --dataset single_moon --model seqflow --batch_size 100 --lr 0.01 --use_tb --validation 0.1 --set_eigval_manually [50,0.002] --with_noise .1 --fix_mean
@@ -39,10 +42,44 @@ python train.py --dataset bcancer --model seqflow --batch 50 --lr 0.005 --use_tb
 ```
 python train.py --dataset bcancer --model ffjord --n_block 1 --dims 64-64-64 --layer_type concatsquash --batch 50 --lr 0.005 --use_tb --validation 0.1 --uniform_eigval --mean_of_eigval 10 --with_noise .2
 ```
-### Image datasets
+
+#### Image datasets
 MNIST:
 ```
 python train.py --dataset mnist --model cglow --batch 16 --use_tb --validation 0.01 --uniform_eigval --mean_of_eigval 10 --with_noise .5
+```
+
+### Regression
+Swiss roll:
+```
+python train.py --dataset swissroll --model seqflow --batch_size 20 --lr 0.01 --use_tb --validation 0.1 --uniform_eigval --isotrope_gaussian --beta 50 --mean_of_eigval 10 --with_noise 0.1 
+```
+```
+python train.py --dataset swissroll --model ffjord --n_block 1 --dims 64-64-64 --layer_type concatsquash --batch_size 20 --lr 0.01 --use_tb --validation 0.1 --uniform_eigval --isotrope_gaussian --beta 50 --mean_of_eigval 10 --with_noise 0.1 
+```
+
+Diabetes:
+```
+python train.py --dataset diabetes --model seqflow --batch_size 20 --lr 0.01 --use_tb --validation 0.1 --uniform_eigval --isotrope_gaussian --beta 50 --mean_of_eigval 0.1
+```
+```
+python train.py --dataset diabetes --model ffjord --n_block 1 --dims 64-64-64 --layer_type concatsquash --batch_size 20 --lr 0.01 --use_tb --validation 0.1 --uniform_eigval --isotrope_gaussian --beta 50 --mean_of_eigval 0.1
+```
+
+QSAR aquatic toxicity:
+```
+python train.py --dataset aquatoxi --model seqflow --batch_size 20 --lr 0.001 --use_tb --validation 0.1 --uniform_eigval --isotrope_gaussian --beta 200 --mean_of_eigval 0.01
+```
+```
+python train.py --dataset aquatoxi --model ffjord --n_block 1 --dims 64-64-64 --layer_type concatsquash --batch_size 20 --lr 0.001 --use_tb --validation 0.1 --uniform_eigval --isotrope_gaussian --beta 50 --mean_of_eigval 0.1
+```
+
+QSAR fish toxicity:
+```
+python train.py --dataset fishtoxi --model seqflow --batch_size 20 --lr 0.001 --use_tb --validation 0.1 --uniform_eigval --isotrope_gaussian --beta 50 --mean_of_eigval 0.1
+```
+```
+python train.py --dataset fishtoxi --model ffjord --n_block 1 --dims 64-64-64 --layer_type concatsquash --batch_size 20 --lr 0.001 --use_tb --validation 0.1 --uniform_eigval --isotrope_gaussian --beta 50 --mean_of_eigval 0.1
 ```
 
 ## Find Models
@@ -68,6 +105,17 @@ For example:
 python get_best_projection.py --folder ./checkpoint/double_moon/ffjord/b1_nfkernel_lmean1_manualeigval50-0.002_noise01_dimperlab1
 ```
 
+### Regression
+
+Once models have been trained, in order to choose the best model for regression, the following command has to be used by replacing {dataset},{model_type} and {model_name} by your parameters :
+```
+python get_best_regression.py --folder ./checkpoint/{dataset}/{model_type}/{model_name}
+```
+For example:
+```
+python get_best_regression.py --folder ./checkpoint/swissroll/ffjord/b1_nfkernel_lmean50.0_isotrope_eigvaluniform10_noise01_dimperlab2
+```
+
 ## Evaluate Models
 
 ### Classification
@@ -83,4 +131,9 @@ The evaluation on MNIST for projection can be done on the best classification mo
 ### MNIST Generation
 ```
 python evaluate.py --folder ./checkpoint/mnist/cglow/{model_name} --eval_type generation --model_to_use classification
+```
+
+### Regression
+```
+python evaluate.py --folder ./checkpoint/{dataset}/{model_type}/{model_name} --eval_type regression --model_to_use regression
 ```
