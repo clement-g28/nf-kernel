@@ -939,7 +939,7 @@ def evaluate_regression_preimage(model, val_dataset, device, save_dir):
         from utils.graphs.mol_utils import check_validity, save_mol_png
         atomic_num_list = val_dataset.atomic_num_list
         valid_mols = check_validity(adj, x, atomic_num_list)['valid_mols']
-        mol_dir = os.path.join(save_dir, 'generated')
+        mol_dir = os.path.join(save_dir, 'generated_means')
         os.makedirs(mol_dir, exist_ok=True)
         for ind, mol in enumerate(valid_mols):
             save_mol_png(mol, os.path.join(mol_dir, '{}.png'.format(ind)))
@@ -992,7 +992,7 @@ def evaluate_regression_preimage2(model, val_dataset, device, save_dir):
         from utils.graphs.mol_utils import check_validity, save_mol_png
         atomic_num_list = val_dataset.atomic_num_list
         valid_mols = check_validity(adj, x, atomic_num_list)['valid_mols']
-        mol_dir = os.path.join(save_dir, 'generated')
+        mol_dir = os.path.join(save_dir, 'generated_samples')
         os.makedirs(mol_dir, exist_ok=True)
         for ind, mol in enumerate(valid_mols):
             save_mol_png(mol, os.path.join(mol_dir, '{}.png'.format(ind)))
@@ -1129,8 +1129,8 @@ def evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=20, n
             with_seeds = [mol0] + valid_mols_unique + [mol1]
             legends_with_seed = [smile0] + valid_mols_smiles_unique + [smile1]
             # if display_property == 'plogp':
-            legends_with_seed = [smile + ', logP:' + str(round(Descriptors.MolLogP(mol), 2)) for mol, smile in
-                                 zip(with_seeds, legends_with_seed)]
+            # legends_with_seed = [smile + ', logP:' + str(round(Descriptors.MolLogP(mol), 2)) for mol, smile in
+            #                      zip(with_seeds, legends_with_seed)]
             img = Draw.MolsToGridImage(with_seeds, legends=legends_with_seed,
                                        molsPerRow=int((n_interpolation + 2) / 4),
                                        subImgSize=psize)

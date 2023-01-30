@@ -980,19 +980,32 @@ class GraphDataset(BaseDataset):
                 n_atoms = []
                 nsmiles = []
                 nsmiles_test = []
+                n_labels = []
+                n_y_test = []
+                # filter_n_atom = 250
                 filter_n_atom = 22
-                for smile in smiles:
+                for i, smile in enumerate(smiles):
                     mol = Chem.MolFromSmiles(smile)
                     if mol.GetNumAtoms() <= filter_n_atom:
                         mols.append(mol)
                         n_atoms.append(mol.GetNumAtoms())
                         nsmiles.append(Chem.MolToSmiles(mol))
-                for smile in smiles_test:
+                        n_labels.append(labels[i])
+                for i, smile in enumerate(smiles_test):
                     mol = Chem.MolFromSmiles(smile)
                     if mol.GetNumAtoms() <= filter_n_atom:
                         mols_test.append(mol)
                         n_atoms.append(mol.GetNumAtoms())
                         nsmiles_test.append(Chem.MolToSmiles(mol))
+                        n_y_test.append(y_test[i])
+
+                # Histogram of n_atoms
+                # import matplotlib.pyplot as plt
+                #
+                # plt.hist(n_atoms, bins=range(0, max(n_atoms)))
+                # plt.savefig('hist.png')
+                # plt.show()
+                # plt.close()
 
                 label_map = {}
                 for mol in mols + mols_test:
@@ -1001,7 +1014,7 @@ class GraphDataset(BaseDataset):
                         if symbol not in label_map:
                             label_map[symbol] = len(label_map) + 1
 
-                results, label_map = process_mols(name, (mols, labels), (mols_test, y_test), max(n_atoms), label_map,
+                results, label_map = process_mols(name, (mols, n_labels), (mols_test, n_y_test), max(n_atoms), label_map,
                                                   dupe_filter=False, categorical_values=False,
                                                   return_smiles=False)
 
