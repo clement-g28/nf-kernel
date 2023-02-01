@@ -843,7 +843,7 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
             graph_krr_mse_score = np.power(graph_krr.predict(K_val) - labels_val, 2).mean()
 
             print(f'GraphKernelRidge ({graph_kernels[i][2]}) R2: {graph_krr_r2_score}, '
-                  f'MSE: {graph_krr_mae_score}, MAE: {graph_krr_mse_score}')
+                  f'MSE: {graph_krr_mse_score}, MAE: {graph_krr_mae_score}')
 
     print('Predictions scores :')
     print(f'Ridge R2: {ridge_r2_score}, MSE: {ridge_mse_score}, MAE: {ridge_mae_score}')
@@ -1399,3 +1399,4 @@ if __name__ == "__main__":
         evaluate_regression_preimage(model, val_dataset, device, save_dir)
         evaluate_regression_preimage2(model, val_dataset, device, save_dir)
         evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z)
+        # TODO openbenchmark, random permutation on graph for regression, compare with same y values from dset

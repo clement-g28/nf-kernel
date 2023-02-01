@@ -13,7 +13,10 @@ from rdkit.Chem.rdchem import BondType
 
 def get_atoms_adj_from_mol(mol, max_num_nodes, label_map, categorical_adj=False, no_edge_type=False):
     # Remove Aromatic bond marking
-    Chem.Kekulize(mol)
+    try:
+        Chem.Kekulize(mol, clearAromaticFlags=True)
+    except:
+        mol = Chem.MolFromSmiles(Chem.MolToSmiles(Chem.RemoveHs(mol)))
 
     if categorical_adj:
         adj = np.zeros(shape=(max_num_nodes, max_num_nodes), dtype=np.float32)
@@ -122,16 +125,34 @@ def chunks(lst, n):
         yield lst[i:i + int(len(lst) / n)]
 
 
+def filter_datasets_with_n_atoms(datasets, filter_n_atom):
+    label_map = {}
+    res_mols = [[], [], []]
+    res_ys = [[], [], []]
+    for k, (dset_mols, ys) in enumerate(datasets):
+        for i, mol in enumerate(dset_mols):
+            if mol.GetNumAtoms() <= filter_n_atom:
+                res_mols[k].append(mol)
+                res_ys[k].append(ys[i])
+                for atom in mol.GetAtoms():
+                    if atom.GetSymbol() not in label_map:
+                        label_map[atom.GetSymbol()] = len(label_map)
+    return res_mols, res_ys, label_map
+
+
 def get_molecular_dataset_mp(name='qm7', data_path=None, categorical_values=False, return_smiles=False):
     if 'qm7' in name:
-        tasks, (train_dataset, valid_dataset, test_dataset), transformers = dc.molnet.load_qm7_from_mat(
-            featurizer='Raw', data_dir=data_path, save_dir=data_path)
+        tasks, (train_dataset, valid_dataset, test_dataset), transformers = dc.molnet.load_qm7(
+            featurizer='Raw', data_dir=data_path, save_dir=data_path)  # Different split (with from_mat)
         dupe_filter = True
         label_map = {'O': 1, 'N': 2, 'C': 3, 'S': 4}
         max_num_nodes = 7
         train_y = train_dataset.y
         val_y = valid_dataset.y
         test_y = test_dataset.y
+        train_mols = train_dataset.X
+        val_mols = valid_dataset.X
+        test_mols = test_dataset.X
     elif 'qm9' in name:
         tasks, (train_dataset, valid_dataset, test_dataset), transformers = dc.molnet.load_qm9(featurizer='Raw',
                                                                                                data_dir=data_path,
@@ -144,12 +165,68 @@ def get_molecular_dataset_mp(name='qm7', data_path=None, categorical_values=Fals
         train_y = train_dataset.y[:, 8].squeeze()
         val_y = valid_dataset.y[:, 8].squeeze()
         test_y = test_dataset.y[:, 8].squeeze()
+        train_mols = train_dataset.X
+        val_mols = valid_dataset.X
+        test_mols = test_dataset.X
+    elif 'lipo' in name:
+        tasks, (train_dataset, valid_dataset, test_dataset), transformers = dc.molnet.load_lipo(featurizer='Raw',
+                                                                                                data_dir=data_path,
+                                                                                                save_dir=data_path)
+        dupe_filter = True
+        label_map = {'C': 1, 'O': 2, 'N': 3, 'F': 4}
+        max_num_nodes = 9
+
+        train_y = train_dataset.y
+        val_y = valid_dataset.y
+        test_y = test_dataset.y
+        train_mols = train_dataset.X
+        val_mols = valid_dataset.X
+        test_mols = test_dataset.X
+    elif 'freesolv' in name:
+        tasks, (train_dataset, valid_dataset, test_dataset), transformers = dc.molnet.load_freesolv(featurizer='Raw',
+                                                                                                    data_dir=data_path,
+                                                                                                    save_dir=data_path)
+        dupe_filter = True
+
+        train_y = train_dataset.y
+        val_y = valid_dataset.y
+        test_y = test_dataset.y
+        train_mols = train_dataset.X
+        val_mols = valid_dataset.X
+        test_mols = test_dataset.X
+
+        filter_n_atom = 22
+        res_mols, res_ys, label_map = filter_datasets_with_n_atoms(
+            datasets=[(train_mols, train_y), (test_mols, test_y), (val_mols, val_y)],
+            filter_n_atom=filter_n_atom)
+        max_num_nodes = filter_n_atom
+
+        train_mols, test_mols, val_mols = res_mols
+        train_y, test_y, val_y = res_ys
+    elif 'esol' in name:
+        tasks, (train_dataset, valid_dataset, test_dataset), transformers = dc.molnet.load_delaney(featurizer='Raw',
+                                                                                                   data_dir=data_path,
+                                                                                                   save_dir=data_path)
+        dupe_filter = True
+
+        train_y = train_dataset.y
+        val_y = valid_dataset.y
+        test_y = test_dataset.y
+        train_mols = train_dataset.X
+        val_mols = valid_dataset.X
+        test_mols = test_dataset.X
+
+        filter_n_atom = 22
+        res_mols, res_ys, label_map = filter_datasets_with_n_atoms(
+            datasets=[(train_mols, train_y), (test_mols, test_y), (val_mols, val_y)],
+            filter_n_atom=filter_n_atom)
+        max_num_nodes = filter_n_atom
+
+        train_mols, test_mols, val_mols = res_mols
+        train_y, test_y, val_y = res_ys
     else:
         assert False, 'unknown dataset'
 
-    train_mols = train_dataset.X
-    val_mols = valid_dataset.X
-    test_mols = test_dataset.X
     # all_mol = np.concatenate((train_dataset.X, valid_dataset.X, test_dataset.X), axis=0)
     # all_y = np.concatenate((train_dataset.y, valid_dataset.y, test_dataset.y), axis=0).astype(np.float)
 

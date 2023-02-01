@@ -21,7 +21,7 @@ from utils import visualize_flow
 
 DATASETS = ['single_moon', 'double_moon', 'iris', 'bcancer', 'mnist']
 REGRESSION_DATASETS = ['swissroll', 'diabetes', 'waterquality', 'aquatoxi', 'fishtoxi', 'trafficflow']
-GRAPH_DATASETS = ['qm7', 'qm9']
+GRAPH_DATASETS = ['qm7', 'qm9', 'freesolv', 'esol', 'lipo']
 
 
 # abstract base kernel dataset class
@@ -760,26 +760,39 @@ class GraphDataset(BaseDataset):
         return n_x + n_adj
 
     def get_dataset_params(self):
+        atom_type_list = [key for key, val in self.label_map.items()]
         if self.dataset_name == 'qm7':
-            atom_type_list = ['C', 'N', 'S', 'O']
+            # atom_type_list = ['C', 'N', 'S', 'O']
             b_n_type = 4
             # b_n_squeeze = 1
             b_n_squeeze = 7
             a_n_node = 7
             a_n_type = len(atom_type_list) + 1  # 5
+        elif self.dataset_name == 'qm9':
+            # atom_type_list = ['C', 'N', 'O', 'F']
+            b_n_type = 4
+            # b_n_squeeze = 1
+            b_n_squeeze = 3
+            a_n_node = 9
+            a_n_type = len(atom_type_list) + 1  # 5
         elif self.dataset_name == 'fishtoxi':
-            atom_type_list = ['Cl', 'C', 'O', 'N', 'Br', 'S', 'P', 'I', 'F']
+            # atom_type_list = ['Cl', 'C', 'O', 'N', 'Br', 'S', 'P', 'I', 'F']
             b_n_type = 4
             # b_n_squeeze = 1
             b_n_squeeze = 11
             a_n_node = 22
             a_n_type = len(atom_type_list) + 1  # 5
-        elif self.dataset_name == 'qm9':
-            atom_type_list = ['C', 'N', 'O', 'F']
+        elif self.dataset_name == 'freesolv':
             b_n_type = 4
             # b_n_squeeze = 1
-            b_n_squeeze = 3
-            a_n_node = 9
+            b_n_squeeze = 11
+            a_n_node = 22
+            a_n_type = len(atom_type_list) + 1  # 5
+        elif self.dataset_name == 'esol':
+            b_n_type = 4
+            # b_n_squeeze = 1
+            b_n_squeeze = 11
+            a_n_node = 22
             a_n_type = len(atom_type_list) + 1  # 5
         else:
             assert False, 'unknown dataset'
@@ -944,8 +957,20 @@ class GraphDataset(BaseDataset):
     def load_dataset(name):
         path = './datasets'
 
-        if name in ['qm7', 'qm9']:
+        if name in ['qm7', 'qm9', 'freesolv', 'esol', 'lipo']:
             results, label_map = get_molecular_dataset_mp(name=name, data_path=path)
+        # elif name == 'lipo':
+        #
+        #     from deepchem.molnet import load_lipo
+        #
+        #     dataset = load_lipo(featurizer='Raw')
+        #     print('a')
+        #
+        #     ### importing OGB
+        #     # from ogb.graphproppred import PygGraphPropPredDataset
+        #     # dataset = PygGraphPropPredDataset(name=name)
+        #     # split_idx = dataset.get_idx_split()
+
         else:
             # exist_dataset = os.path.exists(f'{path}/{name}_data.npy') if path is not None else False
             # test_dataset = None
@@ -1014,7 +1039,8 @@ class GraphDataset(BaseDataset):
                         if symbol not in label_map:
                             label_map[symbol] = len(label_map) + 1
 
-                results, label_map = process_mols(name, (mols, n_labels), (mols_test, n_y_test), max(n_atoms), label_map,
+                results, label_map = process_mols(name, (mols, n_labels), (mols_test, n_y_test), max(n_atoms),
+                                                  label_map,
                                                   dupe_filter=False, categorical_values=False,
                                                   return_smiles=False)
 
