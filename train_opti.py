@@ -215,9 +215,10 @@ def train_opti(config):
                 accuracy += np.power((pred - np_label), 2).mean()
 
         model.train()
-        with tune.checkpoint_dir(epoch) as checkpoint_dir:
-            path = os.path.join(checkpoint_dir, "checkpoint")
-            torch.save((model.state_dict(), optimizer.state_dict()), path)
+        if epoch % args.save_each_epoch == 0:
+            with tune.checkpoint_dir(epoch) as checkpoint_dir:
+                path = os.path.join(checkpoint_dir, "checkpoint")
+                torch.save((model.state_dict(), optimizer.state_dict()), path)
 
         tune.report(loss=(val_loss / val_steps), accuracy=(accuracy / val_steps), logp=(val_logp / val_steps),
                     logdet=(val_logdet / val_steps), distloss=(val_dist / val_steps))
