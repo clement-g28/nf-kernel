@@ -4,6 +4,7 @@ import torch
 
 import ffjord_lib.layers.odefunc as odefunc
 from utils.dataset import DATASETS, REGRESSION_DATASETS, GRAPH_DATASETS
+from utils.models import GRAPH_MODELS, SIMPLE_MODELS, IMAGE_MODELS
 
 
 def strtobool(val):
@@ -20,6 +21,57 @@ def strtobool(val):
         return 0
     else:
         raise ValueError("invalid truth value %r" % (val,))
+
+
+def graphnvp_arguments():
+    parser = argparse.ArgumentParser(description="GraphNVP Arguments")
+
+    # reproducibility
+    # parser.add_argument('--num_atoms', type=int, default=9, help='Maximum number of atoms in a molecule')
+    # parser.add_argument('--num_rels', type=int, default=4, help='Number of bond types')
+    # parser.add_argument('--num_atom_types', type=int, default=4, help='Types of atoms that can be used in a molecule')
+    parser.add_argument('--num_node_masks', type=int, default=9,
+                        help='Number of node masks to be used in coupling layers')
+    parser.add_argument('--num_channel_masks', type=int, default=4,
+                        help='Number of channel masks to be used in coupling layers')
+    parser.add_argument('--num_node_coupling', type=int, default=12, help='Number of coupling layers with node masking')
+    parser.add_argument('--num_channel_coupling', type=int, default=6,
+                        help='Number of coupling layers with channel masking')
+    parser.add_argument('--node_mask_size', type=int, default=5, help='Number of cells to be masked in the Node '
+                                                                      'coupling layer')
+    parser.add_argument('--channel_mask_size', type=int, default=-1, help='Number of cells to be masked in the Channel '
+                                                                          'coupling layer')
+    parser.add_argument('--apply_batch_norm', type=bool, default=False, help='Whether batch '
+                                                                             'normalization should be performed')
+    # parser.add_argument('--additive_transformations', type=bool, default=True,
+    #                     help='if True, apply only addictive coupling layers; else, apply affine coupling layers')
+    parser.add_argument('--additive_transformations', action='store_true', default=False,
+                        help='if True, apply only addictive coupling layers; else, apply affine coupling layers')
+    # Model configuration.
+    parser.add_argument('--use_switch', type=bool, default=False, help='use switch activation for R-GCN')
+    parser.add_argument('--num_gcn_layer', type=int, default=3)
+
+    # Generation args
+    parser.add_argument('--min_atoms', type=int, default=2, help='Minimum number of atoms in a generated molecule')
+    parser.add_argument('--num_gen', type=int, default=100,
+                        help='num of molecules to generate on each call to train.generate')
+    parser.add_argument('--min_gen_epoch', type=int, default=5,
+                        help='num of molecules to generate on each call to train.generate')
+    parser.add_argument('--max_resample', type=int, default=200, help='the times of resampling each epoch')
+    parser.add_argument('--atomic_num_list', type=int, default=[6, 7, 8, 9, 0],
+                        help='atomic number list for datasets')
+    # parser.add_argument('--post_method', type=str, default='softmax', choices=['softmax', 'soft_gumbel', 'hard_gumbel'],
+    #                    help='TODO: postprocessing to convert continuous A and X to discrete ones')
+
+    # Added, hidden channels params
+    parser.add_argument('--mlp_channels', type=str, default="128,128",
+                        help='Hidden channel list for bonds tensor, delimited list input ')  # 256,256 qm9
+    parser.add_argument('--gnn_channels_gcn', type=str, default="8,64",
+                        help='Hidden dimension list for graph convolution for atoms matrix, delimited list input ')
+    parser.add_argument('--gnn_channels_hidden', type=str, default="64,128",
+                        help='Hidden dimension list for linear transformation for atoms, delimited list input ')
+
+    return parser
 
 
 def moflow_arguments():
@@ -56,6 +108,9 @@ def moflow_arguments():
 
 def ffjord_arguments():
     parser = argparse.ArgumentParser(description="FFJORD Arguments")
+
+    parser.add_argument("--n_block", default=2, type=int, help="number of blocks")
+
     # -------- FFJORD parameters ---------
     SOLVERS = ["dopri5", "bdf", "rk4", "midpoint", 'adams', 'explicit_adams', 'fixed_adams']
     parser.add_argument(
@@ -94,18 +149,11 @@ def ffjord_arguments():
     return parser
 
 
-def training_arguments():
-    parser = argparse.ArgumentParser(description="CGlow trainer")
-    MODELS = ['cglow', 'seqflow', 'ffjord', 'moflow']
-    parser.add_argument("--dataset", type=str, default='mnist', choices=DATASETS + REGRESSION_DATASETS + GRAPH_DATASETS,
-                        help="Dataset to use")
-    parser.add_argument("--batch_size", default=16, type=int, help="batch size")
-    parser.add_argument("--n_epoch", default=1000, type=int, help="number of epoch")
-    parser.add_argument("--model", type=str, default='cglow', choices=MODELS, help="Model to use")
+def cglow_arguments():
+    parser = argparse.ArgumentParser(description="CGlow Arguments")
 
     parser.add_argument("--n_flow", default=32, type=int, help="number of flows in each block")
     parser.add_argument("--n_block", default=2, type=int, help="number of blocks")
-
     # CGLOW parameters
     parser.add_argument(
         "--no_lu",
@@ -114,10 +162,26 @@ def training_arguments():
     )
     parser.add_argument("--affine", action="store_true", help="use affine coupling instead of additive")
 
+    return parser
+
+
+def seqflow_arguments():
+    parser = argparse.ArgumentParser(description="SeqFlow Arguments")
+    parser.add_argument("--n_flow", default=32, type=int, help="number of flows in each block")
+    return parser
+
+
+def training_arguments():
+    parser = argparse.ArgumentParser(description="CGlow trainer")
+    parser.add_argument("--dataset", type=str, default='mnist', choices=DATASETS + REGRESSION_DATASETS + GRAPH_DATASETS,
+                        help="Dataset to use")
+    parser.add_argument("--batch_size", default=16, type=int, help="batch size")
+    parser.add_argument("--n_epoch", default=1000, type=int, help="number of epoch")
+    parser.add_argument("--model", type=str, default='cglow', choices=SIMPLE_MODELS + IMAGE_MODELS + GRAPH_MODELS,
+                        help="Model to use")
+
     parser.add_argument("--n_bits", default=5, type=int, help="number of bits")
     parser.add_argument("--lr", default=1e-4, type=float, help="learning rate")
-    parser.add_argument("--temp", default=0.7, type=float, help="temperature of sampling")
-    parser.add_argument("--n_sample", default=20, type=int, help="number of samples")
 
     parser.add_argument("--use_tb", action="store_true", help="use tensorboard to save losses")
     parser.add_argument("--save_each_epoch", default=20, type=int, help='save every n epoch')

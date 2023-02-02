@@ -11,13 +11,13 @@ from utils.utils import set_seed, create_folder, save_every_pic, initialize_gaus
     initialize_regression_gaussian_params, save_fig, initialize_tmp_regression_gaussian_params
 
 from utils.custom_glow import CGlow, WrappedModel
-from utils.toy_models import load_seqflow_model, load_ffjord_model, load_moflow_model
-from utils.toy_models import IMAGE_MODELS, SIMPLE_MODELS, GRAPH_MODELS
+from utils.models import load_seqflow_model, load_ffjord_model, load_moflow_model
+from utils.models import IMAGE_MODELS, SIMPLE_MODELS, GRAPH_MODELS
 from utils.dataset import ImDataset, SimpleDataset, GraphDataset
 from utils.density import construct_covariance
 from utils.testing import learn_or_load_modelhyperparams, generate_sample, project_inZ, testing_arguments, noise_data
 from utils.testing import project_between
-from utils.training import ffjord_arguments, moflow_arguments
+from utils.training import ffjord_arguments, cglow_arguments, moflow_arguments
 from sklearn.metrics.pairwise import rbf_kernel
 from utils.graphs.kernels import compute_wl_kernel, compute_sp_kernel, compute_mslap_kernel, compute_hadcode_kernel
 
@@ -77,10 +77,6 @@ if __name__ == "__main__":
     n_flow = 32  # base value
     reg_use_var = False
 
-    # Model params
-    affine = args.affine
-    no_lu = args.no_lu
-
     # Load the splits of the dataset used in the training phase
     train_idx_path = f'./train_idx.npy'
     val_idx_path = f'./val_idx.npy'
@@ -135,6 +131,9 @@ if __name__ == "__main__":
 
     learn_mean = True
     if model_type == 'cglow':
+        args_cglow, _ = cglow_arguments().parse_known_args()
+        affine = args_cglow.affine
+        no_lu = args_cglow.no_lu
         # Load model
         model_single = CGlow(n_channel, n_flow, n_block, affine=affine, conv_lu=not no_lu,
                              gaussian_params=gaussian_params, device=device, learn_mean='lmean' in folder_name)

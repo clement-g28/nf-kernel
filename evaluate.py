@@ -11,13 +11,13 @@ from utils.utils import set_seed, create_folder, save_every_pic, initialize_gaus
     initialize_regression_gaussian_params, save_fig, initialize_tmp_regression_gaussian_params
 
 from utils.custom_glow import CGlow, WrappedModel
-from utils.toy_models import load_seqflow_model, load_ffjord_model, load_moflow_model
-from utils.toy_models import IMAGE_MODELS, SIMPLE_MODELS, GRAPH_MODELS
+from utils.models import load_seqflow_model, load_ffjord_model, load_moflow_model
+from utils.models import IMAGE_MODELS, SIMPLE_MODELS, GRAPH_MODELS
 from utils.dataset import ImDataset, SimpleDataset, GraphDataset
 from utils.density import construct_covariance
 from utils.testing import learn_or_load_modelhyperparams, generate_sample, project_inZ, testing_arguments, noise_data
 from utils.testing import project_between
-from utils.training import ffjord_arguments, moflow_arguments
+from utils.training import ffjord_arguments, cglow_arguments, moflow_arguments
 from sklearn.metrics.pairwise import rbf_kernel
 from utils.graphs.kernels import compute_wl_kernel, compute_sp_kernel, compute_mslap_kernel, compute_hadcode_kernel
 from utils.graphs.mol_utils import valid_mol, construct_mol
@@ -749,7 +749,8 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
     # krr_types = ['rbf']
     krr_params = [
         {'Ridge__kernel': ['rbf'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__alpha': np.logspace(-5, 2, 11)},
-        {'Ridge__kernel': ['poly'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__degree': np.linspace(1, 4, 4),
+        {'Ridge__kernel': ['poly'], 'Ridge__gamma': np.logspace(-5, 3, 5),
+         'Ridge__degree': np.linspace(1, 4, 4).astype(np.int),
          'Ridge__alpha': np.logspace(-5, 2, 11)},
         {'Ridge__kernel': ['sigmoid'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__alpha': np.logspace(-5, 2, 11)}
     ]
@@ -1233,10 +1234,6 @@ if __name__ == "__main__":
             reg_use_var = True
             print(f'Flow trained using variance.')
 
-    # Model params
-    affine = args.affine
-    no_lu = args.no_lu
-
     # Load the splits of the dataset used in the training phase
     train_idx_path = f'{args.folder}/train_idx.npy'
     val_idx_path = f'{args.folder}/val_idx.npy'
@@ -1324,6 +1321,9 @@ if __name__ == "__main__":
             assert False, 'no method selected'
 
     if model_type == 'cglow':
+        args_cglow, _ = cglow_arguments().parse_known_args()
+        affine = args_cglow.affine
+        no_lu = args_cglow.no_lu
         # Load model
         model_single = CGlow(n_channel, n_flow, n_block, affine=affine, conv_lu=not no_lu,
                              gaussian_params=gaussian_params, device=device, learn_mean='lmean' in folder_name)
@@ -1333,7 +1333,7 @@ if __name__ == "__main__":
 
     elif model_type == 'ffjord':
         args_ffjord, _ = ffjord_arguments().parse_known_args()
-        args_ffjord.n_block = n_block
+        # args_ffjord.n_block = n_block
         model_single = load_ffjord_model(args_ffjord, n_dim, gaussian_params=gaussian_params,
                                          learn_mean='lmean' in folder_name, reg_use_var=reg_use_var, dataset=dataset)
     elif model_type == 'moflow':
@@ -1394,9 +1394,9 @@ if __name__ == "__main__":
     elif eval_type == 'regression':
         assert dataset.is_regression_dataset(), 'the dataset is not made for regression purposes'
         evaluate_regression(model, train_dataset, val_dataset, save_dir, device)
-        _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
-                                 only_Z=isinstance(dataset, GraphDataset))
-        evaluate_regression_preimage(model, val_dataset, device, save_dir)
-        evaluate_regression_preimage2(model, val_dataset, device, save_dir)
-        evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z)
+        # _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
+        #                          only_Z=isinstance(dataset, GraphDataset))
+        # evaluate_regression_preimage(model, val_dataset, device, save_dir)
+        # evaluate_regression_preimage2(model, val_dataset, device, save_dir)
+        # evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z)
         # TODO openbenchmark, random permutation on graph for regression, compare with same y values from dset

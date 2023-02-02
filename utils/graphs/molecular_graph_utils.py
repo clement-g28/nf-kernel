@@ -136,7 +136,7 @@ def filter_datasets_with_n_atoms(datasets, filter_n_atom):
                 res_ys[k].append(ys[i])
                 for atom in mol.GetAtoms():
                     if atom.GetSymbol() not in label_map:
-                        label_map[atom.GetSymbol()] = len(label_map)
+                        label_map[atom.GetSymbol()] = len(label_map)+1
     return res_mols, res_ys, label_map
 
 
@@ -226,31 +226,34 @@ def get_molecular_dataset_mp(name='qm7', data_path=None, categorical_values=Fals
         train_y, test_y, val_y = res_ys
     else:
         assert False, 'unknown dataset'
-
+    return_smiles=True
     # all_mol = np.concatenate((train_dataset.X, valid_dataset.X, test_dataset.X), axis=0)
     # all_y = np.concatenate((train_dataset.y, valid_dataset.y, test_dataset.y), axis=0).astype(np.float)
 
     train_data = (np.concatenate((train_mols, val_mols), axis=0),
                   np.concatenate((train_y, val_y), axis=0))
     test_data = (test_mols, test_y)
-    results, label_map = process_mols(name, train_data, test_data, max_num_nodes, label_map, dupe_filter,
-                                      categorical_values, return_smiles)
+    results, _ = process_mols(name, train_data, test_data, max_num_nodes, label_map, dupe_filter,
+                              categorical_values, return_smiles)
 
     return results, label_map
 
 
-def process_mols(name, train_data, test_data, max_num_nodes, label_map, dupe_filter, categorical_values=False,
+def process_mols(name, train_data, test_data, max_num_nodes, lmap, dupe_filter, categorical_values=False,
                  return_smiles=False):
     results = []
     for mols, y in (train_data, test_data):
 
-        pool = multiprocessing.Pool()
-        returns = pool.map(multiprocessing_func,
-                           [(chunk, i, max_num_nodes, label_map, name, categorical_values, return_smiles) for i, chunk
-                            in
-                            enumerate(chunks(list(zip(mols, y)), os.cpu_count()))])
-        pool.close()
-        returns = list(itertools.chain.from_iterable(returns))
+        # pool = multiprocessing.Pool()
+        # returns = pool.map(multiprocessing_func,
+        #                    [(chunk, i, max_num_nodes, lmap, name, categorical_values, return_smiles) for i, chunk
+        #                     in
+        #                     enumerate(chunks(list(zip(mols, y)), os.cpu_count()))])
+        # pool.close()
+        # returns = list(itertools.chain.from_iterable(returns))
+
+        returns = multiprocessing_func((list(zip(mols, y)), 0, max_num_nodes, lmap, name, categorical_values, return_smiles))
+
         returns = list(filter(None, returns))
 
         if dupe_filter:
@@ -270,23 +273,23 @@ def process_mols(name, train_data, test_data, max_num_nodes, label_map, dupe_fil
         else:
             xs, adjs, y2 = map(list, zip(*res))
             results.append((xs, adjs, y2))
-    return results, label_map
+    return results, lmap
 
 
 def multiprocessing_func(input_args):
-    chunk, i, max_num_nodes, label_map, name, categorical_values, return_smiles = input_args
+    chunk, i, max_num_nodes, lmap, name, categorical_values, return_smiles = input_args
     res = []
     for mol, y in chunk:
 
         mol = Chem.RemoveAllHs(mol, sanitize=False)
-        atoms, adj, label_map = get_atoms_adj_from_mol(mol, max_num_nodes=max_num_nodes, label_map=label_map,
-                                                       categorical_adj=categorical_values,
-                                                       no_edge_type='no_edge' in name)
+        atoms, adj, lmap = get_atoms_adj_from_mol(mol, max_num_nodes=max_num_nodes, label_map=lmap,
+                                               categorical_adj=categorical_values,
+                                               no_edge_type='no_edge' in name)
         if atoms is None or adj is None:
             continue
 
         if not categorical_values:
-            atoms = atoms_to_one_hot(atoms, label_map)
+            atoms = atoms_to_one_hot(atoms, lmap)
         if return_smiles:
             smiles = Chem.MolToSmiles(mol)
             res.append([atoms, adj, smiles, y])

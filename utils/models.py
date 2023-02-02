@@ -17,10 +17,13 @@ from utils.ffjord_model import build_model_tabular, create_regularization_fns, a
     get_regularization, spectral_norm_power_iteration
 from utils.seqflow_model import load_flow_model
 
-from utils.graphs.hyperparams import Hyperparameters
-from utils.graphs.model import MoFlow, rescale_adj
+from moflow_lib.hyperparams import Hyperparameters as MoFlowHyperparams
+from moflow_lib.model import MoFlow, rescale_adj
 
-GRAPH_MODELS = ['moflow']
+from graphnvp_lib.graph_nvp.hyperparams import Hyperparameters as GraphNVPHyperparams
+from graphnvp_lib.nvp_model import GraphNvpModel
+
+GRAPH_MODELS = ['moflow', 'graphnvp']
 IMAGE_MODELS = ['cglow']
 SIMPLE_MODELS = ['seqflow', 'ffjord']
 
@@ -461,26 +464,26 @@ def load_moflow_model(args_moflow, gaussian_params, learn_mean=True, device='cud
     mask_row_size_list = [int(d) for d in args_moflow.mask_row_size_list.strip(',').split(',')]
     mask_row_stride_list = [int(d) for d in args_moflow.mask_row_stride_list.strip(',').split(',')]
     dset_params = dataset.get_dataset_params()
-    model_params = Hyperparameters(b_n_type=dset_params['b_n_type'],  # 4,
-                                   b_n_flow=args_moflow.b_n_flow,
-                                   b_n_block=args_moflow.b_n_block,
-                                   b_n_squeeze=dset_params['b_n_squeeze'],
-                                   b_hidden_ch=b_hidden_ch,
-                                   b_affine=True,
-                                   b_conv_lu=args_moflow.b_conv_lu,
-                                   a_n_node=dset_params['a_n_node'],
-                                   a_n_type=dset_params['a_n_type'],
-                                   a_hidden_gnn=a_hidden_gnn,
-                                   a_hidden_lin=a_hidden_lin,
-                                   a_n_flow=args_moflow.a_n_flow,
-                                   a_n_block=args_moflow.a_n_block,
-                                   mask_row_size_list=mask_row_size_list,
-                                   mask_row_stride_list=mask_row_stride_list,
-                                   a_affine=True,
-                                   learn_dist=args_moflow.learn_dist,
-                                   seed=args_moflow.seed,
-                                   noise_scale=args_moflow.noise_scale
-                                   )
+    model_params = MoFlowHyperparams(b_n_type=dset_params['b_n_type'],  # 4,
+                                     b_n_flow=args_moflow.b_n_flow,
+                                     b_n_block=args_moflow.b_n_block,
+                                     b_n_squeeze=dset_params['b_n_squeeze'],
+                                     b_hidden_ch=b_hidden_ch,
+                                     b_affine=True,
+                                     b_conv_lu=args_moflow.b_conv_lu,
+                                     a_n_node=dset_params['a_n_node'],
+                                     a_n_type=dset_params['a_n_type'],
+                                     a_hidden_gnn=a_hidden_gnn,
+                                     a_hidden_lin=a_hidden_lin,
+                                     a_n_flow=args_moflow.a_n_flow,
+                                     a_n_block=args_moflow.a_n_block,
+                                     mask_row_size_list=mask_row_size_list,
+                                     mask_row_stride_list=mask_row_stride_list,
+                                     a_affine=True,
+                                     learn_dist=args_moflow.learn_dist,
+                                     seed=args_moflow.seed,
+                                     noise_scale=args_moflow.noise_scale
+                                     )
     if print:
         model_params.print()
     model = MoFlow(model_params)
@@ -575,6 +578,149 @@ class CMoFlow(NF):
         x, adj = inp
         adj_normalized = rescale_adj(adj).to(self.device)
         output = self.model(adj, x, adj_normalized)
+        z, sum_log_det_jacs = output
+        z = torch.cat([zi.reshape(zi.shape[0], -1) for zi in z], dim=1)
+        # z, _ = self.model(p_samples)
+        fig, (ax1, ax2) = plt.subplots(nrows=1, ncols=2)
+        x = inp[0].reshape(inp[0].shape[0], -1).detach().cpu().numpy()
+        z = z.detach().cpu().numpy()
+        np_means = self.means.detach().cpu().numpy()
+        z = np.concatenate((z, np_means), axis=0)
+        lab_min = np.min(val_dataset.true_labels)
+        lab_max = np.max(val_dataset.true_labels)
+        ax1.scatter(x[:, 0], x[:, 1], c=y, vmin=lab_min, vmax=lab_max)
+        # add_col = [int(np.max(val_dataset.true_labels)) + i + 1 for i in range(np_means.shape[0])]
+        add_col = [lab_min, lab_max]
+        y = np.concatenate((y, np.array(add_col)), axis=0)
+        ax2.scatter(z[:, 0], z[:, 1], c=y, vmin=lab_min, vmax=lab_max)
+
+        fig_filename = os.path.join(save_dir, 'figs', 'z_{:04d}.jpg'.format(itr))
+        create_folder(os.path.dirname(fig_filename))
+        # means_title = str(np.around(np_means, 2).tolist())
+        means_dist = str(torch.cdist(self.means, self.means).mean().detach().cpu().numpy().item())
+        # plt.title(means_title + ', d=' + means_dist)
+        plt.title('d=' + means_dist)
+        plt.savefig(fig_filename)
+        plt.close()
+
+
+def load_graphnvp_model(args_model, gaussian_params, learn_mean=True, device='cuda:0', reg_use_var=False, dataset=None):
+    num_masks = {'node': args_model.num_node_masks, 'channel': args_model.num_channel_masks}
+    mask_size = {'node': args_model.node_mask_size, 'channel': args_model.channel_mask_size}
+    num_coupling = {'node': args_model.num_node_coupling, 'channel': args_model.num_channel_coupling}
+    dset_params = dataset.get_dataset_params()
+    mlp_channels = [int(d) for d in args_model.mlp_channels.strip(',').split(',')]
+    gnn_channels_gcn = [int(d) for d in args_model.gnn_channels_gcn.strip(',').split(',')]
+    gnn_channels_hidden = [int(d) for d in args_model.gnn_channels_hidden.strip(',').split(',')]
+    gnn_channels = {'gcn': gnn_channels_gcn, 'hidden': gnn_channels_hidden}
+    num_atoms = dset_params['a_n_node']
+    num_rels = dset_params['b_n_type']
+    num_atom_types = len(dset_params['atom_type_list']) +1
+    model_params = GraphNVPHyperparams(args_model.num_gcn_layer, num_atoms, num_rels,
+                                       num_atom_types,
+                                       num_masks=num_masks, mask_size=mask_size, num_coupling=num_coupling,
+                                       batch_norm=args_model.apply_batch_norm,
+                                       additive_transformations=args_model.additive_transformations,
+                                       mlp_channels=mlp_channels,
+                                       gnn_channels=gnn_channels,
+                                       use_switch=args_model.use_switch
+                                       )
+
+    model = GraphNvpModel(model_params, device)
+    model = CGrapNVP(model, gaussian_params, learn_mean=learn_mean, device=device, reg_use_var=reg_use_var,
+                     dataset=dataset)
+    return model
+
+
+class CGrapNVP(NF):
+    def __init__(self, model, gaussian_params=None, device='cuda:0', learn_mean=True, reg_use_var=False, dataset=None):
+        super().__init__(model, gaussian_params, device, learn_mean, reg_use_var, dataset)
+        self.device = device
+
+    def calc_last_z_shape(self, input_size):
+        return (input_size,)
+
+    def downstream_process(self):
+        return -1
+
+    def upstream_process(self, loss):
+        return loss
+
+    def forward(self, input, label, pair_with_noise=False):
+        x, adj = input
+        # adj_normalized = rescale_adj(adj).to(self.device)
+        output = self.model(adj, x)
+        z, sum_log_det_jacs = output
+
+        # compute distance loss
+        distloss = torch.log(1 + torch.cdist(self.means, self.means).mean())
+        # compute log q(z)
+        # means = torch.empty_like(self.means).copy_(self.means)
+        flat_z = torch.cat([zi.reshape(zi.shape[0], -1) for zi in z], dim=1)
+        log_p = self.calculate_log_p(flat_z, label, self.means, self.gaussian_params)
+
+        sum_log_det_jacs = torch.sum(torch.cat([logdet.unsqueeze(1) for logdet in sum_log_det_jacs], dim=1), dim=1)
+        return log_p, distloss, sum_log_det_jacs, flat_z
+
+    def reverse(self, z, reconstruct=False):
+        adj, x = self.model.reverse(z, true_adj=None)  # (adj, x)
+        flat_x = torch.cat([x.reshape(x.shape[0], -1), adj.reshape(adj.shape[0], -1)], dim=1)
+
+        return flat_x
+
+    @staticmethod
+    def get_transforms(model):
+        def sample_fn(z, logpz=None):
+            res = model.reverse(z, true_adj=None)
+            if logpz is not None:
+                # return res, logp
+                return res, None
+            else:
+                return res
+
+        def density_fn(input, logpx=None):
+            x, adj = input
+            # adj_normalized = rescale_adj(adj).to(x.device)
+            # res, logp = model(x)
+            output = model(adj, x)
+            res, logp = output
+            if logpx is not None:
+                return res, logp
+            else:
+                return res
+
+        return sample_fn, density_fn
+
+    def sample_evaluation(self, itr, train_dataset, val_dataset, save_dir, writer=None,
+                          batch_size=200):
+
+        # loader = val_dataset.get_loader(batch_size, shuffle=True, drop_last=True, pin_memory=False)
+
+        idx = np.random.randint(0, len(val_dataset.X), batch_size)
+        p_samples, y = list(zip(*[val_dataset[i] for i in idx]))
+
+        # sample_fn, density_fn = self.get_transforms(self.model)
+
+        # plt.figure(figsize=(9, 3))
+        # visualize_transform(
+        #     p_samples, self.sample_from_distrib, self.vis_log_p_calcul, transform=sample_fn,
+        #     inverse_transform=density_fn, samples=True, npts=100, device=self.device
+        # )
+        # fig_filename = os.path.join(save_dir, 'figs', '{:04d}.jpg'.format(itr))
+        # create_folder(os.path.dirname(fig_filename))
+        # plt.savefig(fig_filename)
+        # plt.close()
+        y = np.concatenate([y], axis=0)
+        p_samples = list(zip(*p_samples))
+        inp = []
+        for i in range(len(p_samples)):
+            inp.append(np.concatenate([np.expand_dims(v, axis=0) for v in p_samples[i]], axis=0))
+            inp[i] = torch.from_numpy(inp[i]).float().to(self.device)
+
+        # p_samples = torch.from_numpy(p_samples).float().to(self.device)
+        x, adj = inp
+        # adj_normalized = rescale_adj(adj).to(self.device)
+        output = self.model(adj, x)
         z, sum_log_det_jacs = output
         z = torch.cat([zi.reshape(zi.shape[0], -1) for zi in z], dim=1)
         # z, _ = self.model(p_samples)

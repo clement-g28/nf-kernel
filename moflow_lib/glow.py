@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 
-from utils.graphs.basic import ActNorm, InvConv2dLU, InvConv2d, ActNorm2D
-from utils.graphs.coupling import AffineCoupling, GraphAffineCoupling
+from moflow_lib.basic import ActNorm, InvConv2dLU, InvConv2d, ActNorm2D
+from moflow_lib.coupling import AffineCoupling, GraphAffineCoupling
 
 
 class Flow(nn.Module):

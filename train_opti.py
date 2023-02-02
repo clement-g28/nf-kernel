@@ -8,9 +8,10 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision import transforms, utils
 
 from utils.custom_glow import CGlow
-from utils.toy_models import load_seqflow_model, load_ffjord_model, load_moflow_model
-from utils.toy_models import IMAGE_MODELS, SIMPLE_MODELS, GRAPH_MODELS
-from utils.training import training_arguments, ffjord_arguments, moflow_arguments, AddGaussianNoise, calc_loss
+from utils.models import load_seqflow_model, load_ffjord_model, load_moflow_model
+from utils.models import IMAGE_MODELS, SIMPLE_MODELS, GRAPH_MODELS
+from utils.training import training_arguments, seqflow_arguments, ffjord_arguments, cglow_arguments, moflow_arguments, \
+    graphnvp_arguments, AddGaussianNoise, calc_loss
 from utils.dataset import ImDataset, SimpleDataset, GraphDataset
 from utils.density import construct_covariance
 from utils.utils import write_dict_to_tensorboard, set_seed, create_folder, AverageMeter, initialize_gaussian_params, \
@@ -85,21 +86,24 @@ def init_model(var, noise, dataset):
 
     folder_path = f'{args.dataset}/{args.model}/'
     if args.model == 'cglow':
+        args_cglow, _ = cglow_arguments().parse_known_args()
         n_channel = dataset.n_channel
-        model_single = CGlow(n_channel, args.n_flow, args.n_block, affine=args.affine, conv_lu=not args.no_lu,
+        model_single = CGlow(n_channel, args_cglow.n_flow, args_cglow.n_block, affine=args_cglow.affine,
+                             conv_lu=not args_cglow.no_lu,
                              gaussian_params=gaussian_params, device=device, learn_mean=not args.fix_mean)
-        folder_path += f'b{args.n_block}_f{args.n_flow}'
+        folder_path += f'b{args_cglow.n_block}_f{args_cglow.n_flow}'
     elif args.model == 'seqflow':
-        model_single = load_seqflow_model(dataset.im_size, args.n_flow, gaussian_params=gaussian_params,
+        args_seqflow, _ = seqflow_arguments().parse_known_args()
+        model_single = load_seqflow_model(dataset.im_size, args_seqflow.n_flow, gaussian_params=gaussian_params,
                                           learn_mean=not args.fix_mean, reg_use_var=args.reg_use_var,
                                           dataset=dataset)
-        folder_path += f'f{args.n_flow}'
+        folder_path += f'f{args_seqflow.n_flow}'
     elif args.model == 'ffjord':
         args_ffjord, _ = ffjord_arguments().parse_known_args()
-        args_ffjord.n_block = args.n_block
+        # args_ffjord.n_block = args.n_block
         model_single = load_ffjord_model(args_ffjord, dataset.im_size, gaussian_params=gaussian_params,
                                          learn_mean=not args.fix_mean, reg_use_var=args.reg_use_var, dataset=dataset)
-        folder_path += f'b{args.n_block}'
+        folder_path += f'b{args_ffjord.n_block}'
     elif args.model == 'moflow':
         args_moflow, _ = moflow_arguments().parse_known_args()
         args_moflow.noise_scale = noise
@@ -112,7 +116,6 @@ def init_model(var, noise, dataset):
 
 
 def train_opti(config):
-
     train_dataset = get_train_dataset()
     val_dataset = get_val_dataset()
     # Init model

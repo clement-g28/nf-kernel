@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from utils.graphs.basic import GraphLinear, GraphConv
+from moflow_lib.basic import GraphLinear, GraphConv
 
 
 # class AffineCoupling(nn.Module):
@@ -316,7 +316,7 @@ def test_AffineCoupling():
 
 
 def test_GraphAffineCoupling():
-    from utils.graphs.model import rescale_adj
+    from moflow_lib.model import rescale_adj
     torch.manual_seed(0)
     bs = 2
     nodes = 9

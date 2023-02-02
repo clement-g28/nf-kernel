@@ -15,9 +15,9 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 
 from utils.testing import testing_arguments, noise_data, save_fig
-from utils.training import ffjord_arguments
+from utils.training import ffjord_arguments, cglow_arguments, moflow_arguments, seqflow_arguments, graphnvp_arguments
 
-from utils.toy_models import load_seqflow_model, load_ffjord_model
+from utils.models import load_seqflow_model, load_ffjord_model
 
 from utils.utils import initialize_gaussian_params
 
@@ -246,10 +246,6 @@ if __name__ == '__main__':
             dim_per_label = int(dpl_split.replace("dimperlab", ""))
             print(f'Flow trained with dimperlab: {dim_per_label}')
 
-    # Model params
-    affine = args.affine
-    no_lu = args.no_lu
-
     os.chdir(args.folder)
     saves = []
     for file in glob.glob("model_*.pt"):
@@ -322,13 +318,19 @@ if __name__ == '__main__':
 
         learn_mean = 'lmean' in folder_name
         model_loading_params = {'model': model_type, 'n_dim': n_dim, 'n_channel': n_channel, 'n_flow': n_flow,
-                                'n_block': n_block, 'affine': affine,
-                                'conv_lu': not no_lu, 'gaussian_params': gaussian_params, 'device': device,
+                                'n_block': n_block, 'gaussian_params': gaussian_params, 'device': device,
                                 'loading_path': save_path, 'learn_mean': learn_mean}
+        if model_type == 'cglow':
+            args_cglow, _ = cglow_arguments().parse_known_args()
+            model_loading_params['affine'] = args_cglow.affine
+            model_loading_params['conv_lu'] = not args_cglow.no_lu
         if model_type == 'ffjord':
             args_ffjord, _ = ffjord_arguments().parse_known_args()
-            args_ffjord.n_block = n_block
+            # args_ffjord.n_block = n_block
             model_loading_params['ffjord_args'] = args_ffjord
+        elif model_type == 'moflow':
+            args_moflow, _ = moflow_arguments().parse_known_args()
+            model_loading_params['moflow_args'] = args_moflow
 
         t_model_params.append(model_loading_params)
 

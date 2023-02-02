@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
-from utils.graphs.hyperparams import Hyperparameters
-from utils.graphs.glow import Glow, GlowOnGraph
+from moflow_lib.hyperparams import Hyperparameters
+from moflow_lib.glow import Glow, GlowOnGraph
 
 
 def gaussian_nll(x, mean, ln_var, reduce='sum'):
