@@ -634,9 +634,13 @@ def evaluate_distances(model, train_dataset, val_dataset, gaussian_params, z_sha
 
 
 def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fithyperparam=True):
+    if isinstance(train_dataset, GraphDataset):
+        train_dataset.permute_graphs_in_dataset()
+        val_dataset.permute_graphs_in_dataset()
+
+    batch_size = 200
     # Compute results with our approach if not None
     if model is not None:
-        batch_size = 200
         loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
 
         start = time.time()
@@ -679,50 +683,7 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
         end = time.time()
         print(f"time to fit linear ridge in Z : {str(end - start)}")
 
-        val_loader = val_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
-
-        start = time.time()
-        val_inZ = []
-        elabels = []
-        with torch.no_grad():
-            for j, data in enumerate(val_loader):
-                inp, labels = data
-                inp = val_dataset.format_data(inp, None, None, device)
-                labels = labels.to(device)
-                log_p, distloss, logdet, out = model(inp, labels)
-                val_inZ.append(out.detach().cpu().numpy())
-                elabels.append(labels.detach().cpu().numpy())
-        val_inZ = np.concatenate(val_inZ, axis=0).reshape(len(val_dataset), -1)
-        elabels = np.concatenate(elabels, axis=0)
-        end = time.time()
-        print(f"time to get Z_val from X_val : {str(end - start)}")
-
-        pred = zlinridge.predict(val_inZ)
-        zridge_r2_score = zlinridge.score(val_inZ, elabels)
-        zridge_mae_score = np.abs(pred - elabels).mean()
-        zridge_mse_score = np.power(pred - elabels, 2).mean()
-        q2_ext = 1 - (np.sum(np.power(elabels - pred, 2)) / elabels.shape[0]) / (
-                np.sum(np.power(tlabels - np.mean(tlabels), 2)) / tlabels.shape[0])
-        print(f'Our approach R2: {zridge_r2_score}, MSE: {zridge_mse_score}, MAE: {zridge_mae_score}, q2_ext: {q2_ext}')
-
-        # See on train
-        pred = zlinridge.predict(Z)
-        t_zridge_r2_score = zlinridge.score(Z, tlabels)
-        t_zridge_mae_score = np.abs(pred - tlabels).mean()
-        t_zridge_mse_score = np.power(pred - tlabels, 2).mean()
-        print(f'(On train) Our approach R2: {t_zridge_r2_score}, MSE: {t_zridge_mse_score}, MAE: {t_zridge_mae_score}')
-
-        # TEST project between the means
-        means = model.means.detach().cpu().numpy()
-        proj, dot_val = project_between(val_inZ, means[0], means[1])
-        # pred = ((proj - means[1]) / (means[0] - means[1])) * (
-        #         model.label_max - model.label_min) + model.label_min
-        # pred = pred.mean(axis=1)
-        pred = dot_val.squeeze() * (model.label_max - model.label_min) + model.label_min
-        projection_mse_score = np.power((pred - elabels), 2).mean()
-        projection_mae_score = np.abs((pred - elabels)).mean()
-        print(f'Our approach (projection) MSE: {projection_mse_score}, MAE: {projection_mae_score}')
-
+    # KERNELS FIT
     X_train = train_dataset.get_flattened_X()
     # X_train = train_dataset.X.reshape(train_dataset.X.shape[0], -1)
     labels_train = train_dataset.true_labels
@@ -773,25 +734,7 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
         end = time.time()
         print(f"time to fit {krr_type} ridge : {str(end - start)}")
 
-    X_val = val_dataset.get_flattened_X()
-    # X_val = val_dataset.X.reshape(val_dataset.X.shape[0], -1)
-    labels_val = val_dataset.true_labels
-
-    krr_scores = []
-    for krr in krrs:
-        krr_scores.append([])
-
-    ridge_r2_score = linridge.score(X_val, labels_val)
-    ridge_mae_score = np.abs(linridge.predict(X_val) - labels_val).mean()
-    ridge_mse_score = np.power(linridge.predict(X_val) - labels_val, 2).mean()
-
-    for i, krr in enumerate(krrs):
-        krr_r2_score = krr.score(X_val, labels_val)
-        krr_mae_score = np.abs(krr.predict(X_val) - labels_val).mean()
-        krr_mse_score = np.power(krr.predict(X_val) - labels_val, 2).mean()
-        # krr_score = np.abs(krr.predict(X_val) - labels_val).mean()
-        krr_scores[i].append((krr_r2_score, krr_mae_score, krr_mse_score))
-
+    # GRAPH KERNELS FIT
     if isinstance(train_dataset, GraphDataset):
         def compute_kernel(name, dataset, edge_to_node, normalize, wl_height=10):
             if name == 'wl':
@@ -834,27 +777,242 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
             end = time.time()
             print(f"time to fit {krr_type} ridge : {str(end - start)}")
 
-        for i, graph_krr in enumerate(graph_krrs):
-            K_val = compute_kernel(graph_kernels[i][2], (val_dataset, train_dataset), edge_to_node=edge_to_node,
-                                   normalize=normalize, wl_height=wl_height)
-            # K_val = compute_wl_kernel((val_dataset, train_dataset), wl_height=wl_height, edge_to_node=edge_to_node,
-            #                           normalize=normalize)
-            graph_krr_r2_score = graph_krr.score(K_val, labels_val)
-            graph_krr_mae_score = np.abs(graph_krr.predict(K_val) - labels_val).mean()
-            graph_krr_mse_score = np.power(graph_krr.predict(K_val) - labels_val, 2).mean()
+    if isinstance(train_dataset, GraphDataset):
+        n_permutation = 10
+        our_r2_scores = []
+        our_mse_scores = []
+        our_mae_scores = []
+        r2_scores_train = []
+        mse_scores_train = []
+        mae_scores_train = []
+        ridge_r2_scores = []
+        ridge_mse_scores = []
+        ridge_mae_scores = []
+        krr_scores = []
+        for krr in krrs:
+            krr_scores.append([])
+        krr_graph_scores = []
+        for graph_krr in graph_krrs:
+            krr_graph_scores.append([])
 
-            print(f'GraphKernelRidge ({graph_kernels[i][2]}) R2: {graph_krr_r2_score}, '
-                  f'MSE: {graph_krr_mse_score}, MAE: {graph_krr_mae_score}')
+        for n_perm in range(n_permutation):
+            val_dataset.permute_graphs_in_dataset()
+            # OUR APPROACH EVALUATION
+            if model is not None:
+                val_loader = val_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
 
-    print('Predictions scores :')
-    print(f'Ridge R2: {ridge_r2_score}, MSE: {ridge_mse_score}, MAE: {ridge_mae_score}')
-    for j, krr_type in enumerate(krr_types):
-        krr_r2_score, krr_mae_score, krr_mse_score = krr_scores[j][0]
-        print(f'KernelRidge ({krr_type}) R2: {krr_r2_score}, MSE: {krr_mse_score}, MAE: {krr_mae_score}')
+                start = time.time()
+                val_inZ = []
+                elabels = []
+                with torch.no_grad():
+                    for j, data in enumerate(val_loader):
+                        inp, labels = data
+                        inp = val_dataset.format_data(inp, None, None, device)
+                        labels = labels.to(device)
+                        log_p, distloss, logdet, out = model(inp, labels)
+                        val_inZ.append(out.detach().cpu().numpy())
+                        elabels.append(labels.detach().cpu().numpy())
+                val_inZ = np.concatenate(val_inZ, axis=0).reshape(len(val_dataset), -1)
+                elabels = np.concatenate(elabels, axis=0)
+                end = time.time()
+                print(f"time to get Z_val from X_val : {str(end - start)}")
 
-    print(f'Our approach (projection) MSE: {projection_mse_score}, MAE: {projection_mae_score}')
-    print(f'Our approach R2: {zridge_r2_score}, MSE: {zridge_mse_score}, MAE: {zridge_mae_score}, q2_ext: {q2_ext}')
-    print(f'(On train) Our approach R2: {t_zridge_r2_score}, MSE: {t_zridge_mse_score}, MAE: {t_zridge_mae_score}')
+                pred = zlinridge.predict(val_inZ)
+                zridge_r2_score = zlinridge.score(val_inZ, elabels)
+                zridge_mae_score = np.abs(pred - elabels).mean()
+                zridge_mse_score = np.power(pred - elabels, 2).mean()
+                # print(f'Our approach R2: {zridge_r2_score}, MSE: {zridge_mse_score}, MAE: {zridge_mae_score}')
+                our_r2_scores.append(zridge_r2_score)
+                our_mse_scores.append(zridge_mse_score)
+                our_mae_scores.append(zridge_mae_score)
+
+                # See on train
+                pred = zlinridge.predict(Z)
+                t_zridge_r2_score = zlinridge.score(Z, tlabels)
+                t_zridge_mae_score = np.abs(pred - tlabels).mean()
+                t_zridge_mse_score = np.power(pred - tlabels, 2).mean()
+                # print(
+                #     f'(On train) Our approach R2: {t_zridge_r2_score}, MSE: {t_zridge_mse_score}, MAE: {t_zridge_mae_score}')
+                r2_scores_train.append(t_zridge_r2_score)
+                mse_scores_train.append(t_zridge_mse_score)
+                mae_scores_train.append(t_zridge_mae_score)
+
+            # KERNELS EVALUATION
+            X_val = val_dataset.get_flattened_X()
+            # X_val = val_dataset.X.reshape(val_dataset.X.shape[0], -1)
+            labels_val = val_dataset.true_labels
+
+            ridge_r2_score = linridge.score(X_val, labels_val)
+            ridge_mae_score = np.abs(linridge.predict(X_val) - labels_val).mean()
+            ridge_mse_score = np.power(linridge.predict(X_val) - labels_val, 2).mean()
+            ridge_r2_scores.append(ridge_r2_score)
+            ridge_mae_scores.append(ridge_mae_score)
+            ridge_mse_scores.append(ridge_mse_score)
+
+            for i, krr in enumerate(krrs):
+                krr_r2_score = krr.score(X_val, labels_val)
+                krr_mae_score = np.abs(krr.predict(X_val) - labels_val).mean()
+                krr_mse_score = np.power(krr.predict(X_val) - labels_val, 2).mean()
+                # krr_score = np.abs(krr.predict(X_val) - labels_val).mean()
+                krr_scores[i].append((krr_r2_score, krr_mae_score, krr_mse_score))
+
+            # GRAPH KERNELS EVALUATION
+            for i, graph_krr in enumerate(graph_krrs):
+                K_val = compute_kernel(graph_kernels[i][2], (val_dataset, train_dataset), edge_to_node=edge_to_node,
+                                       normalize=normalize, wl_height=wl_height)
+                # K_val = compute_wl_kernel((val_dataset, train_dataset), wl_height=wl_height, edge_to_node=edge_to_node,
+                #                           normalize=normalize)
+                graph_krr_r2_score = graph_krr.score(K_val, labels_val)
+                graph_krr_mae_score = np.abs(graph_krr.predict(K_val) - labels_val).mean()
+                graph_krr_mse_score = np.power(graph_krr.predict(K_val) - labels_val, 2).mean()
+
+                # print(f'GraphKernelRidge ({graph_kernels[i][2]}) R2: {graph_krr_r2_score}, '
+                #       f'MSE: {graph_krr_mse_score}, MAE: {graph_krr_mae_score}')
+                krr_graph_scores[i].append((graph_krr_r2_score, graph_krr_mae_score, graph_krr_mse_score))
+
+        # PRINT RESULTS
+        print('Predictions scores :')
+        r2_mean_score = np.mean(ridge_r2_scores)
+        mse_mean_score = np.mean(ridge_mse_scores)
+        mae_mean_score = np.mean(ridge_mae_scores)
+        score_str = f'Ridge R2: {ridge_r2_scores}, MSE: {ridge_mse_scores}, MAE: {ridge_mae_scores} \n' \
+                    f'Mean Scores: R2: {r2_mean_score}, MSE: {mse_mean_score}, MAE: {mae_mean_score}'
+        print(score_str)
+
+        for j, krr_type in enumerate(krr_types):
+            r2_scores = []
+            mse_scores = []
+            mae_scores = []
+            for krr_r2_score, krr_mae_score, krr_mse_score in krr_scores[j]:
+                r2_scores.append(krr_r2_score)
+                mse_scores.append(krr_mse_score)
+                mae_scores.append(krr_mae_score)
+            r2_mean_score = np.mean(r2_scores)
+            mse_mean_score = np.mean(mse_scores)
+            mae_mean_score = np.mean(mae_scores)
+            score_str = f'KernelRidge ({krr_type}) R2: {r2_scores}, MSE: {mse_scores}, MAE: {mae_scores} \n' \
+                        f'Mean Scores: R2: {r2_mean_score}, MSE: {mse_mean_score}, MAE: {mae_mean_score}'
+            print(score_str)
+
+        for j, graph_krr in enumerate(graph_krrs):
+            r2_scores = []
+            mse_scores = []
+            mae_scores = []
+            for graph_krr_r2_score, graph_krr_mae_score, graph_krr_mse_score in krr_graph_scores[j]:
+                r2_scores.append(graph_krr_r2_score)
+                mse_scores.append(graph_krr_mse_score)
+                mae_scores.append(graph_krr_mae_score)
+            r2_mean_score = np.mean(r2_scores)
+            mse_mean_score = np.mean(mse_scores)
+            mae_mean_score = np.mean(mae_scores)
+            score_str = f'GraphKernelRidge ({graph_kernels[j][2]}) R2: {r2_scores}, MSE: {mse_scores}, MAE: {mae_scores} \n' \
+                        f'Mean Scores: R2: {r2_mean_score}, MSE: {mse_mean_score}, MAE: {mae_mean_score}'
+            print(score_str)
+
+        r2_mean_score = np.mean(our_r2_scores)
+        mse_mean_score = np.mean(our_mse_scores)
+        mae_mean_score = np.mean(our_mae_scores)
+        score_str = f'Our approach R2: {our_r2_scores}, MSE: {our_mse_scores}, MAE: {our_mae_scores} \n' \
+                    f'Mean Scores: R2: {r2_mean_score}, MSE: {mse_mean_score}, MAE: {mae_mean_score}'
+        print(score_str)
+        r2_mean_score = np.mean(r2_scores_train)
+        mse_mean_score = np.mean(mse_scores_train)
+        mae_mean_score = np.mean(mae_scores_train)
+        score_str = f'(On train) Our approach R2: {our_r2_scores}, MSE: {our_mse_scores}, MAE: {our_mae_scores} \n' \
+                    f'Mean Scores: R2: {r2_mean_score}, MSE: {mse_mean_score}, MAE: {mae_mean_score}'
+        print(score_str)
+    else:
+        # OUR APPROACH EVALUATION
+        if model is not None:
+            val_loader = val_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+
+            start = time.time()
+            val_inZ = []
+            elabels = []
+            with torch.no_grad():
+                for j, data in enumerate(val_loader):
+                    inp, labels = data
+                    inp = val_dataset.format_data(inp, None, None, device)
+                    labels = labels.to(device)
+                    log_p, distloss, logdet, out = model(inp, labels)
+                    val_inZ.append(out.detach().cpu().numpy())
+                    elabels.append(labels.detach().cpu().numpy())
+            val_inZ = np.concatenate(val_inZ, axis=0).reshape(len(val_dataset), -1)
+            elabels = np.concatenate(elabels, axis=0)
+            end = time.time()
+            print(f"time to get Z_val from X_val : {str(end - start)}")
+
+            pred = zlinridge.predict(val_inZ)
+            zridge_r2_score = zlinridge.score(val_inZ, elabels)
+            zridge_mae_score = np.abs(pred - elabels).mean()
+            zridge_mse_score = np.power(pred - elabels, 2).mean()
+            q2_ext = 1 - (np.sum(np.power(elabels - pred, 2)) / elabels.shape[0]) / (
+                    np.sum(np.power(tlabels - np.mean(tlabels), 2)) / tlabels.shape[0])
+            print(
+                f'Our approach R2: {zridge_r2_score}, MSE: {zridge_mse_score}, MAE: {zridge_mae_score}, q2_ext: {q2_ext}')
+
+            # See on train
+            pred = zlinridge.predict(Z)
+            t_zridge_r2_score = zlinridge.score(Z, tlabels)
+            t_zridge_mae_score = np.abs(pred - tlabels).mean()
+            t_zridge_mse_score = np.power(pred - tlabels, 2).mean()
+            print(
+                f'(On train) Our approach R2: {t_zridge_r2_score}, MSE: {t_zridge_mse_score}, MAE: {t_zridge_mae_score}')
+
+            # TEST project between the means
+            means = model.means.detach().cpu().numpy()
+            proj, dot_val = project_between(val_inZ, means[0], means[1])
+            # pred = ((proj - means[1]) / (means[0] - means[1])) * (
+            #         model.label_max - model.label_min) + model.label_min
+            # pred = pred.mean(axis=1)
+            pred = dot_val.squeeze() * (model.label_max - model.label_min) + model.label_min
+            projection_mse_score = np.power((pred - elabels), 2).mean()
+            projection_mae_score = np.abs((pred - elabels)).mean()
+            print(f'Our approach (projection) MSE: {projection_mse_score}, MAE: {projection_mae_score}')
+
+        # KERNELS EVALUATION
+        X_val = val_dataset.get_flattened_X()
+        # X_val = val_dataset.X.reshape(val_dataset.X.shape[0], -1)
+        labels_val = val_dataset.true_labels
+
+        krr_scores = []
+        for krr in krrs:
+            krr_scores.append([])
+
+        ridge_r2_score = linridge.score(X_val, labels_val)
+        ridge_mae_score = np.abs(linridge.predict(X_val) - labels_val).mean()
+        ridge_mse_score = np.power(linridge.predict(X_val) - labels_val, 2).mean()
+
+        for i, krr in enumerate(krrs):
+            krr_r2_score = krr.score(X_val, labels_val)
+            krr_mae_score = np.abs(krr.predict(X_val) - labels_val).mean()
+            krr_mse_score = np.power(krr.predict(X_val) - labels_val, 2).mean()
+            # krr_score = np.abs(krr.predict(X_val) - labels_val).mean()
+            krr_scores[i].append((krr_r2_score, krr_mae_score, krr_mse_score))
+
+        # GRAPH KERNELS EVALUATION
+        if isinstance(train_dataset, GraphDataset):
+            for i, graph_krr in enumerate(graph_krrs):
+                K_val = compute_kernel(graph_kernels[i][2], (val_dataset, train_dataset), edge_to_node=edge_to_node,
+                                       normalize=normalize, wl_height=wl_height)
+                # K_val = compute_wl_kernel((val_dataset, train_dataset), wl_height=wl_height, edge_to_node=edge_to_node,
+                #                           normalize=normalize)
+                graph_krr_r2_score = graph_krr.score(K_val, labels_val)
+                graph_krr_mae_score = np.abs(graph_krr.predict(K_val) - labels_val).mean()
+                graph_krr_mse_score = np.power(graph_krr.predict(K_val) - labels_val, 2).mean()
+
+                print(f'GraphKernelRidge ({graph_kernels[i][2]}) R2: {graph_krr_r2_score}, '
+                      f'MSE: {graph_krr_mse_score}, MAE: {graph_krr_mae_score}')
+
+        print('Predictions scores :')
+        print(f'Ridge R2: {ridge_r2_score}, MSE: {ridge_mse_score}, MAE: {ridge_mae_score}')
+        for j, krr_type in enumerate(krr_types):
+            krr_r2_score, krr_mae_score, krr_mse_score = krr_scores[j][0]
+            print(f'KernelRidge ({krr_type}) R2: {krr_r2_score}, MSE: {krr_mse_score}, MAE: {krr_mae_score}')
+
+        print(f'Our approach (projection) MSE: {projection_mse_score}, MAE: {projection_mae_score}')
+        print(f'Our approach R2: {zridge_r2_score}, MSE: {zridge_mse_score}, MAE: {zridge_mae_score}, q2_ext: {q2_ext}')
+        print(f'(On train) Our approach R2: {t_zridge_r2_score}, MSE: {t_zridge_mse_score}, MAE: {t_zridge_mae_score}')
 
 
 def create_figures_XZ(model, train_dataset, save_path, device, std_noise=0.1, only_Z=False):

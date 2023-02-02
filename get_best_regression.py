@@ -41,6 +41,10 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
     # save_fig(train_dataset.X, train_dataset.true_labels, size=10, save_path=f'{save_dir}/X_space')
     # save_fig(val_dataset.X, val_dataset.true_labels, size=10, save_path=f'{save_dir}/X_space_val')
 
+    if isinstance(train_dataset, GraphDataset):  # Permutations for Graphs
+        train_dataset.permute_graphs_in_dataset()
+        val_dataset.permute_graphs_in_dataset()
+
     # TEST
     start_from = None
     # start_from = 289
@@ -100,101 +104,176 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
         Z = np.concatenate(Z, axis=0).reshape(len(train_dataset), -1)
         tlabels = np.concatenate(tlabels, axis=0)
 
-        # Learn Ridge
-        # zlinridge = make_pipeline(StandardScaler(), KernelRidge(kernel='linear', alpha=0.1))
-        # zlinridge = Ridge(alpha=1.0)
-        # zlinridge.fit(Z, tlabels)
         param_gridlin = [{'Ridge__alpha': np.concatenate((np.logspace(-5, 2, 11), np.array([1])))}]
         model_type = ('Ridge', Ridge())
         scaler = False
         zlinridge = learn_or_load_modelhyperparams(Z, tlabels, 'zlinear', param_gridlin, save_dir,
-                                                   model_type=model_type, scaler=scaler, save=False, force_train=True)
-        # kernel_name = 'linear'
-        # param_gridlin = [{'Ridge__kernel': [kernel_name], 'Ridge__alpha': np.linspace(0, 10, 11)}]
-        # zlinridge = learn_or_load_modelhyperparams(Z, tlabels, kernel_name, param_gridlin, save_dir,
-        #                                            model_type=('Ridge', KernelRidge()), scaler=False)
+                                                   model_type=model_type, scaler=scaler, save=False,
+                                                   force_train=True)
+        if isinstance(train_dataset, GraphDataset):  # Permutations for Graphs
+            n_permutation = 10
+            scores = []
+            scores_train = []
+            for n_perm in range(n_permutation):
+                val_dataset.permute_graphs_in_dataset()
 
-        val_loader = eval_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+                val_loader = eval_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
 
-        val_inZ = []
-        elabels = []
-        with torch.no_grad():
-            for j, data in enumerate(val_loader):
-                inp, labels = data
+                val_inZ = []
+                elabels = []
+                with torch.no_grad():
+                    for j, data in enumerate(val_loader):
+                        inp, labels = data
 
-                inp = eval_dataset.format_data(inp, None, None, device)
-                labels = labels.to(device)
-                log_p, distloss, logdet, out = model(inp, labels)
-                val_inZ.append(out.detach().cpu().numpy())
-                elabels.append(labels.detach().cpu().numpy())
-        val_inZ = np.concatenate(val_inZ, axis=0).reshape(len(eval_dataset), -1)
-        elabels = np.concatenate(elabels, axis=0)
+                        inp = eval_dataset.format_data(inp, None, None, device)
+                        labels = labels.to(device)
+                        log_p, distloss, logdet, out = model(inp, labels)
+                        val_inZ.append(out.detach().cpu().numpy())
+                        elabels.append(labels.detach().cpu().numpy())
+                val_inZ = np.concatenate(val_inZ, axis=0).reshape(len(eval_dataset), -1)
+                elabels = np.concatenate(elabels, axis=0)
 
-        # zridge_score = zlinridge.score(val_inZ, elabels)
-        y_pred = zlinridge.predict(val_inZ)
-        zridge_score = (np.power((y_pred - elabels), 2)).mean()
-        zridge_scores.append(zridge_score)
+                y_pred = zlinridge.predict(val_inZ)
+                zridge_score = (np.power((y_pred - elabels), 2)).mean()
+                zridge_scores.append(zridge_score)
 
-        # Analytic predictions:
-        # device_p = device
-        # device_p = 'cpu'
-        # Zt = torch.from_numpy(Z).to(device_p)
-        # val_inZt = torch.from_numpy(val_inZ).to(device_p)
-        # tlabelst = torch.from_numpy(tlabels).float().to(device_p)
-        # norm_Z = Zt / torch.sum(Zt, dim=1, keepdim=True)
-        # norm_val_inZ = val_inZt / torch.sum(val_inZt, dim=1, keepdim=True)
-        # alphas = torch.matmul(
-        #     torch.inverse(torch.matmul(norm_Z, norm_Z.transpose(1, 0)) + 0.01 * torch.eye(Zt.shape[0]).to(device_p)),
-        #     tlabelst)
-        # pred = torch.matmul(torch.sum(alphas.unsqueeze(1) * norm_Z, dim=0),
-        #                     norm_val_inZ.transpose(1, 0)).detach().cpu().numpy()
-        # test analytic phi
-        # A = torch.pow(norm_Z, 2) + 0.1
-        # left_inv = torch.matmul(torch.inverse(torch.matmul(A.transpose(1, 0), A)), A.transpose(1, 0))
-        # weights = left_inv @ (2 * tlabelst.unsqueeze(1) * (norm_Z @ torch.ones((norm_Z.shape[1], 1))))
-        # pred = torch.matmul(norm_val_inZ, weights).detach().cpu().numpy()
-        # score = (np.power((pred - elabels), 2)).mean()
+                # Train score
+                y_pred_train = zlinridge.predict(Z)
+                zridge_score_train = (np.power((y_pred_train - tlabels), 2)).mean()
+                scores.append(zridge_score)
+                scores_train.append(zridge_score_train)
+            mean_score = np.mean(scores)
+            mean_score_train = np.mean(scores_train)
+            score_str = f'Our approach ({i}) : {scores}, (train score : {scores_train}) \n' \
+                        f'Mean Scores: {mean_score}, (train score : {mean_score_train})'
+            print(score_str)
+            # if zridge_score >= best_score:
+            if mean_score_train <= best_score_train:
+                best_score_train = mean_score_train
+                best_i_train = i
+                print(f'New best train ({i}).')
+                best_score_str_train = score_str
+                # save_modelhyperparams(zlinridge, param_gridlin, save_dir, model_type, 'zlinear_train',
+                #                       scaler_used=False)
+            if mean_score <= best_score:
+                best_score = mean_score
+                best_i = i
+                print(f'New best ({i}).')
+                best_score_str = score_str
+                # save_modelhyperparams(zlinridge, param_gridlin, save_dir, model_type, 'zlinear', scaler_used=False)
+        else:
+            loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
 
-        # TEST #
-        # if i == 47:
-        #     numpy.save(f'{save_dir}/test_save_Z', Z)
-        #     numpy.save(f'{save_dir}/test_save_valinZ', val_inZ)
-        #     numpy.save(f'{save_dir}/test_save_y', elabels)
-        #     numpy.save(f'{save_dir}/test_save_predy', y_pred)
+            Z = []
+            tlabels = []
+            with torch.no_grad():
+                for j, data in enumerate(loader):
+                    inp, labels = data
+                    inp = train_dataset.format_data(inp, None, None, device)
+                    labels = labels.to(device)
+                    log_p, distloss, logdet, out = model(inp, labels)
+                    Z.append(out.detach().cpu().numpy())
+                    tlabels.append(labels.detach().cpu().numpy())
+            Z = np.concatenate(Z, axis=0).reshape(len(train_dataset), -1)
+            tlabels = np.concatenate(tlabels, axis=0)
 
-        # Train score
-        # zridge_score_train = zlinridge.score(Z, tlabels)
-        y_pred_train = zlinridge.predict(Z)
-        zridge_score_train = (np.power((y_pred_train - tlabels), 2)).mean()
+            # Learn Ridge
+            # zlinridge = make_pipeline(StandardScaler(), KernelRidge(kernel='linear', alpha=0.1))
+            # zlinridge = Ridge(alpha=1.0)
+            # zlinridge.fit(Z, tlabels)
+            param_gridlin = [{'Ridge__alpha': np.concatenate((np.logspace(-5, 2, 11), np.array([1])))}]
+            model_type = ('Ridge', Ridge())
+            scaler = False
+            zlinridge = learn_or_load_modelhyperparams(Z, tlabels, 'zlinear', param_gridlin, save_dir,
+                                                       model_type=model_type, scaler=scaler, save=False,
+                                                       force_train=True)
+            # kernel_name = 'linear'
+            # param_gridlin = [{'Ridge__kernel': [kernel_name], 'Ridge__alpha': np.linspace(0, 10, 11)}]
+            # zlinridge = learn_or_load_modelhyperparams(Z, tlabels, kernel_name, param_gridlin, save_dir,
+            #                                            model_type=('Ridge', KernelRidge()), scaler=False)
 
-        save_fig(Z, tlabels, size=20, save_path=f'{save_dir}/Z_space_{i}')
-        save_fig(val_inZ, elabels, size=20, save_path=f'{save_dir}/Z_space_val_{i}')
+            val_loader = eval_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
 
-        # TEST project between the means
-        from utils.testing import project_between
-        means = model.means.detach().cpu().numpy()
-        proj, dot_val = project_between(val_inZ, means[0], means[1])
-        # pred = ((proj - means[1]) / (means[0] - means[1])) * (
-        #         model.label_max - model.label_min) + model.label_min
-        # pred = pred.mean(axis=1)
-        pred = dot_val.squeeze() * (model.label_max - model.label_min) + model.label_min
-        projection_score = np.power((pred - elabels), 2).mean()
-        # score_str = f'Our approach ({i}) : {zridge_score}, (train score : {zridge_score_train}), (projection) : {projection_score}, (analytic pred): {score}'
-        score_str = f'Our approach ({i}) : {zridge_score}, (train score : {zridge_score_train}), (projection) : {projection_score}'
-        print(score_str)
-        # if zridge_score >= best_score:
-        if zridge_score_train <= best_score_train:
-            best_score_train = zridge_score_train
-            best_i_train = i
-            print(f'New best train ({i}).')
-            best_score_str_train = score_str
-            save_modelhyperparams(zlinridge, param_gridlin, save_dir, model_type, 'zlinear_train', scaler_used=False)
-        if zridge_score <= best_score:
-            best_score = zridge_score
-            best_i = i
-            print(f'New best ({i}).')
-            best_score_str = score_str
-            save_modelhyperparams(zlinridge, param_gridlin, save_dir, model_type, 'zlinear', scaler_used=False)
+            val_inZ = []
+            elabels = []
+            with torch.no_grad():
+                for j, data in enumerate(val_loader):
+                    inp, labels = data
+
+                    inp = eval_dataset.format_data(inp, None, None, device)
+                    labels = labels.to(device)
+                    log_p, distloss, logdet, out = model(inp, labels)
+                    val_inZ.append(out.detach().cpu().numpy())
+                    elabels.append(labels.detach().cpu().numpy())
+            val_inZ = np.concatenate(val_inZ, axis=0).reshape(len(eval_dataset), -1)
+            elabels = np.concatenate(elabels, axis=0)
+
+            # zridge_score = zlinridge.score(val_inZ, elabels)
+            y_pred = zlinridge.predict(val_inZ)
+            zridge_score = (np.power((y_pred - elabels), 2)).mean()
+            zridge_scores.append(zridge_score)
+
+            # Analytic predictions:
+            # device_p = device
+            # device_p = 'cpu'
+            # Zt = torch.from_numpy(Z).to(device_p)
+            # val_inZt = torch.from_numpy(val_inZ).to(device_p)
+            # tlabelst = torch.from_numpy(tlabels).float().to(device_p)
+            # norm_Z = Zt / torch.sum(Zt, dim=1, keepdim=True)
+            # norm_val_inZ = val_inZt / torch.sum(val_inZt, dim=1, keepdim=True)
+            # alphas = torch.matmul(
+            #     torch.inverse(torch.matmul(norm_Z, norm_Z.transpose(1, 0)) + 0.01 * torch.eye(Zt.shape[0]).to(device_p)),
+            #     tlabelst)
+            # pred = torch.matmul(torch.sum(alphas.unsqueeze(1) * norm_Z, dim=0),
+            #                     norm_val_inZ.transpose(1, 0)).detach().cpu().numpy()
+            # test analytic phi
+            # A = torch.pow(norm_Z, 2) + 0.1
+            # left_inv = torch.matmul(torch.inverse(torch.matmul(A.transpose(1, 0), A)), A.transpose(1, 0))
+            # weights = left_inv @ (2 * tlabelst.unsqueeze(1) * (norm_Z @ torch.ones((norm_Z.shape[1], 1))))
+            # pred = torch.matmul(norm_val_inZ, weights).detach().cpu().numpy()
+            # score = (np.power((pred - elabels), 2)).mean()
+
+            # TEST #
+            # if i == 47:
+            #     numpy.save(f'{save_dir}/test_save_Z', Z)
+            #     numpy.save(f'{save_dir}/test_save_valinZ', val_inZ)
+            #     numpy.save(f'{save_dir}/test_save_y', elabels)
+            #     numpy.save(f'{save_dir}/test_save_predy', y_pred)
+
+            # Train score
+            # zridge_score_train = zlinridge.score(Z, tlabels)
+            y_pred_train = zlinridge.predict(Z)
+            zridge_score_train = (np.power((y_pred_train - tlabels), 2)).mean()
+
+            save_fig(Z, tlabels, size=20, save_path=f'{save_dir}/Z_space_{i}')
+            save_fig(val_inZ, elabels, size=20, save_path=f'{save_dir}/Z_space_val_{i}')
+
+            # TEST project between the means
+            from utils.testing import project_between
+            means = model.means.detach().cpu().numpy()
+            proj, dot_val = project_between(val_inZ, means[0], means[1])
+            # pred = ((proj - means[1]) / (means[0] - means[1])) * (
+            #         model.label_max - model.label_min) + model.label_min
+            # pred = pred.mean(axis=1)
+            pred = dot_val.squeeze() * (model.label_max - model.label_min) + model.label_min
+            projection_score = np.power((pred - elabels), 2).mean()
+            # score_str = f'Our approach ({i}) : {zridge_score}, (train score : {zridge_score_train}), (projection) : {projection_score}, (analytic pred): {score}'
+            score_str = f'Our approach ({i}) : {zridge_score}, (train score : {zridge_score_train}), (projection) : {projection_score}'
+            print(score_str)
+            # if zridge_score >= best_score:
+            if zridge_score_train <= best_score_train:
+                best_score_train = zridge_score_train
+                best_i_train = i
+                print(f'New best train ({i}).')
+                best_score_str_train = score_str
+                save_modelhyperparams(zlinridge, param_gridlin, save_dir, model_type, 'zlinear_train',
+                                      scaler_used=False)
+            if zridge_score <= best_score:
+                best_score = zridge_score
+                best_i = i
+                print(f'New best ({i}).')
+                best_score_str = score_str
+                save_modelhyperparams(zlinridge, param_gridlin, save_dir, model_type, 'zlinear', scaler_used=False)
 
     model_loading_params = t_model_params[best_i]
     if model_loading_params['model'] == 'cglow':

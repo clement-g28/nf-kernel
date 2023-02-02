@@ -69,7 +69,6 @@ def train(args, model_single, add_path, gaussian_params, train_dataset, val_data
                 # nll_loss, log_p, log_det = calc_loss(log_p, logdet, dataset.im_size, n_bins)
                 nll_loss, log_p, log_det = dataset.format_loss(log_p, logdet, n_bins)
                 loss = nll_loss - beta * distloss
-                # + torch.pow(log_det, 2)
 
                 loss = model_single.upstream_process(loss)
 

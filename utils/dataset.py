@@ -741,6 +741,16 @@ class GraphDataset(BaseDataset):
         # if self.is_regression_dataset():
         #     self.label_mindist = self.init_labelmin()
 
+    def permute_graphs_in_dataset(self):
+        # r = list(zip(*self.X))
+        # res = []
+        # for t in r:
+        #     res.append(np.concatenate([np.expand_dims(v, axis=0) for v in t], axis=0))
+        # result = transform_graph_permutation(*res)
+        #
+        for i in range(len(self.X)):
+            self.X[i] = transform_graph_permutation(*self.X[i])
+
     def get_flattened_X(self):
         x, adj = list(zip(*self.X))
         x = np.concatenate([np.expand_dims(v, axis=0) for v in x], axis=0)
