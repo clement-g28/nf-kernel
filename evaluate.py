@@ -871,6 +871,7 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
                 krr_graph_scores[i].append((graph_krr_r2_score, graph_krr_mae_score, graph_krr_mse_score))
 
         # PRINT RESULTS
+        lines = []
         print('Predictions scores :')
         r2_mean_score = np.mean(ridge_r2_scores)
         mse_mean_score = np.mean(ridge_mse_scores)
@@ -878,6 +879,7 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
         score_str = f'Ridge R2: {ridge_r2_scores}, MSE: {ridge_mse_scores}, MAE: {ridge_mae_scores} \n' \
                     f'Mean Scores: R2: {r2_mean_score}, MSE: {mse_mean_score}, MAE: {mae_mean_score}'
         print(score_str)
+        lines += [score_str, '\n']
 
         for j, krr_type in enumerate(krr_types):
             r2_scores = []
@@ -893,6 +895,7 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
             score_str = f'KernelRidge ({krr_type}) R2: {r2_scores}, MSE: {mse_scores}, MAE: {mae_scores} \n' \
                         f'Mean Scores: R2: {r2_mean_score}, MSE: {mse_mean_score}, MAE: {mae_mean_score}'
             print(score_str)
+            lines += [score_str, '\n']
 
         for j, graph_krr in enumerate(graph_krrs):
             r2_scores = []
@@ -908,6 +911,7 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
             score_str = f'GraphKernelRidge ({graph_kernels[j][2]}) R2: {r2_scores}, MSE: {mse_scores}, MAE: {mae_scores} \n' \
                         f'Mean Scores: R2: {r2_mean_score}, MSE: {mse_mean_score}, MAE: {mae_mean_score}'
             print(score_str)
+            lines += [score_str, '\n']
 
         r2_mean_score = np.mean(our_r2_scores)
         mse_mean_score = np.mean(our_mse_scores)
@@ -915,12 +919,15 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
         score_str = f'Our approach R2: {our_r2_scores}, MSE: {our_mse_scores}, MAE: {our_mae_scores} \n' \
                     f'Mean Scores: R2: {r2_mean_score}, MSE: {mse_mean_score}, MAE: {mae_mean_score}'
         print(score_str)
+        lines += [score_str, '\n']
         r2_mean_score = np.mean(r2_scores_train)
         mse_mean_score = np.mean(mse_scores_train)
         mae_mean_score = np.mean(mae_scores_train)
         score_str = f'(On train) Our approach R2: {our_r2_scores}, MSE: {our_mse_scores}, MAE: {our_mae_scores} \n' \
                     f'Mean Scores: R2: {r2_mean_score}, MSE: {mse_mean_score}, MAE: {mae_mean_score}'
         print(score_str)
+        lines += [score_str, '\n']
+
     else:
         # OUR APPROACH EVALUATION
         if model is not None:
@@ -990,6 +997,7 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
             # krr_score = np.abs(krr.predict(X_val) - labels_val).mean()
             krr_scores[i].append((krr_r2_score, krr_mae_score, krr_mse_score))
 
+        lines = []
         # GRAPH KERNELS EVALUATION
         if isinstance(train_dataset, GraphDataset):
             for i, graph_krr in enumerate(graph_krrs):
@@ -1001,18 +1009,33 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
                 graph_krr_mae_score = np.abs(graph_krr.predict(K_val) - labels_val).mean()
                 graph_krr_mse_score = np.power(graph_krr.predict(K_val) - labels_val, 2).mean()
 
-                print(f'GraphKernelRidge ({graph_kernels[i][2]}) R2: {graph_krr_r2_score}, '
-                      f'MSE: {graph_krr_mse_score}, MAE: {graph_krr_mae_score}')
+                score_str = f'GraphKernelRidge ({graph_kernels[i][2]}) R2: {graph_krr_r2_score}, ' \
+                            f'MSE: {graph_krr_mse_score}, MAE: {graph_krr_mae_score}'
+                print(score_str)
+                lines += [score_str, '\n']
 
         print('Predictions scores :')
-        print(f'Ridge R2: {ridge_r2_score}, MSE: {ridge_mse_score}, MAE: {ridge_mae_score}')
+        score_str = f'Ridge R2: {ridge_r2_score}, MSE: {ridge_mse_score}, MAE: {ridge_mae_score}'
+        print(score_str)
+        lines += [score_str, '\n']
         for j, krr_type in enumerate(krr_types):
             krr_r2_score, krr_mae_score, krr_mse_score = krr_scores[j][0]
-            print(f'KernelRidge ({krr_type}) R2: {krr_r2_score}, MSE: {krr_mse_score}, MAE: {krr_mae_score}')
+            score_str = f'KernelRidge ({krr_type}) R2: {krr_r2_score}, MSE: {krr_mse_score}, MAE: {krr_mae_score}'
+            print(score_str)
+            lines += [score_str, '\n']
 
-        print(f'Our approach (projection) MSE: {projection_mse_score}, MAE: {projection_mae_score}')
-        print(f'Our approach R2: {zridge_r2_score}, MSE: {zridge_mse_score}, MAE: {zridge_mae_score}, q2_ext: {q2_ext}')
-        print(f'(On train) Our approach R2: {t_zridge_r2_score}, MSE: {t_zridge_mse_score}, MAE: {t_zridge_mae_score}')
+        score_str = f'Our approach (projection) MSE: {projection_mse_score}, MAE: {projection_mae_score}'
+        print(score_str)
+        lines += [score_str, '\n']
+        score_str = f'Our approach R2: {zridge_r2_score}, MSE: {zridge_mse_score}, MAE: {zridge_mae_score}, q2_ext: {q2_ext}'
+        print(score_str)
+        lines += [score_str, '\n']
+        score_str = f'(On train) Our approach R2: {t_zridge_r2_score}, MSE: {t_zridge_mse_score}, MAE: {t_zridge_mae_score}'
+        print(score_str)
+        lines += [score_str, '\n']
+
+    with open(f"{save_dir}/eval_res.txt", 'w') as f:
+        f.writelines(lines)
 
 
 def create_figures_XZ(model, train_dataset, save_path, device, std_noise=0.1, only_Z=False):
@@ -1175,7 +1198,7 @@ def evaluate_regression_preimage2(model, val_dataset, device, save_dir):
         from rdkit.Chem import Draw, AllChem
         from ordered_set import OrderedSet
         for ind, mol in enumerate(valid_mols):
-            save_mol_png(mol, os.path.join(mol_dir, '{}.png'.format(ind)))
+            # save_mol_png(mol, os.path.join(mol_dir, '{}.png'.format(ind)))
 
             # show with closest dataset samples
             psize = (200, 200)
@@ -1596,10 +1619,9 @@ if __name__ == "__main__":
             assert dataset_name in dataset_name_eval, f'Projection can only be evaluated on {dataset_name_eval}'
     elif eval_type == 'regression':
         assert dataset.is_regression_dataset(), 'the dataset is not made for regression purposes'
-        # evaluate_regression(model, train_dataset, val_dataset, save_dir, device)
+        evaluate_regression(model, train_dataset, val_dataset, save_dir, device)
         # _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
         #                          only_Z=isinstance(dataset, GraphDataset))
         # evaluate_regression_preimage(model, val_dataset, device, save_dir)
-        evaluate_regression_preimage2(model, val_dataset, device, save_dir)
+        # evaluate_regression_preimage2(model, val_dataset, device, save_dir)
         # evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z)
-        # TODO openbenchmark, random permutation on graph for regression, compare with same y values from dset
