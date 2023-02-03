@@ -43,7 +43,7 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
 
     if isinstance(train_dataset, GraphDataset):  # Permutations for Graphs
         train_dataset.permute_graphs_in_dataset()
-        val_dataset.permute_graphs_in_dataset()
+        eval_dataset.permute_graphs_in_dataset()
 
     # TEST
     start_from = None
@@ -115,7 +115,7 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
             scores = []
             scores_train = []
             for n_perm in range(n_permutation):
-                val_dataset.permute_graphs_in_dataset()
+                eval_dataset.permute_graphs_in_dataset()
 
                 val_loader = eval_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
 
