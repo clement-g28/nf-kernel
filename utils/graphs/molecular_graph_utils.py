@@ -244,15 +244,15 @@ def process_mols(name, train_data, test_data, max_num_nodes, lmap, dupe_filter, 
     results = []
     for mols, y in (train_data, test_data):
 
-        # pool = multiprocessing.Pool()
-        # returns = pool.map(multiprocessing_func,
-        #                    [(chunk, i, max_num_nodes, lmap, name, categorical_values, return_smiles) for i, chunk
-        #                     in
-        #                     enumerate(chunks(list(zip(mols, y)), os.cpu_count()))])
-        # pool.close()
-        # returns = list(itertools.chain.from_iterable(returns))
+        pool = multiprocessing.Pool()
+        returns = pool.map(multiprocessing_func,
+                           [(chunk, i, max_num_nodes, lmap, name, categorical_values, return_smiles) for i, chunk
+                            in
+                            enumerate(chunks(list(zip(mols, y)), os.cpu_count()))])
+        pool.close()
+        returns = list(itertools.chain.from_iterable(returns))
 
-        returns = multiprocessing_func((list(zip(mols, y)), 0, max_num_nodes, lmap, name, categorical_values, return_smiles))
+        # returns = multiprocessing_func((list(zip(mols, y)), 0, max_num_nodes, lmap, name, categorical_values, return_smiles))
 
         returns = list(filter(None, returns))
 
