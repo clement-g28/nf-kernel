@@ -876,12 +876,12 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
         r2_mean_score = np.mean(ridge_r2_scores)
         mse_mean_score = np.mean(ridge_mse_scores)
         mae_mean_score = np.mean(ridge_mae_scores)
-        r2_var_score = np.var(ridge_r2_scores)
-        mse_var_score = np.var(ridge_mse_scores)
-        mae_var_score = np.var(ridge_mae_scores)
+        r2_std_score = np.std(ridge_r2_scores)
+        mse_std_score = np.std(ridge_mse_scores)
+        mae_std_score = np.std(ridge_mae_scores)
         score_str = f'Ridge R2: {ridge_r2_scores}, MSE: {ridge_mse_scores}, MAE: {ridge_mae_scores} \n' \
                     f'Mean Scores: R2: {r2_mean_score}, MSE: {mse_mean_score}, MAE: {mae_mean_score} \n' \
-                    f'Var Scores: R2: {r2_var_score}, MSE: {mse_var_score}, MAE: {mae_var_score}'
+                    f'Std Scores: R2: {r2_std_score}, MSE: {mse_std_score}, MAE: {mae_std_score}'
         print(score_str)
         lines += [score_str, '\n']
 
@@ -896,12 +896,12 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
             r2_mean_score = np.mean(r2_scores)
             mse_mean_score = np.mean(mse_scores)
             mae_mean_score = np.mean(mae_scores)
-            r2_var_score = np.var(r2_scores)
-            mse_var_score = np.var(mse_scores)
-            mae_var_score = np.var(mae_scores)
+            r2_std_score = np.std(r2_scores)
+            mse_std_score = np.std(mse_scores)
+            mae_std_score = np.std(mae_scores)
             score_str = f'KernelRidge ({krr_type}) R2: {r2_scores}, MSE: {mse_scores}, MAE: {mae_scores} \n' \
                         f'Mean Scores: R2: {r2_mean_score}, MSE: {mse_mean_score}, MAE: {mae_mean_score} \n' \
-                        f'Var Scores: R2: {r2_var_score}, MSE: {mse_var_score}, MAE: {mae_var_score}'
+                        f'Std Scores: R2: {r2_std_score}, MSE: {mse_std_score}, MAE: {mae_std_score}'
             print(score_str)
             lines += [score_str, '\n']
 
@@ -916,35 +916,35 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
             r2_mean_score = np.mean(r2_scores)
             mse_mean_score = np.mean(mse_scores)
             mae_mean_score = np.mean(mae_scores)
-            r2_var_score = np.var(r2_scores)
-            mse_var_score = np.var(mse_scores)
-            mae_var_score = np.var(mae_scores)
+            r2_std_score = np.std(r2_scores)
+            mse_std_score = np.std(mse_scores)
+            mae_std_score = np.std(mae_scores)
             score_str = f'GraphKernelRidge ({graph_kernels[j][2]}) R2: {r2_scores}, MSE: {mse_scores}, MAE: {mae_scores} \n' \
                         f'Mean Scores: R2: {r2_mean_score}, MSE: {mse_mean_score}, MAE: {mae_mean_score} \n' \
-                        f'Var Scores: R2: {r2_var_score}, MSE: {mse_var_score}, MAE: {mae_var_score}'
+                        f'Std Scores: R2: {r2_std_score}, MSE: {mse_std_score}, MAE: {mae_std_score}'
             print(score_str)
             lines += [score_str, '\n']
 
         r2_mean_score = np.mean(our_r2_scores)
         mse_mean_score = np.mean(our_mse_scores)
         mae_mean_score = np.mean(our_mae_scores)
-        r2_var_score = np.var(our_r2_scores)
-        mse_var_score = np.var(our_mse_scores)
-        mae_var_score = np.var(our_mae_scores)
+        r2_std_score = np.std(our_r2_scores)
+        mse_std_score = np.std(our_mse_scores)
+        mae_std_score = np.std(our_mae_scores)
         score_str = f'Our approach R2: {our_r2_scores}, MSE: {our_mse_scores}, MAE: {our_mae_scores} \n' \
                     f'Mean Scores: R2: {r2_mean_score}, MSE: {mse_mean_score}, MAE: {mae_mean_score} \n' \
-                    f'Var Scores: R2: {r2_var_score}, MSE: {mse_var_score}, MAE: {mae_var_score}'
+                    f'Std Scores: R2: {r2_std_score}, MSE: {mse_std_score}, MAE: {mae_std_score}'
         print(score_str)
         lines += [score_str, '\n']
         r2_mean_score = np.mean(r2_scores_train)
         mse_mean_score = np.mean(mse_scores_train)
         mae_mean_score = np.mean(mae_scores_train)
-        r2_var_score = np.var(r2_scores_train)
-        mse_var_score = np.var(mse_scores_train)
-        mae_var_score = np.var(mae_scores_train)
+        r2_std_score = np.std(r2_scores_train)
+        mse_std_score = np.std(mse_scores_train)
+        mae_std_score = np.std(mae_scores_train)
         score_str = f'(On train) Our approach R2: {our_r2_scores}, MSE: {our_mse_scores}, MAE: {our_mae_scores} \n' \
                     f'Mean Scores: R2: {r2_mean_score}, MSE: {mse_mean_score}, MAE: {mae_mean_score} \n' \
-                    f'Var Scores: R2: {r2_var_score}, MSE: {mse_var_score}, MAE: {mae_var_score}'
+                    f'Std Scores: R2: {r2_std_score}, MSE: {mse_std_score}, MAE: {mae_std_score}'
         print(score_str)
         lines += [score_str, '\n']
 
