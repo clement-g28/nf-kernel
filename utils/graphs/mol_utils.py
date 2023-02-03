@@ -237,7 +237,7 @@ def adj_to_smiles(adj, x, atomic_num_list):
 
 
 def check_validity(adj, x, atomic_num_list, gpu=-1, return_unique=True,
-                   correct_validity=True, largest_connected_comp=True, debug=True):
+                   correct_validity=True, largest_connected_comp=True, debug=True, with_idx=False):
     """
 
     :param adj:  (100,4,9,9)
@@ -249,11 +249,11 @@ def check_validity(adj, x, atomic_num_list, gpu=-1, return_unique=True,
     """
     adj = _to_numpy_array(adj)  # , gpu)  (1000,4,9,9)
     x = _to_numpy_array(x)  # , gpu)  (1000,9,5)
+    valid = []
     if correct_validity:
         # valid = [valid_mol_can_with_seg(construct_mol_with_validation(x_elem, adj_elem, atomic_num_list)) # valid_mol_can_with_seg
         #          for x_elem, adj_elem in zip(x, adj)]
-        valid = []
-        for x_elem, adj_elem in zip(x, adj):
+        for i, (x_elem, adj_elem) in enumerate(zip(x, adj)):
             mol = construct_mol(x_elem, adj_elem, atomic_num_list)
             # Chem.Kekulize(mol, clearAromaticFlags=True)
             cmol = correct_mol(mol)
@@ -262,9 +262,10 @@ def check_validity(adj, x, atomic_num_list, gpu=-1, return_unique=True,
             # Chem.Kekulize(vcmol, clearAromaticFlags=True)
             valid.append(vcmol)
     else:
-        valid = [valid_mol(construct_mol(x_elem, adj_elem, atomic_num_list))
-                 for x_elem, adj_elem in zip(x, adj)]  # len()=1000
+        for i, (x_elem, adj_elem) in enumerate(zip(x, adj)):
+            valid.append(valid_mol(construct_mol(x_elem, adj_elem, atomic_num_list)))
     valid = [mol for mol in valid if mol is not None]  # len()=valid number, say 794
+    idxs = [i for i, mol in enumerate(valid) if mol is not None]
     if debug:
         print("valid molecules: {}/{}".format(len(valid), adj.shape[0]))
         for i, mol in enumerate(valid):
@@ -290,6 +291,8 @@ def check_validity(adj, x, atomic_num_list, gpu=-1, return_unique=True,
     results['valid_ratio'] = valid_ratio * 100
     results['unique_ratio'] = unique_ratio * 100
     results['abs_unique_ratio'] = abs_unique_ratio * 100
+    if with_idx:
+        results['idxs'] = idxs
 
     return results
 
