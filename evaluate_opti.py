@@ -210,5 +210,5 @@ if __name__ == "__main__":
         # _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
         #                          only_Z=isinstance(dataset, GraphDataset))
         # evaluate_regression_preimage(model, val_dataset, device, save_dir)
-        # evaluate_regression_preimage2(model, val_dataset, device, save_dir)
+        evaluate_regression_preimage2(model, val_dataset, device, save_dir)
         # evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z)

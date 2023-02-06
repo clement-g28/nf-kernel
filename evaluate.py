@@ -942,7 +942,7 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
         r2_std_score = np.std(r2_scores_train)
         mse_std_score = np.std(mse_scores_train)
         mae_std_score = np.std(mae_scores_train)
-        score_str = f'(On train) Our approach R2: {our_r2_scores}, MSE: {our_mse_scores}, MAE: {our_mae_scores} \n' \
+        score_str = f'(On train) Our approach R2: {r2_scores_train}, MSE: {mse_scores_train}, MAE: {mae_scores_train} \n' \
                     f'Mean Scores: R2: {r2_mean_score}, MSE: {mse_mean_score}, MAE: {mae_mean_score} \n' \
                     f'Std Scores: R2: {r2_std_score}, MSE: {mse_std_score}, MAE: {mae_std_score}'
         print(score_str)
