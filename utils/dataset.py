@@ -996,8 +996,15 @@ class GraphDataset(BaseDataset):
     def rescale(x):
         return x
 
+    def get_dataset_params(self):
+        raise NotImplementedError
+
+    @staticmethod
+    def load_dataset(name):
+        raise NotImplementedError
+
     def is_regression_dataset(self):
-        return True
+        raise NotImplementedError
 
 
 class RegressionGraphDataset(GraphDataset):
