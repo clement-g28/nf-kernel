@@ -3,7 +3,8 @@ import math
 import torch
 
 import ffjord_lib.layers.odefunc as odefunc
-from utils.dataset import DATASETS, REGRESSION_DATASETS, GRAPH_DATASETS
+from utils.dataset import SIMPLE_DATASETS, SIMPLE_REGRESSION_DATASETS, IMAGE_DATASETS, GRAPH_REGRESSION_DATASETS, \
+    GRAPH_CLASSIFICATION_DATASETS
 from utils.models import GRAPH_MODELS, SIMPLE_MODELS, IMAGE_MODELS
 
 
@@ -173,7 +174,9 @@ def seqflow_arguments():
 
 def training_arguments():
     parser = argparse.ArgumentParser(description="CGlow trainer")
-    parser.add_argument("--dataset", type=str, default='mnist', choices=DATASETS + REGRESSION_DATASETS + GRAPH_DATASETS,
+    parser.add_argument("--dataset", type=str, default='mnist',
+                        choices=SIMPLE_DATASETS + SIMPLE_REGRESSION_DATASETS + IMAGE_DATASETS +
+                                GRAPH_REGRESSION_DATASETS + GRAPH_CLASSIFICATION_DATASETS,
                         help="Dataset to use")
     parser.add_argument("--batch_size", default=16, type=int, help="batch size")
     parser.add_argument("--n_epoch", default=1000, type=int, help="number of epoch")

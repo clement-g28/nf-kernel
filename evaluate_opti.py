@@ -13,7 +13,9 @@ from utils.utils import set_seed, create_folder, save_every_pic, initialize_gaus
 from utils.custom_glow import CGlow, WrappedModel
 from utils.models import load_seqflow_model, load_ffjord_model, load_moflow_model
 from utils.models import IMAGE_MODELS, SIMPLE_MODELS, GRAPH_MODELS
-from utils.dataset import ImDataset, SimpleDataset, GraphDataset
+from utils.dataset import ImDataset, SimpleDataset, GraphDataset, RegressionGraphDataset, ClassificationGraphDataset, \
+    SIMPLE_DATASETS, SIMPLE_REGRESSION_DATASETS, IMAGE_DATASETS, GRAPH_REGRESSION_DATASETS, \
+    GRAPH_CLASSIFICATION_DATASETS
 from utils.density import construct_covariance
 from utils.testing import learn_or_load_modelhyperparams, generate_sample, project_inZ, testing_arguments, noise_data
 from utils.testing import project_between
@@ -49,15 +51,22 @@ if __name__ == "__main__":
 
     dataset_name, model_type, folder_name = args.folder.split('/')[-3:]
     # DATASET #
-    if model_type in IMAGE_MODELS:
+    if dataset_name in IMAGE_DATASETS:
         dataset = ImDataset(dataset_name=dataset_name)
-        n_channel = dataset.n_channel
-    elif model_type in GRAPH_MODELS:
-        dataset = GraphDataset(dataset_name=dataset_name)
-        n_channel = -1
-    else:
+    elif dataset_name == 'fishtoxi':  # Special case where the data can be either graph or vectorial data
+        use_graph_type = model_type in GRAPH_MODELS
+        if use_graph_type:
+            dataset = RegressionGraphDataset(dataset_name=dataset_name)
+        else:
+            dataset = SimpleDataset(dataset_name=dataset_name)
+    elif dataset_name in SIMPLE_DATASETS or dataset_name in SIMPLE_REGRESSION_DATASETS:
         dataset = SimpleDataset(dataset_name=dataset_name)
-        n_channel = 1
+    elif dataset_name in GRAPH_REGRESSION_DATASETS:
+        dataset = RegressionGraphDataset(dataset_name=dataset_name)
+    elif dataset_name in GRAPH_CLASSIFICATION_DATASETS:
+        dataset = ClassificationGraphDataset(dataset_name=dataset_name)
+    else:
+        assert False, 'unknown dataset'
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -132,6 +141,7 @@ if __name__ == "__main__":
     learn_mean = True
     if model_type == 'cglow':
         args_cglow, _ = cglow_arguments().parse_known_args()
+        n_channel = dataset.n_channel
         affine = args_cglow.affine
         no_lu = args_cglow.no_lu
         # Load model
@@ -206,10 +216,11 @@ if __name__ == "__main__":
             assert dataset_name in dataset_name_eval, f'Projection can only be evaluated on {dataset_name_eval}'
     elif eval_type == 'regression':
         assert dataset.is_regression_dataset(), 'the dataset is not made for regression purposes'
-        # evaluate_regression(model, train_dataset, val_dataset, save_dir, device)
-        # _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
-        #                          only_Z=isinstance(dataset, GraphDataset))
+        evaluate_regression(model, train_dataset, val_dataset, save_dir, device)
+        _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
+                                 only_Z=isinstance(dataset, GraphDataset))
         evaluate_regression_preimage(model, val_dataset, device, save_dir, print_as_mol=True, print_as_graph=True)
         evaluate_regression_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=10,
                                       print_as_mol=True, print_as_graph=True)
-        # evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z)
+        evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z,
+                                print_as_mol=True, print_as_graph=True)

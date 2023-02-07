@@ -11,7 +11,9 @@ from utils.models import load_seqflow_model, load_ffjord_model, load_moflow_mode
     IMAGE_MODELS, SIMPLE_MODELS
 from utils.training import training_arguments, ffjord_arguments, seqflow_arguments, cglow_arguments, moflow_arguments, \
     graphnvp_arguments, AddGaussianNoise, calc_loss
-from utils.dataset import ImDataset, SimpleDataset, GraphDataset
+from utils.dataset import ImDataset, SimpleDataset, GraphDataset, RegressionGraphDataset, ClassificationGraphDataset, \
+    SIMPLE_DATASETS, SIMPLE_REGRESSION_DATASETS, IMAGE_DATASETS, GRAPH_REGRESSION_DATASETS, \
+    GRAPH_CLASSIFICATION_DATASETS
 from utils.density import construct_covariance
 from utils.utils import write_dict_to_tensorboard, set_seed, create_folder, AverageMeter, initialize_gaussian_params, \
     initialize_regression_gaussian_params, initialize_tmp_regression_gaussian_params
@@ -194,12 +196,22 @@ if __name__ == "__main__":
 
     transform = transforms.Compose(transform)
 
-    if args.model in IMAGE_MODELS:
+    if args.dataset in IMAGE_DATASETS:
         dataset = ImDataset(dataset_name=args.dataset, transform=transform)
-    elif args.model in GRAPH_MODELS:
-        dataset = GraphDataset(dataset_name=args.dataset, transform='permutation')
-    else:
+    elif args.dataset == 'fishtoxi':  # Special case where the data can be either graph or vectorial data
+        use_graph_type = args.model in GRAPH_MODELS
+        if use_graph_type:
+            dataset = RegressionGraphDataset(dataset_name=args.dataset, transform='permutation')
+        else:
+            dataset = SimpleDataset(dataset_name=args.dataset, transform=transform)
+    elif args.dataset in SIMPLE_DATASETS or args.dataset in SIMPLE_REGRESSION_DATASETS:
         dataset = SimpleDataset(dataset_name=args.dataset, transform=transform)
+    elif args.dataset in GRAPH_REGRESSION_DATASETS:
+        dataset = RegressionGraphDataset(dataset_name=args.dataset, transform='permutation')
+    elif args.dataset in GRAPH_CLASSIFICATION_DATASETS:
+        dataset = ClassificationGraphDataset(dataset_name=args.dataset, transform='permutation')
+    else:
+        assert False, 'unknown dataset'
 
     redclass_str = ''
     if args.reduce_class_size:
@@ -326,7 +338,7 @@ if __name__ == "__main__":
     elif args.model == 'graphnvp':
         args_graphnvp, _ = graphnvp_arguments().parse_known_args()
         model_single = load_graphnvp_model(args_graphnvp, gaussian_params=gaussian_params,
-                           learn_mean=not args.fix_mean, reg_use_var=args.reg_use_var, dataset=dataset)
+                                           learn_mean=not args.fix_mean, reg_use_var=args.reg_use_var, dataset=dataset)
     else:
         assert False, 'unknown model type'
 

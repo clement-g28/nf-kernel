@@ -6,7 +6,9 @@ import os
 import re
 
 from utils.custom_glow import CGlow, WrappedModel
-from utils.dataset import ImDataset, SimpleDataset, GraphDataset
+from utils.dataset import ImDataset, SimpleDataset, GraphDataset, RegressionGraphDataset, ClassificationGraphDataset, \
+    SIMPLE_DATASETS, SIMPLE_REGRESSION_DATASETS, IMAGE_DATASETS, GRAPH_REGRESSION_DATASETS, \
+    GRAPH_CLASSIFICATION_DATASETS
 
 from utils.utils import set_seed, create_folder, initialize_gaussian_params, initialize_regression_gaussian_params, \
     save_fig, initialize_tmp_regression_gaussian_params
@@ -34,16 +36,24 @@ if __name__ == '__main__':
     set_seed(0)
 
     dataset_name, model_type, folder_name = args.folder.split('/')[-3:]
+
     # DATASET #
-    if model_type in IMAGE_MODELS:
+    if dataset_name in IMAGE_DATASETS:
         dataset = ImDataset(dataset_name=dataset_name)
-        n_channel = dataset.n_channel
-    elif model_type in GRAPH_MODELS:
-        dataset = GraphDataset(dataset_name=dataset_name)
-        n_channel = -1
-    else:
+    elif dataset_name == 'fishtoxi':  # Special case where the data can be either graph or vectorial data
+        use_graph_type = model_type in GRAPH_MODELS
+        if use_graph_type:
+            dataset = RegressionGraphDataset(dataset_name=dataset_name)
+        else:
+            dataset = SimpleDataset(dataset_name=dataset_name)
+    elif dataset_name in SIMPLE_DATASETS or dataset_name in SIMPLE_REGRESSION_DATASETS:
         dataset = SimpleDataset(dataset_name=dataset_name)
-        n_channel = 1
+    elif dataset_name in GRAPH_REGRESSION_DATASETS:
+        dataset = RegressionGraphDataset(dataset_name=dataset_name)
+    elif dataset_name in GRAPH_CLASSIFICATION_DATASETS:
+        dataset = ClassificationGraphDataset(dataset_name=dataset_name)
+    else:
+        assert False, 'unknown dataset'
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -123,11 +133,12 @@ if __name__ == '__main__':
                                                                 fixed_eigval=fixed_eigval)
 
         learn_mean = True
-        model_loading_params = {'model': model_type, 'n_dim': n_dim, 'n_channel': n_channel, 'n_flow': n_flow,
+        model_loading_params = {'model': model_type, 'n_dim': n_dim, 'n_flow': n_flow,
                                 'n_block': n_block, 'gaussian_params': gaussian_params, 'device': device,
                                 'loading_path': save_path, 'learn_mean': learn_mean}
         if model_type == 'cglow':
             args_cglow, _ = cglow_arguments().parse_known_args()
+            model_loading_params['n_channel'] = dataset.n_channel
             model_loading_params['affine'] = args_cglow.affine
             model_loading_params['conv_lu'] = not args_cglow.no_lu
         if model_type == 'ffjord':

@@ -6,7 +6,7 @@ import os
 import re
 
 from utils.custom_glow import CGlow, WrappedModel
-from utils.dataset import ImDataset, SimpleDataset
+from utils.dataset import ImDataset, SimpleDataset, SIMPLE_DATASETS, IMAGE_DATASETS
 
 from utils.utils import set_seed, create_folder
 
@@ -189,12 +189,12 @@ if __name__ == '__main__':
 
     dataset_name, model_type, folder_name = args.folder.split('/')[-3:]
     # DATASET #
-    if dataset_name == 'mnist':
+    if dataset_name in IMAGE_DATASETS:
         dataset = ImDataset(dataset_name=dataset_name)
-        n_channel = dataset.n_channel
-    else:
+    elif dataset_name in SIMPLE_DATASETS:
         dataset = SimpleDataset(dataset_name=dataset_name)
-        n_channel = 1
+    else:
+        assert False, 'unknown dataset'
 
     img_size = dataset.im_size
 
@@ -317,11 +317,12 @@ if __name__ == '__main__':
                                                      dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
 
         learn_mean = 'lmean' in folder_name
-        model_loading_params = {'model': model_type, 'n_dim': n_dim, 'n_channel': n_channel, 'n_flow': n_flow,
+        model_loading_params = {'model': model_type, 'n_dim': n_dim, 'n_flow': n_flow,
                                 'n_block': n_block, 'gaussian_params': gaussian_params, 'device': device,
                                 'loading_path': save_path, 'learn_mean': learn_mean}
         if model_type == 'cglow':
             args_cglow, _ = cglow_arguments().parse_known_args()
+            model_loading_params['n_channel'] = dataset.n_channel
             model_loading_params['affine'] = args_cglow.affine
             model_loading_params['conv_lu'] = not args_cglow.no_lu
         if model_type == 'ffjord':

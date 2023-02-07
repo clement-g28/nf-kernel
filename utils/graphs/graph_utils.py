@@ -11,7 +11,7 @@ import matplotlib.gridspec as gridspec
 from utils.utils import create_folder
 
 
-def save_nx_graph(G, node_label_map, save_path, title, n_atom_type, colors):
+def save_nx_graph(G, node_label_map, save_path, n_atom_type, colors, title=None):
     e0 = [(u, v) for (u, v, d) in G.edges(data=True) if d["bond_type"] == 0]
     e1 = [(u, v) for (u, v, d) in G.edges(data=True) if d["bond_type"] == 1]
     e2 = [(u, v) for (u, v, d) in G.edges(data=True) if d["bond_type"] == 2]
@@ -56,7 +56,8 @@ def save_nx_graph(G, node_label_map, save_path, title, n_atom_type, colors):
 
     ax = plt.gca()
     # ax.margins(0.08)
-    plt.title(title)
+    if title is not None:
+        plt.title(title)
     plt.axis("off")
     plt.tight_layout()
     plt.savefig(fname=f'{save_path}.png', format='png')
@@ -110,9 +111,9 @@ def format(images, nrow, save_path, row_legends=None, col_legends=None, show=Fal
 
     im_size1 = images.shape[-2]
     im_size2 = images.shape[-1]
-    fig = plt.figure(figsize=(2 * im_size2 * ncol / 100, 2 * im_size1 * nrow / 100))
+    fig = plt.figure(figsize=(2 * im_size2 * ncol / 100, 2 * im_size2 * nrow / 100))
     gspec = gridspec.GridSpec(
-        ncols=ncol + col_add, nrows=nrow + row_add, figure=fig, height_ratios=ratios
+        ncols=ncol + col_add, nrows=nrow + row_add, figure=fig, height_ratios=ratios, wspace=0, hspace=0
     )
     cmap = plt.get_cmap("gist_gray")
 

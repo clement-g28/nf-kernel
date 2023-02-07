@@ -19,9 +19,11 @@ import pickle
 from sklearn.datasets import load_iris, load_diabetes, load_breast_cancer, make_moons, make_swiss_roll
 from utils import visualize_flow
 
-DATASETS = ['single_moon', 'double_moon', 'iris', 'bcancer', 'mnist']
-REGRESSION_DATASETS = ['swissroll', 'diabetes', 'waterquality', 'aquatoxi', 'fishtoxi', 'trafficflow']
-GRAPH_DATASETS = ['qm7', 'qm9', 'freesolv', 'esol', 'lipo']
+SIMPLE_DATASETS = ['single_moon', 'double_moon', 'iris', 'bcancer']
+IMAGE_DATASETS = ['mnist']
+SIMPLE_REGRESSION_DATASETS = ['swissroll', 'diabetes', 'waterquality', 'aquatoxi', 'fishtoxi', 'trafficflow']
+GRAPH_REGRESSION_DATASETS = ['qm7', 'qm9', 'freesolv', 'esol', 'lipo', 'fishtoxi']
+GRAPH_CLASSIFICATION_DATASETS = []
 
 
 # abstract base kernel dataset class
@@ -267,7 +269,7 @@ class BaseDataset(Dataset):
 class SimpleDataset(BaseDataset):
     def __init__(self, dataset_name, transform=None):
         self.dataset_name = dataset_name
-        self.label_type = np.int if self.dataset_name not in REGRESSION_DATASETS else np.float
+        self.label_type = np.int if self.dataset_name not in SIMPLE_REGRESSION_DATASETS else np.float
         self.transform = transform
         ori_X, ori_true_labels, test_dataset = self.load_dataset(dataset_name)
         super().__init__(ori_X, ori_true_labels, test_dataset)
@@ -309,7 +311,7 @@ class SimpleDataset(BaseDataset):
         return input, (self.true_labels[idx]).astype(self.label_type)
 
     def reduce_dataset(self, reduce_type, label=None, how_many=None, reduce_from_ori=True):
-        assert self.dataset_name not in REGRESSION_DATASETS, "the dataset can\'t be reduced (regression dataset)"
+        assert self.dataset_name not in SIMPLE_REGRESSION_DATASETS, "the dataset can\'t be reduced (regression dataset)"
         return self.reduce_dataset(reduce_type, label, how_many, reduce_from_ori)
 
     @staticmethod
@@ -541,7 +543,7 @@ class SimpleDataset(BaseDataset):
         return x
 
     def is_regression_dataset(self):
-        return self.dataset_name in REGRESSION_DATASETS
+        return self.dataset_name in SIMPLE_REGRESSION_DATASETS
 
 
 class ImDataset(BaseDataset):
@@ -681,7 +683,7 @@ class ImDataset(BaseDataset):
         return dset
 
     def is_regression_dataset(self):
-        return self.dataset_name in REGRESSION_DATASETS
+        return self.dataset_name in SIMPLE_REGRESSION_DATASETS
 
 
 import networkx as nx
@@ -769,47 +771,6 @@ class GraphDataset(BaseDataset):
         for sh in adj.shape[1:]:
             n_adj *= sh
         return n_x + n_adj
-
-    def get_dataset_params(self):
-        atom_type_list = [key for key, val in self.label_map.items()]
-        if self.dataset_name == 'qm7':
-            # atom_type_list = ['C', 'N', 'S', 'O']
-            b_n_type = 4
-            # b_n_squeeze = 1
-            b_n_squeeze = 7
-            a_n_node = 7
-            a_n_type = len(atom_type_list) + 1  # 5
-        elif self.dataset_name == 'qm9':
-            # atom_type_list = ['C', 'N', 'O', 'F']
-            b_n_type = 4
-            # b_n_squeeze = 1
-            b_n_squeeze = 3
-            a_n_node = 9
-            a_n_type = len(atom_type_list) + 1  # 5
-        elif self.dataset_name == 'fishtoxi':
-            # atom_type_list = ['Cl', 'C', 'O', 'N', 'Br', 'S', 'P', 'I', 'F']
-            b_n_type = 4
-            # b_n_squeeze = 1
-            b_n_squeeze = 11
-            a_n_node = 22
-            a_n_type = len(atom_type_list) + 1  # 5
-        elif self.dataset_name == 'freesolv':
-            b_n_type = 4
-            # b_n_squeeze = 1
-            b_n_squeeze = 11
-            a_n_node = 22
-            a_n_type = len(atom_type_list) + 1  # 5
-        elif self.dataset_name == 'esol':
-            b_n_type = 4
-            # b_n_squeeze = 1
-            b_n_squeeze = 11
-            a_n_node = 22
-            a_n_type = len(atom_type_list) + 1  # 5
-        else:
-            assert False, 'unknown dataset'
-        result = {'atom_type_list': atom_type_list, 'b_n_type': b_n_type, 'b_n_squeeze': b_n_squeeze,
-                  'a_n_node': a_n_node, 'a_n_type': a_n_type}
-        return result
 
     def get_nx_graphs(self, edge_to_node=False, data=None):
         function = self.create_node_labeled_only_graph if edge_to_node else self.create_node_and_edge_labeled_graph
@@ -1018,8 +979,71 @@ class GraphDataset(BaseDataset):
     #     # return label_mindist
 
     def reduce_dataset(self, reduce_type, label=None, how_many=None, reduce_from_ori=True):
-        assert self.dataset_name not in REGRESSION_DATASETS, "the dataset can\'t be reduced (regression dataset)"
+        assert self.dataset_name not in SIMPLE_REGRESSION_DATASETS, "the dataset can\'t be reduced (regression dataset)"
         return self.reduce_dataset(reduce_type, label, how_many, reduce_from_ori)
+
+    @staticmethod
+    def format_data(input, n_bits, n_bins, device):
+        for i in range(len(input)):
+            input[i] = input[i].float().to(device)
+        return input
+
+    def format_loss(self, log_p, logdet, n_bins):
+        loss = logdet + log_p
+        return -loss.mean(), log_p.mean(), logdet.mean()
+
+    @staticmethod
+    def rescale(x):
+        return x
+
+    def is_regression_dataset(self):
+        return True
+
+
+class RegressionGraphDataset(GraphDataset):
+    def __init__(self, dataset_name, transform=None):
+        super().__init__(dataset_name, transform=transform)
+
+    def get_dataset_params(self):
+        atom_type_list = [key for key, val in self.label_map.items()]
+        if self.dataset_name == 'qm7':
+            # atom_type_list = ['C', 'N', 'S', 'O']
+            b_n_type = 4
+            # b_n_squeeze = 1
+            b_n_squeeze = 7
+            a_n_node = 7
+            a_n_type = len(atom_type_list) + 1  # 5
+        elif self.dataset_name == 'qm9':
+            # atom_type_list = ['C', 'N', 'O', 'F']
+            b_n_type = 4
+            # b_n_squeeze = 1
+            b_n_squeeze = 3
+            a_n_node = 9
+            a_n_type = len(atom_type_list) + 1  # 5
+        elif self.dataset_name == 'fishtoxi':
+            # atom_type_list = ['Cl', 'C', 'O', 'N', 'Br', 'S', 'P', 'I', 'F']
+            b_n_type = 4
+            # b_n_squeeze = 1
+            b_n_squeeze = 11
+            a_n_node = 22
+            a_n_type = len(atom_type_list) + 1  # 5
+        elif self.dataset_name == 'freesolv':
+            b_n_type = 4
+            # b_n_squeeze = 1
+            b_n_squeeze = 11
+            a_n_node = 22
+            a_n_type = len(atom_type_list) + 1  # 5
+        elif self.dataset_name == 'esol':
+            b_n_type = 4
+            # b_n_squeeze = 1
+            b_n_squeeze = 11
+            a_n_node = 22
+            a_n_type = len(atom_type_list) + 1  # 5
+        else:
+            assert False, 'unknown dataset'
+        result = {'atom_type_list': atom_type_list, 'b_n_type': b_n_type, 'b_n_squeeze': b_n_squeeze,
+                  'a_n_node': a_n_node, 'a_n_type': a_n_type}
+        return result
 
     @staticmethod
     def load_dataset(name):
@@ -1027,7 +1051,6 @@ class GraphDataset(BaseDataset):
 
         if name in ['qm7', 'qm9', 'freesolv', 'esol', 'lipo']:
             results, label_map = get_molecular_dataset_mp(name=name, data_path=path)
-
         else:
             if name == 'fishtoxi':
                 name += '_graph_fulldata'
@@ -1093,19 +1116,32 @@ class GraphDataset(BaseDataset):
 
         return results, label_map
 
-    @staticmethod
-    def format_data(input, n_bits, n_bins, device):
-        for i in range(len(input)):
-            input[i] = input[i].float().to(device)
-        return input
-
-    def format_loss(self, log_p, logdet, n_bins):
-        loss = logdet + log_p
-        return -loss.mean(), log_p.mean(), logdet.mean()
-
-    @staticmethod
-    def rescale(x):
-        return x
-
     def is_regression_dataset(self):
         return True
+
+
+class ClassificationGraphDataset(GraphDataset):
+    def __init__(self, dataset_name, transform=None):
+        super().__init__(dataset_name, transform=transform)
+
+    def get_dataset_params(self):
+        atom_type_list = [key for key, val in self.label_map.items()]
+        if self.dataset_name == 'qm7':
+            # atom_type_list = ['C', 'N', 'S', 'O']
+            b_n_type = 4
+            # b_n_squeeze = 1
+            b_n_squeeze = 7
+            a_n_node = 7
+            a_n_type = len(atom_type_list) + 1  # 5
+        # result = {'atom_type_list': atom_type_list, 'b_n_type': b_n_type, 'b_n_squeeze': b_n_squeeze,
+        #           'a_n_node': a_n_node, 'a_n_type': a_n_type}
+        # return result
+
+    @staticmethod
+    def load_dataset(name):
+        path = './datasets'
+
+        # return results, label_map
+
+    def is_regression_dataset(self):
+        return False

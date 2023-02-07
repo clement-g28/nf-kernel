@@ -14,7 +14,9 @@ from utils.utils import set_seed, create_folder, save_every_pic, initialize_gaus
 from utils.custom_glow import CGlow, WrappedModel
 from utils.models import load_seqflow_model, load_ffjord_model, load_moflow_model
 from utils.models import IMAGE_MODELS, SIMPLE_MODELS, GRAPH_MODELS
-from utils.dataset import ImDataset, SimpleDataset, GraphDataset
+from utils.dataset import ImDataset, SimpleDataset, GraphDataset, RegressionGraphDataset, ClassificationGraphDataset, \
+    SIMPLE_DATASETS, SIMPLE_REGRESSION_DATASETS, IMAGE_DATASETS, GRAPH_REGRESSION_DATASETS, \
+    GRAPH_CLASSIFICATION_DATASETS
 from utils.density import construct_covariance
 from utils.testing import learn_or_load_modelhyperparams, generate_sample, project_inZ, testing_arguments, noise_data
 from utils.testing import project_between
@@ -30,6 +32,10 @@ from sklearn.linear_model import Ridge
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
+
+from utils.graphs.graph_utils import save_nx_graph
+from utils.graphs.graph_utils import format, organise_data
+import matplotlib.pyplot as plt
 
 
 def test_generation_on_eigvec(model_single, gaussian_params, z_shape, how_much_dim, device, sample_per_label=10,
@@ -1150,8 +1156,6 @@ def evaluate_regression_preimage(model, val_dataset, device, save_dir, print_as_
                 save_mol_png(mol, os.path.join(mol_dir, '{}.png'.format(ind)))
         if print_as_graph:
 
-            # color map
-            import matplotlib.pyplot as plt
             # define the colormap
             cmap = plt.cm.jet
             # extract all colors from the .jet map
@@ -1159,8 +1163,6 @@ def evaluate_regression_preimage(model, val_dataset, device, save_dir, print_as_
             n_type = x.shape[-1] - 1
             node_colors = [cmaplist[i * math.floor(len(cmaplist) / n_type)] for i in range(0, n_type)]
 
-            from utils.graphs.graph_utils import save_nx_graph
-            from utils.graphs.graph_utils import format, organise_data
             graphs = val_dataset.get_full_graphs(data=list(zip(x, adj)))
             inv_map = {v: k for k, v in val_dataset.label_map.items()}
             for i, graph in enumerate(graphs):
@@ -1169,7 +1171,7 @@ def evaluate_regression_preimage(model, val_dataset, device, save_dir, print_as_
                 path = f'{save_dir}/generated_means_graphs/'
                 os.makedirs(path, exist_ok=True)
                 title = '\^y:' + str(round(val_dataset.true_labels[i], 2))
-                save_nx_graph(graph, inv_map, save_path=f'{path}/{i}', title=title, n_atom_type=x.shape[-1] - 1,
+                save_nx_graph(graph, inv_map, save_path=f'{path}/{str(i).zfill(4)}', title=title, n_atom_type=x.shape[-1] - 1,
                               colors=node_colors)
 
 
@@ -1272,17 +1274,12 @@ def evaluate_regression_preimage2(model, val_dataset, device, save_dir, n_y=50, 
                 img.save(f'{save_dir}/generated_samples/{ind}_close_grid.png')
         if print_as_graph:
 
-            # color map
-            import matplotlib.pyplot as plt
             # define the colormap
             cmap = plt.cm.jet
             # extract all colors from the .jet map
             cmaplist = [cmap(i) for i in range(cmap.N)]
             n_type = x.shape[-1] - 1
             node_colors = [cmaplist[i * math.floor(len(cmaplist) / n_type)] for i in range(0, n_type)]
-
-            from utils.graphs.graph_utils import save_nx_graph
-            from utils.graphs.graph_utils import format, organise_data
 
             close_xadj = [(np.concatenate([np.expand_dims(v, axis=0) for v in samples[0]], axis=0),
                            np.concatenate([np.expand_dims(v, axis=0) for v in samples[1]], axis=0)) for samples in
@@ -1301,26 +1298,29 @@ def evaluate_regression_preimage2(model, val_dataset, device, save_dir, n_y=50, 
                 close_y = datasets_close_y[y_idx]
                 all_ys = [ys[y_idx]] + list(close_y)
 
-                path = f'{save_dir}/generated_samples_graphs/{i}'
+                path = f'{save_dir}/generated_samples_graphs/{str(i).zfill(4)}'
                 os.makedirs(path, exist_ok=True)
                 title = '\^y:' + str(round(all_ys[0], 2))
-                save_nx_graph(graph, inv_map, save_path=f'{path}/gen_{i}', title=title, n_atom_type=x.shape[-1] - 1,
+                save_nx_graph(graph, inv_map, save_path=f'{path}/gen_{str(i).zfill(4)}', title=title,
+                              n_atom_type=x.shape[-1] - 1,
                               colors=node_colors)
 
                 # closest graphs
                 close_graphs_i = close_graphs[y_idx]
                 for j, close_graph in enumerate(close_graphs_i):
                     title = 'y:' + str(round(all_ys[j], 2))
-                    save_nx_graph(close_graph, inv_map, save_path=f'{path}/{j}_{i}', title=title,
+                    save_nx_graph(close_graph, inv_map, save_path=f'{path}/{str(j).zfill(4)}_{str(i).zfill(4)}',
+                                  title=title,
                                   n_atom_type=x.shape[-1] - 1, colors=node_colors)
                 # create grid
                 nrow = math.ceil(math.sqrt(n_closest))
                 images = organise_data(path, nrow=nrow)
-                res_name = f'{i}_close_grid'
+                res_name = f'{str(i).zfill(4)}_close_grid'
                 format(images, nrow=nrow, save_path=f'{save_dir}/generated_samples_graphs', res_name=res_name)
 
 
-def evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=20, n_interpolation=20, Z=None):
+def evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=20, n_interpolation=20, Z=None,
+                            print_as_mol=True, print_as_graph=True):
     # si Z est donné, PCA sur 2 dimensions
     if Z is not None:
         pca = PCA(n_components=2)
@@ -1405,6 +1405,15 @@ def evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=20, n
     if isinstance(val_dataset, GraphDataset):
         x_shape = val_dataset.X[0][0].shape
         adj_shape = val_dataset.X[0][1].shape
+
+        if print_as_graph:
+            # define the colormap
+            cmap = plt.cm.jet
+            # extract all colors from the .jet map
+            cmaplist = [cmap(i) for i in range(cmap.N)]
+            n_type = x_shape[-1] - 1
+            node_colors = [cmaplist[i * math.floor(len(cmaplist) / n_type)] for i in range(0, n_type)]
+
         x_sh = x_shape[0]
         for v in x_shape[1:]:
             x_sh *= v
@@ -1421,46 +1430,67 @@ def evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=20, n
             xm = x[n * (n_interpolation + 2):(n + 1) * (n_interpolation + 2)]
             adjm = adj[n * (n_interpolation + 2):(n + 1) * (n_interpolation + 2)]
 
-            interpolation_mols = [valid_mol(construct_mol(x_elem, adj_elem, atomic_num_list))
-                                  for x_elem, adj_elem in zip(xm, adjm)]
-            valid_mols = [mol for mol in interpolation_mols if mol is not None]
-            valid_mols_smiles = [Chem.MolToSmiles(mol) for mol in valid_mols]
+            if print_as_mol:
+                interpolation_mols = [valid_mol(construct_mol(x_elem, adj_elem, atomic_num_list))
+                                      for x_elem, adj_elem in zip(xm, adjm)]
+                valid_mols = [mol for mol in interpolation_mols if mol is not None]
+                valid_mols_smiles = [Chem.MolToSmiles(mol) for mol in valid_mols]
 
-            valid_mols_smiles_unique = list(OrderedSet(valid_mols_smiles))
-            valid_mols_unique = [Chem.MolFromSmiles(s) for s in valid_mols_smiles_unique]
-            valid_mols_smiles_unique_label = []
+                valid_mols_smiles_unique = list(OrderedSet(valid_mols_smiles))
+                valid_mols_unique = [Chem.MolFromSmiles(s) for s in valid_mols_smiles_unique]
+                valid_mols_smiles_unique_label = []
 
-            mol0 = valid_mols[0]
-            mol1 = valid_mols[-1]
-            smile0 = valid_mols_smiles[0]
-            smile1 = valid_mols_smiles[-1]
-            fp0 = AllChem.GetMorganFingerprint(mol0, 2)
+                mol0 = valid_mols[0]
+                mol1 = valid_mols[-1]
+                smile0 = valid_mols_smiles[0]
+                smile1 = valid_mols_smiles[-1]
+                fp0 = AllChem.GetMorganFingerprint(mol0, 2)
 
-            for s, m in zip(valid_mols_smiles_unique, valid_mols_unique):
-                fp = AllChem.GetMorganFingerprint(m, 2)
-                sim = DataStructs.TanimotoSimilarity(fp, fp0)
-                s = '{:.2f}\n'.format(sim) + s
-                if s == smile0:
-                    s = '***[' + s + ']***'
-                valid_mols_smiles_unique_label.append(s)
+                for s, m in zip(valid_mols_smiles_unique, valid_mols_unique):
+                    fp = AllChem.GetMorganFingerprint(m, 2)
+                    sim = DataStructs.TanimotoSimilarity(fp, fp0)
+                    s = '{:.2f}\n'.format(sim) + s
+                    if s == smile0:
+                        s = '***[' + s + ']***'
+                    valid_mols_smiles_unique_label.append(s)
 
-            print('interpolation_mols valid {} / {}'
-                  .format(len(valid_mols), len(interpolation_mols)))
+                print('interpolation_mols valid {} / {}'
+                      .format(len(valid_mols), len(interpolation_mols)))
 
-            psize = (200, 200)
-            with_seeds = [mol0] + valid_mols_unique + [mol1]
-            legends_with_seed = [smile0] + valid_mols_smiles_unique + [smile1]
-            # if display_property == 'plogp':
-            # legends_with_seed = [smile + ', logP:' + str(round(Descriptors.MolLogP(mol), 2)) for mol, smile in
-            #                      zip(with_seeds, legends_with_seed)]
-            img = Draw.MolsToGridImage(with_seeds, legends=legends_with_seed,
-                                       molsPerRow=int((n_interpolation + 2) / 4),
-                                       subImgSize=psize)
+                psize = (200, 200)
+                with_seeds = [mol0] + valid_mols_unique + [mol1]
+                legends_with_seed = [smile0] + valid_mols_smiles_unique + [smile1]
+                img = Draw.MolsToGridImage(with_seeds, legends=legends_with_seed,
+                                           molsPerRow=int((n_interpolation + 2) / 4),
+                                           subImgSize=psize)
 
-            if not os.path.exists(f'{save_dir}/generated_interp'):
-                os.makedirs(f'{save_dir}/generated_interp')
-            img.save(
-                f'{save_dir}/generated_interp/{str(n).zfill(4)}_res_grid_valid{len(valid_mols)}_{len(interpolation_mols)}.png')
+                if not os.path.exists(f'{save_dir}/generated_interp'):
+                    os.makedirs(f'{save_dir}/generated_interp')
+                img.save(
+                    f'{save_dir}/generated_interp/{str(n).zfill(4)}_res_grid_valid{len(valid_mols)}_{len(interpolation_mols)}.png')
+            if print_as_graph:
+                graphs = val_dataset.get_full_graphs(data=list(zip(xm, adjm)))
+
+                inv_map = {v: k for k, v in val_dataset.label_map.items()}
+                path = f'{save_dir}/generated_interp_graphs/{str(n).zfill(4)}'
+                for i, graph in enumerate(graphs):
+                    if graph is None:
+                        continue
+                    os.makedirs(path, exist_ok=True)
+                    save_nx_graph(graph, inv_map, save_path=f'{path}/{str(i).zfill(4)}_{str(n).zfill(4)}',
+                                  n_atom_type=x.shape[-1] - 1,
+                                  colors=node_colors)
+                # create grid
+                nrow = math.ceil(math.sqrt(n_interpolation + 2))
+                images = organise_data(path, nrow=nrow)
+                # add borders
+                margin = 2
+                images[:, :-1, :margin, :] = 0
+                images[:, :-1, -margin:, :] = 0
+                images[:, :-1, :, :margin] = 0
+                images[:, :-1, :, -margin:] = 0
+                res_name = f'{str(n).zfill(4)}_res_grid'
+                format(images, nrow=nrow, save_path=f'{save_dir}/generated_interp_graphs', res_name=res_name)
 
         # from utils.graphs.mol_utils import check_validity, save_mol_png
         # atomic_num_list = val_dataset.atomic_num_list
@@ -1487,15 +1517,22 @@ if __name__ == "__main__":
 
     dataset_name, model_type, folder_name = args.folder.split('/')[-3:]
     # DATASET #
-    if model_type in IMAGE_MODELS:
+    if dataset_name in IMAGE_DATASETS:
         dataset = ImDataset(dataset_name=dataset_name)
-        n_channel = dataset.n_channel
-    elif model_type in GRAPH_MODELS:
-        dataset = GraphDataset(dataset_name=dataset_name)
-        n_channel = -1
-    else:
+    elif dataset_name == 'fishtoxi':  # Special case where the data can be either graph or vectorial data
+        use_graph_type = model_type in GRAPH_MODELS
+        if use_graph_type:
+            dataset = RegressionGraphDataset(dataset_name=dataset_name)
+        else:
+            dataset = SimpleDataset(dataset_name=dataset_name)
+    elif dataset_name in SIMPLE_DATASETS or dataset_name in SIMPLE_REGRESSION_DATASETS:
         dataset = SimpleDataset(dataset_name=dataset_name)
-        n_channel = 1
+    elif dataset_name in GRAPH_REGRESSION_DATASETS:
+        dataset = RegressionGraphDataset(dataset_name=dataset_name)
+    elif dataset_name in GRAPH_CLASSIFICATION_DATASETS:
+        dataset = ClassificationGraphDataset(dataset_name=dataset_name)
+    else:
+        assert False, 'unknown dataset'
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -1643,6 +1680,7 @@ if __name__ == "__main__":
 
     if model_type == 'cglow':
         args_cglow, _ = cglow_arguments().parse_known_args()
+        n_channel = dataset.n_channel
         affine = args_cglow.affine
         no_lu = args_cglow.no_lu
         # Load model
@@ -1714,10 +1752,11 @@ if __name__ == "__main__":
             assert dataset_name in dataset_name_eval, f'Projection can only be evaluated on {dataset_name_eval}'
     elif eval_type == 'regression':
         assert dataset.is_regression_dataset(), 'the dataset is not made for regression purposes'
-        # evaluate_regression(model, train_dataset, val_dataset, save_dir, device)
-        # _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
-        #                          only_Z=isinstance(dataset, GraphDataset))
+        evaluate_regression(model, train_dataset, val_dataset, save_dir, device)
+        _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
+                                 only_Z=isinstance(dataset, GraphDataset))
         evaluate_regression_preimage(model, val_dataset, device, save_dir, print_as_mol=True, print_as_graph=True)
         evaluate_regression_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=10,
                                       print_as_mol=True, print_as_graph=True)
-        # evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z)
+        evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z,
+                                print_as_mol=True, print_as_graph=True)
