@@ -1,3 +1,4 @@
+import networkx as nx
 import numpy as np
 from PIL import Image, ImageDraw
 import time
@@ -1097,7 +1098,8 @@ def create_figures_XZ(model, train_dataset, save_path, device, std_noise=0.1, on
     return X, Z
 
 
-def evaluate_regression_preimage(model, val_dataset, device, save_dir):
+def evaluate_regression_preimage(model, val_dataset, device, save_dir, print_as_mol=True,
+                                 print_as_graph=True):
     batch_size = 20
 
     y_min = model.label_min
@@ -1138,25 +1140,49 @@ def evaluate_regression_preimage(model, val_dataset, device, save_dir):
             x_sh *= v
         x = all_res[:, :x_sh].reshape(all_res.shape[0], *x_shape)
         adj = all_res[:, x_sh:].reshape(all_res.shape[0], *adj_shape)
-        from utils.graphs.mol_utils import check_validity, save_mol_png
-        atomic_num_list = val_dataset.atomic_num_list
-        valid_mols = check_validity(adj, x, atomic_num_list)['valid_mols']
-        mol_dir = os.path.join(save_dir, 'generated_means')
-        os.makedirs(mol_dir, exist_ok=True)
-        for ind, mol in enumerate(valid_mols):
-            save_mol_png(mol, os.path.join(mol_dir, '{}.png'.format(ind)))
+        if print_as_mol:
+            from utils.graphs.mol_utils import check_validity, save_mol_png
+            atomic_num_list = val_dataset.atomic_num_list
+            valid_mols = check_validity(adj, x, atomic_num_list)['valid_mols']
+            mol_dir = os.path.join(save_dir, 'generated_means')
+            os.makedirs(mol_dir, exist_ok=True)
+            for ind, mol in enumerate(valid_mols):
+                save_mol_png(mol, os.path.join(mol_dir, '{}.png'.format(ind)))
+        if print_as_graph:
+
+            # color map
+            import matplotlib.pyplot as plt
+            # define the colormap
+            cmap = plt.cm.jet
+            # extract all colors from the .jet map
+            cmaplist = [cmap(i) for i in range(cmap.N)]
+            n_type = x.shape[-1] - 1
+            node_colors = [cmaplist[i * math.floor(len(cmaplist) / n_type)] for i in range(0, n_type)]
+
+            from utils.graphs.graph_utils import save_nx_graph
+            from utils.graphs.graph_utils import format, organise_data
+            graphs = val_dataset.get_full_graphs(data=list(zip(x, adj)))
+            inv_map = {v: k for k, v in val_dataset.label_map.items()}
+            for i, graph in enumerate(graphs):
+                if graph is None:
+                    continue
+                path = f'{save_dir}/generated_means_graphs/'
+                os.makedirs(path, exist_ok=True)
+                title = '\^y:' + str(round(val_dataset.true_labels[i], 2))
+                save_nx_graph(graph, inv_map, save_path=f'{path}/{i}', title=title, n_atom_type=x.shape[-1] - 1,
+                              colors=node_colors)
 
 
-def evaluate_regression_preimage2(model, val_dataset, device, save_dir):
+def evaluate_regression_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_by_y=20, print_as_mol=True,
+                                  print_as_graph=True):
     batch_size = 20
 
     y_min = model.label_min
     y_max = model.label_max
-    ys = np.linspace(y_min, y_max, 50)
+    ys = np.linspace(y_min, y_max, n_y)
     model_means = model.means[:2].detach().cpu().numpy()
     covariance_matrix = construct_covariance(model.eigvecs.cpu()[0].squeeze(), model.eigvals.cpu()[0].squeeze())
     samples = []
-    n_samples_by_y = 20
     datasets_close_samples = []
     datasets_close_y = []
     import scipy
@@ -1205,44 +1231,93 @@ def evaluate_regression_preimage2(model, val_dataset, device, save_dir):
             x_sh *= v
         x = all_res[:, :x_sh].reshape(all_res.shape[0], *x_shape)
         adj = all_res[:, x_sh:].reshape(all_res.shape[0], *adj_shape)
-        from utils.graphs.mol_utils import check_validity, save_mol_png
-        atomic_num_list = val_dataset.atomic_num_list
-        results = check_validity(adj, x, atomic_num_list, with_idx=True)
-        valid_mols = results['valid_mols']
-        valid_smiles = results['valid_smiles']
-        idxs_valid = results['idxs']
-        mol_dir = os.path.join(save_dir, 'generated_samples')
-        os.makedirs(mol_dir, exist_ok=True)
+        if print_as_mol:
+            from utils.graphs.mol_utils import check_validity, save_mol_png
+            atomic_num_list = val_dataset.atomic_num_list
+            results = check_validity(adj, x, atomic_num_list, with_idx=True)
+            valid_mols = results['valid_mols']
+            valid_smiles = results['valid_smiles']
+            idxs_valid = results['idxs']
+            mol_dir = os.path.join(save_dir, 'generated_samples')
+            os.makedirs(mol_dir, exist_ok=True)
 
-        from rdkit import Chem, DataStructs
-        from rdkit.Chem import Draw, AllChem
-        from ordered_set import OrderedSet
-        for ind, mol in enumerate(valid_mols):
-            # save_mol_png(mol, os.path.join(mol_dir, '{}.png'.format(ind)))
+            from rdkit import Chem, DataStructs
+            from rdkit.Chem import Draw, AllChem
+            from ordered_set import OrderedSet
+            for ind, mol in enumerate(valid_mols):
+                # save_mol_png(mol, os.path.join(mol_dir, '{}.png'.format(ind)))
 
-            # show with closest dataset samples
-            psize = (200, 200)
-            mol_idx = idxs_valid[ind]
-            y_idx = math.floor(mol_idx / n_samples_by_y)
-            close_samples_x = datasets_close_samples[y_idx][0]
-            close_samples_adj = datasets_close_samples[y_idx][1]
-            close_y = datasets_close_y[y_idx]
-            x = np.concatenate([np.expand_dims(v, axis=0) for v in close_samples_x], axis=0)
-            adj = np.concatenate([np.expand_dims(v, axis=0) for v in close_samples_adj], axis=0)
-            results = check_validity(adj, x, atomic_num_list, return_unique=False, debug=False)
-            close_mols = results['valid_mols']
-            close_smiles = results['valid_smiles']
-            with_seeds = [mol] + close_mols
-            all_ys = [ys[y_idx]] + list(close_y)
-            legends_with_seed = [valid_smiles[ind]] + close_smiles
-            legends_with_seed[0] = legends_with_seed[0] + ', \^y:' + str(round(all_ys[0], 2))
-            legends_with_seed[1:] = [smile + ', y:' + str(round(y, 2)) for y, smile in
-                                     zip(all_ys[1:], legends_with_seed[1:])]
-            img = Draw.MolsToGridImage(with_seeds, legends=legends_with_seed,
-                                       molsPerRow=int((n_closest + 1) / 3),
-                                       subImgSize=psize)
+                # show with closest dataset samples
+                psize = (200, 200)
+                mol_idx = idxs_valid[ind]
+                y_idx = math.floor(mol_idx / n_samples_by_y)
+                close_samples_x = datasets_close_samples[y_idx][0]
+                close_samples_adj = datasets_close_samples[y_idx][1]
+                close_y = datasets_close_y[y_idx]
+                c_x = np.concatenate([np.expand_dims(v, axis=0) for v in close_samples_x], axis=0)
+                c_adj = np.concatenate([np.expand_dims(v, axis=0) for v in close_samples_adj], axis=0)
+                results = check_validity(c_adj, c_x, atomic_num_list, return_unique=False, debug=False)
+                close_mols = results['valid_mols']
+                close_smiles = results['valid_smiles']
+                with_seeds = [mol] + close_mols
+                all_ys = [ys[y_idx]] + list(close_y)
+                legends_with_seed = [valid_smiles[ind]] + close_smiles
+                legends_with_seed[0] = legends_with_seed[0] + ', \^y:' + str(round(all_ys[0], 2))
+                legends_with_seed[1:] = [smile + ', y:' + str(round(y, 2)) for y, smile in
+                                         zip(all_ys[1:], legends_with_seed[1:])]
+                img = Draw.MolsToGridImage(with_seeds, legends=legends_with_seed,
+                                           molsPerRow=int((n_closest + 1) / 3),
+                                           subImgSize=psize)
 
-            img.save(f'{save_dir}/generated_samples/{ind}_close_grid.png')
+                img.save(f'{save_dir}/generated_samples/{ind}_close_grid.png')
+        if print_as_graph:
+
+            # color map
+            import matplotlib.pyplot as plt
+            # define the colormap
+            cmap = plt.cm.jet
+            # extract all colors from the .jet map
+            cmaplist = [cmap(i) for i in range(cmap.N)]
+            n_type = x.shape[-1] - 1
+            node_colors = [cmaplist[i * math.floor(len(cmaplist) / n_type)] for i in range(0, n_type)]
+
+            from utils.graphs.graph_utils import save_nx_graph
+            from utils.graphs.graph_utils import format, organise_data
+
+            close_xadj = [(np.concatenate([np.expand_dims(v, axis=0) for v in samples[0]], axis=0),
+                           np.concatenate([np.expand_dims(v, axis=0) for v in samples[1]], axis=0)) for samples in
+                          list(datasets_close_samples)]
+            close_graphs = []
+            for close_xadj_set in close_xadj:
+                close_graphs.append(val_dataset.get_full_graphs(data=list(zip(*close_xadj_set))))
+
+            graphs = val_dataset.get_full_graphs(data=list(zip(x, adj)))
+            inv_map = {v: k for k, v in val_dataset.label_map.items()}
+            for i, graph in enumerate(graphs):
+                if graph is None:
+                    continue
+                graph_idx = i
+                y_idx = math.floor(graph_idx / n_samples_by_y)
+                close_y = datasets_close_y[y_idx]
+                all_ys = [ys[y_idx]] + list(close_y)
+
+                path = f'{save_dir}/generated_samples_graphs/{i}'
+                os.makedirs(path, exist_ok=True)
+                title = '\^y:' + str(round(all_ys[0], 2))
+                save_nx_graph(graph, inv_map, save_path=f'{path}/gen_{i}', title=title, n_atom_type=x.shape[-1] - 1,
+                              colors=node_colors)
+
+                # closest graphs
+                close_graphs_i = close_graphs[y_idx]
+                for j, close_graph in enumerate(close_graphs_i):
+                    title = 'y:' + str(round(all_ys[j], 2))
+                    save_nx_graph(close_graph, inv_map, save_path=f'{path}/{j}_{i}', title=title,
+                                  n_atom_type=x.shape[-1] - 1, colors=node_colors)
+                # create grid
+                nrow = math.ceil(math.sqrt(n_closest))
+                images = organise_data(path, nrow=nrow)
+                res_name = f'{i}_close_grid'
+                format(images, nrow=nrow, save_path=f'{save_dir}/generated_samples_graphs', res_name=res_name)
 
 
 def evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=20, n_interpolation=20, Z=None):

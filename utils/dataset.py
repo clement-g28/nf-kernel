@@ -695,8 +695,9 @@ ATOMIC_NUM_MAP = {'C': 6, 'N': 7, 'O': 8, 'F': 9, 'P': 15, 'S': 16, 'Cl': 17, 'B
 
 
 def chunks(lst, n):
-    for i in range(0, len(lst), int(len(lst) / n)):
-        yield lst[i:i + int(len(lst) / n)]
+    step = int(len(lst) / n) if n < len(lst) else 1
+    for i in range(0, len(lst), step):
+        yield lst[i:i + step]
 
 
 def mp_create_graph_func(input_args):
@@ -810,14 +811,15 @@ class GraphDataset(BaseDataset):
                   'a_n_node': a_n_node, 'a_n_type': a_n_type}
         return result
 
-    def get_nx_graphs(self, edge_to_node=False):
+    def get_nx_graphs(self, edge_to_node=False, data=None):
         function = self.create_node_labeled_only_graph if edge_to_node else self.create_node_and_edge_labeled_graph
-        return self.init_graphs_mp(function)
+        return self.init_graphs_mp(function, data=data)
 
-    def init_graphs_mp(self, function):
+    def init_graphs_mp(self, function, data=None):
+        data = data if data is not None else self.X
         pool = multiprocessing.Pool()
         returns = pool.map(mp_create_graph_func, [(chunk, self.label_names, function) for chunk in
-                                                  chunks(self.X, os.cpu_count())])
+                                                  chunks(data, os.cpu_count())])
         pool.close()
         return list(itertools.chain.from_iterable(returns))
 
@@ -920,15 +922,71 @@ class GraphDataset(BaseDataset):
             for i, a_name in enumerate(gr.graph['node_attrs']):
                 gr.nodes[i_node][a_name] = str(attr_node)
 
+        removed_edge = []
         for node in virtual_nodes:
             gr.remove_node(node)
             # remove node corresponding to edges connected to the virtual node, note that we can directly remove the
             # node because nodes can only be linked to a node corresponding to an edge (in this function case)
             for (n1, n2) in n_edges:
-                if n1 == node:
+                if n1 == node and n2 not in removed_edge:
+                    removed_edge.append(n2)
                     gr.remove_node(n2)
-                elif n2 == node:
+                elif n2 == node and n1 not in removed_edge:
+                    removed_edge.append(n1)
                     gr.remove_node(n1)
+        return gr
+
+    def get_full_graphs(self, data=None):
+        return self.full_graphs_mp(data=data)
+
+    def full_graphs_mp(self, data=None):
+        data = data if data is not None else self.X
+        pool = multiprocessing.Pool()
+        returns = pool.map(mp_create_graph_func, [(chunk, self.label_names, self.create_full_graph) for chunk in
+                                                  chunks(data, os.cpu_count())])
+        pool.close()
+        # returns = [self.create_full_graph(*data[i], label_names=self.label_names, i=i) for i in range(len(data))]
+        # return returns
+        return list(itertools.chain.from_iterable(returns))
+
+    def create_full_graph(self, x, full_adj, label_names=None, i=None):
+        # i: int used as the graph's name
+        if label_names is None:
+            label_names = self.label_names
+
+        gr = nx.Graph(name=str(i),
+                      node_labels=label_names['node_labels'],
+                      node_attrs=label_names['node_attrs'],
+                      edge_labels=label_names['edge_labels'],
+                      edge_attrs=label_names['edge_attrs'])
+
+        adj = np.sum(full_adj, axis=0)
+        rows, cols = np.where(adj == 1)
+        edges = zip(rows.tolist(), cols.tolist())
+        gr.add_edges_from(edges)
+
+        # node attributes
+        for i_node in gr.nodes:
+            # If NaN only in the row
+            if np.isnan(np.nanmax(x[i_node])):
+                return None
+
+            attr_node = np.where(x[i_node] == np.nanmax(x[i_node]))[0][0]
+
+            gr.nodes[i_node]['attributes'] = [str(attr_node)]
+            # node_label
+            for i, a_name in enumerate(gr.graph['node_labels']):
+                gr.nodes[i_node][a_name] = str(attr_node)
+            for i, a_name in enumerate(gr.graph['node_attrs']):
+                gr.nodes[i_node][a_name] = str(attr_node)
+            for edge in gr.edges(data=True):
+                edge[2][label_names['edge_labels'][0]] = np.where(full_adj[:, edge[0], edge[1]])[0][0]
+
+        edge_labels = nx.get_edge_attributes(gr, "bond_type")
+        # edges_no_virtual = {}
+        for k, v in edge_labels.items():
+            if v == full_adj.shape[0] - 1:
+                gr.remove_edge(*k)
         return gr
 
     def __getitem__(self, idx):
@@ -969,36 +1027,9 @@ class GraphDataset(BaseDataset):
 
         if name in ['qm7', 'qm9', 'freesolv', 'esol', 'lipo']:
             results, label_map = get_molecular_dataset_mp(name=name, data_path=path)
-        # elif name == 'lipo':
-        #
-        #     from deepchem.molnet import load_lipo
-        #
-        #     dataset = load_lipo(featurizer='Raw')
-        #     print('a')
-        #
-        #     ### importing OGB
-        #     # from ogb.graphproppred import PygGraphPropPredDataset
-        #     # dataset = PygGraphPropPredDataset(name=name)
-        #     # split_idx = dataset.get_idx_split()
 
         else:
-            # exist_dataset = os.path.exists(f'{path}/{name}_data.npy') if path is not None else False
-            # test_dataset = None
-            # fulldata = True
-            # name_c = name
-            # if fulldata and name in ['aquatoxi', 'fishtoxi']:
-            #     name_c = f'{name}_graph_fulldata'
-            #     exist_dataset = os.path.exists(f'{path}/{name_c}_data.npy')
-
             if name == 'fishtoxi':
-                # if exist_dataset:
-                #     X = np.load(f'{path}/{name_c}_data.npy')
-                #     labels = np.load(f'{path}/{name_c}_labels.npy')
-                #     if fulldata:
-                #         X_test = np.load(f'{path}/{name_c}_testdata.npy')
-                #         labels_test = np.load(f'{path}/{name_c}_testlabels.npy')
-                #         test_dataset = (X_test, labels_test)
-
                 name += '_graph_fulldata'
                 import pandas as pd
                 from rdkit import Chem
