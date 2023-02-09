@@ -81,10 +81,14 @@ def init_model(var, noise, dataset):
     fixed_eigval = None
     eigval_list = [var for i in range(dim_per_label)]
 
-    gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list,
-                                                            isotrope=args.isotrope_gaussian,
-                                                            dim_per_label=dim_per_label,
-                                                            fixed_eigval=fixed_eigval)
+    if not dataset.is_regression_dataset():
+        gaussian_params = initialize_gaussian_params(dataset, eigval_list, isotrope=args.isotrope_gaussian,
+                                                     dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
+    else:
+        gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list,
+                                                                isotrope=args.isotrope_gaussian,
+                                                                dim_per_label=dim_per_label,
+                                                                fixed_eigval=fixed_eigval)
 
     folder_path = f'{args.dataset}/{args.model}/'
     if args.model == 'cglow':
@@ -211,13 +215,16 @@ def train_opti(config):
                 val_logdet += log_det.cpu().numpy()
                 val_dist += distloss.cpu().numpy()
 
-                # accuracy
-                means = model.means.detach().cpu().numpy()
-                np_z = z.detach().cpu().numpy()
-                np_label = label.detach().cpu().numpy()
-                proj, dot_val = project_between(np_z, means[0], means[1])
-                pred = dot_val.squeeze() * (model.label_max - model.label_min) + model.label_min
-                accuracy += np.power((pred - np_label), 2).mean()
+                if dataset.is_regression_dataset():
+                    # accuracy
+                    means = model.means.detach().cpu().numpy()
+                    np_z = z.detach().cpu().numpy()
+                    np_label = label.detach().cpu().numpy()
+                    proj, dot_val = project_between(np_z, means[0], means[1])
+                    pred = dot_val.squeeze() * (model.label_max - model.label_min) + model.label_min
+                    accuracy += np.power((pred - np_label), 2).mean()
+                else:
+                    accuracy += val_loss
 
         model.train()
         if epoch % args.save_each_epoch == 0:
@@ -360,11 +367,11 @@ if __name__ == "__main__":
         val_dset.save_split(path)
 
     config = {
-        "var": tune.uniform(0.09, 1.0),
-        "beta": tune.randint(50, 200),
+        "var": tune.uniform(1.0, 1.0),
+        "beta": tune.randint(1, 200),
         "noise": tune.uniform(0.2, 0.9),
         "lr": tune.loguniform(1e-4, 0.005),
-        "batch_size": tune.choice([10, 20, 30, 40, 50])
+        "batch_size": tune.choice([40, 60, 80])
     }
     scheduler = ASHAScheduler(
         metric="accuracy",
