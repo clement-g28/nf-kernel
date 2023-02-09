@@ -73,6 +73,7 @@ def train(args, model_single, add_path, gaussian_params, train_dataset, val_data
                 loss = nll_loss - beta * distloss
 
                 loss = model_single.upstream_process(loss)
+                # loss.clamp_(-10000,10000)
 
                 model.zero_grad()
                 loss.backward()
@@ -80,6 +81,9 @@ def train(args, model_single, add_path, gaussian_params, train_dataset, val_data
                 # loss.backward(retain_graph=True)
                 # loss2 = torch.pow(log_det, 2)
                 # loss2.backward()
+
+                # Gradient clipping
+                # torch.nn.utils.clip_grad_norm_(model.parameters(), 10)
 
                 # warmup_lr = args.lr * min(1, i * batch_size / (50000 * 10))
                 warmup_lr = args.lr
@@ -341,6 +345,8 @@ if __name__ == "__main__":
                                            learn_mean=not args.fix_mean, reg_use_var=args.reg_use_var, dataset=dataset)
     else:
         assert False, 'unknown model type'
+
+    # model_single.init_means_to_points(train_dataset)
 
     lmean_str = f'_lmean{args.beta}' if not args.fix_mean else ''
     isotrope_str = '_isotrope' if args.isotrope_gaussian else ''

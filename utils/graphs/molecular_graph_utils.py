@@ -125,18 +125,23 @@ def chunks(lst, n):
         yield lst[i:i + int(len(lst) / n)]
 
 
-def filter_datasets_with_n_atoms(datasets, filter_n_atom):
+def filter_datasets_with_n_atoms(datasets, filter_n_atom, filter_mol_with_H=True):
     label_map = {}
     res_mols = [[], [], []]
     res_ys = [[], [], []]
     for k, (dset_mols, ys) in enumerate(datasets):
         for i, mol in enumerate(dset_mols):
             if mol.GetNumAtoms() <= filter_n_atom:
-                res_mols[k].append(mol)
-                res_ys[k].append(ys[i])
+                append = True
                 for atom in mol.GetAtoms():
-                    if atom.GetSymbol() not in label_map:
-                        label_map[atom.GetSymbol()] = len(label_map)+1
+                    if atom.GetSymbol() == 'H' and filter_mol_with_H:
+                        print(f'Explicit H in molecule :{Chem.MolToSmiles(mol)}. (do not append)')
+                        append = False
+                    if atom.GetSymbol() not in label_map and append:
+                        label_map[atom.GetSymbol()] = len(label_map) + 1
+                if append:
+                    res_mols[k].append(mol)
+                    res_ys[k].append(ys[i])
     return res_mols, res_ys, label_map
 
 
@@ -224,9 +229,35 @@ def get_molecular_dataset_mp(name='qm7', data_path=None, categorical_values=Fals
 
         train_mols, test_mols, val_mols = res_mols
         train_y, test_y, val_y = res_ys
+    elif 'toxcast' in name:
+        tasks, (train_dataset, valid_dataset, test_dataset), transformers = dc.molnet.load_toxcast(featurizer='Raw',
+                                                                                                   data_dir=data_path,
+                                                                                                   save_dir=data_path)
+        dupe_filter = True
+
+        # class selection
+        # test using the two first tasks
+        classes = np.unique(train_dataset.y[:, :2], axis=0)
+        train_y = (train_dataset.y[:, :2] @ np.expand_dims(2 ** np.arange(classes.shape[-1]), 1)).squeeze().astype(
+            np.int)
+        test_y = (test_dataset.y[:, :2] @ np.expand_dims(2 ** np.arange(classes.shape[-1]), 1)).squeeze().astype(np.int)
+        val_y = (valid_dataset.y[:, :2] @ np.expand_dims(2 ** np.arange(classes.shape[-1]), 1)).squeeze().astype(np.int)
+        # np.histogram(train_y.squeeze().tolist(), bins =range(0,classes.shape[0]+1))
+
+        train_mols = train_dataset.X
+        val_mols = valid_dataset.X
+        test_mols = test_dataset.X
+
+        filter_n_atom = 30
+        res_mols, res_ys, label_map = filter_datasets_with_n_atoms(
+            datasets=[(train_mols, train_y), (test_mols, test_y), (val_mols, val_y)],
+            filter_n_atom=filter_n_atom, filter_mol_with_H=True)
+        max_num_nodes = filter_n_atom
+
+        train_mols, test_mols, val_mols = res_mols
     else:
         assert False, 'unknown dataset'
-    return_smiles=True
+    return_smiles = True
     # all_mol = np.concatenate((train_dataset.X, valid_dataset.X, test_dataset.X), axis=0)
     # all_y = np.concatenate((train_dataset.y, valid_dataset.y, test_dataset.y), axis=0).astype(np.float)
 
@@ -283,8 +314,8 @@ def multiprocessing_func(input_args):
 
         mol = Chem.RemoveAllHs(mol, sanitize=False)
         atoms, adj, lmap = get_atoms_adj_from_mol(mol, max_num_nodes=max_num_nodes, label_map=lmap,
-                                               categorical_adj=categorical_values,
-                                               no_edge_type='no_edge' in name)
+                                                  categorical_adj=categorical_values,
+                                                  no_edge_type='no_edge' in name)
         if atoms is None or adj is None:
             continue
 

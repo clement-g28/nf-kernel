@@ -11,29 +11,42 @@ from utils.dataset import ImDataset, SimpleDataset, GraphDataset, RegressionGrap
     SIMPLE_DATASETS, SIMPLE_REGRESSION_DATASETS, IMAGE_DATASETS, GRAPH_REGRESSION_DATASETS, \
     GRAPH_CLASSIFICATION_DATASETS
 
-from utils.utils import initialize_gaussian_params
-from utils.utils import set_seed, create_folder
+from utils.utils import set_seed, create_folder, initialize_gaussian_params, initialize_regression_gaussian_params, \
+    save_fig, initialize_tmp_regression_gaussian_params
 
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 
 from utils.testing import testing_arguments
+from utils.testing import save_modelhyperparams
 from utils.training import ffjord_arguments, cglow_arguments, moflow_arguments, seqflow_arguments, graphnvp_arguments
 
-from utils.models import load_seqflow_model, load_ffjord_model
+from utils.models import load_seqflow_model, load_ffjord_model, load_moflow_model
+from utils.testing import learn_or_load_modelhyperparams
 
 
-def evaluate_classification(t_model_params, save_dir, device):
+def evaluate_classification(t_model_params, train_dataset, eval_dataset, full_dataset, save_dir, device,
+                            with_train=False, cus_load_func=None):
     svc_scores = []
-
-    # Our approach
-    eval_dataset = val_dataset
 
     best_score = 0
     best_i = 0
-    # Get z_val for zpca
+    best_score_train = 0
+    best_i_train = 0
+    best_score_str_train = ''
+    best_score_str = ''
+
+    if isinstance(train_dataset, GraphDataset):  # Permutations for Graphs
+        train_dataset.permute_graphs_in_dataset()
+        eval_dataset.permute_graphs_in_dataset()
+
+    # TEST
+    start_from = None
+    # start_from = 289
     for i, model_loading_params in enumerate(t_model_params):
+        if start_from is not None and i < start_from:
+            continue
         if model_loading_params['model'] == 'cglow':
             # Load model
             model_single = CGlow(model_loading_params['n_channel'], model_loading_params['n_flow'],
@@ -44,31 +57,43 @@ def evaluate_classification(t_model_params, save_dir, device):
         elif model_loading_params['model'] == 'seqflow':
             model_single = load_seqflow_model(model_loading_params['n_dim'], model_loading_params['n_flow'],
                                               gaussian_params=model_loading_params['gaussian_params'],
-                                              learn_mean=model_loading_params['learn_mean'])
+                                              learn_mean=model_loading_params['learn_mean'], dataset=full_dataset)
 
         elif model_loading_params['model'] == 'ffjord':
             model_single = load_ffjord_model(model_loading_params['ffjord_args'], model_loading_params['n_dim'],
                                              gaussian_params=model_loading_params['gaussian_params'],
-                                             learn_mean=model_loading_params['learn_mean'])
-
+                                             learn_mean=model_loading_params['learn_mean'], dataset=full_dataset)
+        elif model_loading_params['model'] == 'moflow':
+            args_moflow, _ = moflow_arguments().parse_known_args()
+            model_single = load_moflow_model(model_loading_params['moflow_args'],
+                                             gaussian_params=model_loading_params['gaussian_params'],
+                                             learn_mean=model_loading_params['learn_mean'],
+                                             dataset=full_dataset)
         else:
             assert False, 'unknown model type!'
-
-        model_single = WrappedModel(model_single)
-        model_single.load_state_dict(torch.load(model_loading_params['loading_path'], map_location=device))
-        model = model_single.module
+        try:
+            if not cus_load_func:
+                model_single = WrappedModel(model_single)
+                model_single.load_state_dict(torch.load(model_loading_params['loading_path'], map_location=device))
+                model = model_single.module
+            else:
+                model = cus_load_func(model_single, model_loading_params['loading_path'])
+        except:
+            print(f'Exception while loading model {i}.')
+            continue
         model = model.to(device)
         model.eval()
 
-        batch_size = 20
+        batch_size = 200
         loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
 
         Z = []
         tlabels = []
         with torch.no_grad():
             for j, data in enumerate(loader):
-                inp = data[0].float().to(device)
-                labels = data[1].to(device)
+                inp, labels = data
+                inp = train_dataset.format_data(inp, None, None, device)
+                labels = labels.to(device)
                 log_p, distloss, logdet, out = model(inp, labels)
                 Z.append(out.detach().cpu().numpy())
                 tlabels.append(labels.detach().cpu().numpy())
@@ -76,30 +101,107 @@ def evaluate_classification(t_model_params, save_dir, device):
         tlabels = np.concatenate(tlabels, axis=0)
 
         # Learn SVC
-        svc = make_pipeline(StandardScaler(), SVC(kernel='linear'))
-        svc.fit(Z, tlabels)
+        param_gridlin = [{'SVC__kernel': ['linear'], 'SVC__C': np.array([1])}]
+        # param_gridlin = [{'SVC__kernel': ['linear'], 'SVC__C': np.concatenate((np.logspace(-5, 2, 11), np.array([1])))}]
+        model_type = ('SVC', SVC())
+        scaler = False
+        svc = learn_or_load_modelhyperparams(Z, tlabels, 'zlinear', param_gridlin, save_dir,
+                                             model_type=model_type, scaler=scaler, save=False,
+                                             force_train=True)
+        # svc = make_pipeline(StandardScaler(), SVC(kernel='linear'))
+        # svc.fit(Z, tlabels)
 
-        val_loader = eval_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+        if isinstance(train_dataset, GraphDataset):  # Permutations for Graphs
+            n_permutation = 10
+            scores = []
+            scores_train = []
+            for n_perm in range(n_permutation):
+                eval_dataset.permute_graphs_in_dataset()
 
-        val_inZ = []
-        elabels = []
-        with torch.no_grad():
-            for j, data in enumerate(val_loader):
-                inp = data[0].float().to(device)
-                labels = data[1].to(device)
-                log_p, distloss, logdet, out = model(inp, labels)
-                val_inZ.append(out.detach().cpu().numpy())
-                elabels.append(labels.detach().cpu().numpy())
-        val_inZ = np.concatenate(val_inZ, axis=0).reshape(len(eval_dataset), -1)
-        elabels = np.concatenate(elabels, axis=0)
+                val_loader = eval_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
 
-        svc_score = svc.score(val_inZ, elabels)
-        svc_scores.append(svc_score)
+                val_inZ = []
+                elabels = []
+                with torch.no_grad():
+                    for j, data in enumerate(val_loader):
+                        inp, labels = data
 
-        print(f'Our approach ({i}) : {svc_score}')
-        if svc_score >= best_score:
-            best_score = svc_score
-            best_i = i
+                        inp = eval_dataset.format_data(inp, None, None, device)
+                        labels = labels.to(device)
+                        log_p, distloss, logdet, out = model(inp, labels)
+                        val_inZ.append(out.detach().cpu().numpy())
+                        elabels.append(labels.detach().cpu().numpy())
+                val_inZ = np.concatenate(val_inZ, axis=0).reshape(len(eval_dataset), -1)
+                elabels = np.concatenate(elabels, axis=0)
+
+                svc_score = svc.score(val_inZ, elabels)
+                svc_scores.append(svc_score)
+
+                svc_score_train = svc.score(Z, tlabels)
+
+                scores.append(svc_score)
+                scores_train.append(svc_score_train)
+            mean_score = np.mean(scores)
+            mean_score_train = np.mean(scores_train)
+            score_str = f'Our approach ({i}) : {scores}, (train score : {scores_train}) \n' \
+                        f'Mean Scores: {mean_score}, (train score : {mean_score_train})'
+            print(score_str)
+            # if zridge_score >= best_score:
+            if mean_score_train >= best_score_train:
+                best_score_train = mean_score_train
+                best_i_train = i
+                print(f'New best train ({i}).')
+                best_score_str_train = score_str
+                # save_modelhyperparams(zlinridge, param_gridlin, save_dir, model_type, 'zlinear_train',
+                #                       scaler_used=False)
+            if mean_score >= best_score:
+                best_score = mean_score
+                best_i = i
+                print(f'New best ({i}).')
+                best_score_str = score_str
+                # save_modelhyperparams(zlinridge, param_gridlin, save_dir, model_type, 'zlinear', scaler_used=False)
+        else:
+            val_loader = eval_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+
+            val_inZ = []
+            elabels = []
+            with torch.no_grad():
+                for j, data in enumerate(val_loader):
+                    inp, labels = data
+
+                    inp = eval_dataset.format_data(inp, None, None, device)
+                    labels = labels.to(device)
+                    log_p, distloss, logdet, out = model(inp, labels)
+                    val_inZ.append(out.detach().cpu().numpy())
+                    elabels.append(labels.detach().cpu().numpy())
+            val_inZ = np.concatenate(val_inZ, axis=0).reshape(len(eval_dataset), -1)
+            elabels = np.concatenate(elabels, axis=0)
+
+            svc_score = svc.score(val_inZ, elabels)
+            svc_scores.append(svc_score)
+
+            svc_score_train = svc.score(Z, tlabels)
+
+            save_fig(Z, tlabels, size=20, save_path=f'{save_dir}/Z_space_{i}')
+            save_fig(val_inZ, elabels, size=20, save_path=f'{save_dir}/Z_space_val_{i}')
+
+            score_str = f'Our approach ({i}) : {svc_score}, (train score : {svc_score_train})'
+            print(score_str)
+
+            print(f'Our approach ({i}) : {svc_score}')
+            if svc_score >= best_score:
+                best_score = svc_score
+                best_i = i
+                print(f'New best ({i}).')
+                best_score_str = score_str
+                save_modelhyperparams(svc, param_gridlin, save_dir, model_type, 'zlinear', scaler_used=False)
+
+            if svc_score_train >= best_score_train:
+                best_score_train = svc_score_train
+                best_i_train = i
+                print(f'New best train ({i}).')
+                best_score_str_train = score_str
+                save_modelhyperparams(svc, param_gridlin, save_dir, model_type, 'zlinear_train', scaler_used=False)
 
     model_loading_params = t_model_params[best_i]
     if model_loading_params['model'] == 'cglow':
@@ -112,21 +214,73 @@ def evaluate_classification(t_model_params, save_dir, device):
     elif model_loading_params['model'] == 'seqflow':
         model_single = load_seqflow_model(model_loading_params['n_dim'], model_loading_params['n_flow'],
                                           gaussian_params=model_loading_params['gaussian_params'],
-                                          learn_mean=model_loading_params['learn_mean'])
+                                          learn_mean=model_loading_params['learn_mean'], dataset=full_dataset)
 
     elif model_loading_params['model'] == 'ffjord':
         model_single = load_ffjord_model(model_loading_params['ffjord_args'], model_loading_params['n_dim'],
                                          gaussian_params=model_loading_params['gaussian_params'],
-                                         learn_mean=model_loading_params['learn_mean'])
-
+                                         learn_mean=model_loading_params['learn_mean'], dataset=full_dataset)
+    elif model_loading_params['model'] == 'moflow':
+        args_moflow, _ = moflow_arguments().parse_known_args()
+        model_single = load_moflow_model(model_loading_params['moflow_args'],
+                                         gaussian_params=model_loading_params['gaussian_params'],
+                                         learn_mean=model_loading_params['learn_mean'],
+                                         dataset=full_dataset)
     else:
         assert False, 'unknown model type!'
 
-    model_single = WrappedModel(model_single)
-    model_single.load_state_dict(torch.load(model_loading_params['loading_path'], map_location=device))
+    if not cus_load_func:
+        model_single = WrappedModel(model_single)
+        model_single.load_state_dict(torch.load(model_loading_params['loading_path'], map_location=device))
+        model = model_single.module
+    else:
+        model = cus_load_func(model_single, model_loading_params['loading_path'])
     torch.save(
-        model_single.state_dict(), f"{save_dir}/best_classification_model.pth"
+        model.state_dict(), f"{save_dir}/best_classification_model.pth"
     )
+
+    lines = [best_score_str, '\n', best_score_str_train]
+    with open(f"{save_dir}/res.txt", 'w') as f:
+        f.writelines(lines)
+
+    if with_train:
+        model_loading_params = t_model_params[best_i_train]
+        if model_loading_params['model'] == 'cglow':
+            # Load model
+            model_single = CGlow(model_loading_params['n_channel'], model_loading_params['n_flow'],
+                                 model_loading_params['n_block'], affine=model_loading_params['affine'],
+                                 conv_lu=model_loading_params['conv_lu'],
+                                 gaussian_params=model_loading_params['gaussian_params'],
+                                 device=model_loading_params['device'], learn_mean=model_loading_params['learn_mean'])
+        elif model_loading_params['model'] == 'seqflow':
+            model_single = load_seqflow_model(model_loading_params['n_dim'], model_loading_params['n_flow'],
+                                              gaussian_params=model_loading_params['gaussian_params'],
+                                              learn_mean=model_loading_params['learn_mean'], dataset=full_dataset)
+
+        elif model_loading_params['model'] == 'ffjord':
+            model_single = load_ffjord_model(model_loading_params['ffjord_args'], model_loading_params['n_dim'],
+                                             gaussian_params=model_loading_params['gaussian_params'],
+                                             learn_mean=model_loading_params['learn_mean'], dataset=full_dataset)
+        elif model_loading_params['model'] == 'moflow':
+            args_moflow, _ = moflow_arguments().parse_known_args()
+            model_single = load_moflow_model(model_loading_params['moflow_args'],
+                                             gaussian_params=model_loading_params['gaussian_params'],
+                                             learn_mean=model_loading_params['learn_mean'],
+                                             dataset=full_dataset)
+        else:
+            model_type = model_loading_params['model']
+            assert False, f'unknown model type! ({model_type})'
+
+        if not cus_load_func:
+            model = WrappedModel(model_single)
+            model.load_state_dict(torch.load(model_loading_params['loading_path'], map_location=device))
+        else:
+            model = cus_load_func(model_single, model_loading_params['loading_path'])
+        torch.save(
+            model.state_dict(), f"{save_dir}/best_classifiation_train_model.pth"
+        )
+
+    return best_i
 
 
 if __name__ == '__main__':
@@ -236,14 +390,19 @@ if __name__ == '__main__':
         val_dataset.load_split(val_idx_path)
     else:
         print('No val idx found, searching for test dataset...')
-        val_dataset = ImDataset(dataset_name=dataset_name, test=True)
+        if dataset_name == 'mnist':
+            val_dataset = ImDataset(dataset_name=dataset_name, test=True)
+        else:
+            train_dataset, val_dataset = dataset.split_dataset(0)
 
-    n_dim = dataset.X[0].shape[0]
-    for sh in dataset.X[0].shape[1:]:
-        n_dim *= sh
+    n_dim = dataset.get_n_dim()
+
     if not dim_per_label:
-        uni = np.unique(dataset.true_labels)
-        dim_per_label = math.floor(n_dim / len(uni))
+        if not dataset.is_regression_dataset():
+            uni = np.unique(dataset.true_labels)
+            dim_per_label = math.floor(n_dim / len(uni))
+        else:
+            dim_per_label = n_dim
 
     t_model_params = []
     for save_path in saves:
@@ -269,8 +428,22 @@ if __name__ == '__main__':
                 assert False, 'Unknown distribution !'
         else:
             eigval_list = None
-        gaussian_params = initialize_gaussian_params(dataset, eigval_list, isotrope='isotrope' in folder_name,
-                                                     dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
+
+        if not dataset.is_regression_dataset():
+            gaussian_params = initialize_gaussian_params(dataset, eigval_list, isotrope='isotrope' in folder_name,
+                                                         dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
+        else:
+            if args.method == 0:
+                gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list,
+                                                                        isotrope='isotrope' in folder_name,
+                                                                        dim_per_label=dim_per_label,
+                                                                        fixed_eigval=fixed_eigval)
+            elif args.method == 1:
+                gaussian_params = initialize_tmp_regression_gaussian_params(dataset, eigval_list)
+            elif args.method == 2:
+                gaussian_params = initialize_tmp_regression_gaussian_params(dataset, eigval_list, ones=True)
+            else:
+                assert False, 'no method selected'
 
         learn_mean = 'lmean' in folder_name
         model_loading_params = {'model': model_type, 'n_dim': n_dim, 'n_flow': n_flow,
@@ -294,4 +467,5 @@ if __name__ == '__main__':
     save_dir = './save'
     create_folder(save_dir)
 
-    evaluate_classification(t_model_params, save_dir=save_dir, device=device)
+    evaluate_classification(t_model_params, train_dataset, val_dataset, full_dataset=dataset, save_dir=save_dir,
+                            device=device, with_train=True)

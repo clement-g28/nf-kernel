@@ -713,8 +713,8 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
     end = time.time()
     print(f"time to fit linear ridge : {str(end - start)}")
 
-    krr_types = ['rbf', 'poly', 'sigmoid']
-    # krr_types = ['rbf']
+    # krr_types = ['rbf', 'poly', 'sigmoid']
+    krr_types = ['rbf']
     krr_params = [
         {'Ridge__kernel': ['rbf'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__alpha': np.logspace(-5, 2, 11)},
         {'Ridge__kernel': ['poly'], 'Ridge__gamma': np.logspace(-5, 3, 5),
@@ -824,6 +824,7 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
                 end = time.time()
                 print(f"time to get Z_val from X_val : {str(end - start)}")
 
+                start = time.time()
                 pred = zlinridge.predict(val_inZ)
                 zridge_r2_score = zlinridge.score(val_inZ, elabels)
                 zridge_mae_score = np.abs(pred - elabels).mean()
@@ -832,8 +833,11 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
                 our_r2_scores.append(zridge_r2_score)
                 our_mse_scores.append(zridge_mse_score)
                 our_mae_scores.append(zridge_mae_score)
+                end = time.time()
+                print(f"time to predict with zlinridge : {str(end - start)}")
 
                 # See on train
+                start = time.time()
                 pred = zlinridge.predict(Z)
                 t_zridge_r2_score = zlinridge.score(Z, tlabels)
                 t_zridge_mae_score = np.abs(pred - tlabels).mean()
@@ -843,26 +847,35 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
                 r2_scores_train.append(t_zridge_r2_score)
                 mse_scores_train.append(t_zridge_mse_score)
                 mae_scores_train.append(t_zridge_mae_score)
+                end = time.time()
+                print(f"time to predict with zlinridge (on train) : {str(end - start)}")
 
             # KERNELS EVALUATION
             X_val = val_dataset.get_flattened_X()
             # X_val = val_dataset.X.reshape(val_dataset.X.shape[0], -1)
             labels_val = val_dataset.true_labels
 
+            start = time.time()
             ridge_r2_score = linridge.score(X_val, labels_val)
             ridge_mae_score = np.abs(linridge.predict(X_val) - labels_val).mean()
             ridge_mse_score = np.power(linridge.predict(X_val) - labels_val, 2).mean()
             ridge_r2_scores.append(ridge_r2_score)
             ridge_mae_scores.append(ridge_mae_score)
             ridge_mse_scores.append(ridge_mse_score)
+            end = time.time()
+            print(f"time to predict with xlinridge : {str(end - start)}")
 
+            start = time.time()
             for i, krr in enumerate(krrs):
                 krr_r2_score = krr.score(X_val, labels_val)
                 krr_mae_score = np.abs(krr.predict(X_val) - labels_val).mean()
                 krr_mse_score = np.power(krr.predict(X_val) - labels_val, 2).mean()
                 # krr_score = np.abs(krr.predict(X_val) - labels_val).mean()
                 krr_scores[i].append((krr_r2_score, krr_mae_score, krr_mse_score))
+            end = time.time()
+            print(f"time to predict with {len(krrs)} kernelridge : {str(end - start)}")
 
+            start = time.time()
             # GRAPH KERNELS EVALUATION
             for i, graph_krr in enumerate(graph_krrs):
                 K_val = compute_kernel(graph_kernels[i][2], (val_dataset, train_dataset), edge_to_node=edge_to_node,
@@ -876,6 +889,8 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
                 # print(f'GraphKernelRidge ({graph_kernels[i][2]}) R2: {graph_krr_r2_score}, '
                 #       f'MSE: {graph_krr_mse_score}, MAE: {graph_krr_mae_score}')
                 krr_graph_scores[i].append((graph_krr_r2_score, graph_krr_mae_score, graph_krr_mse_score))
+            end = time.time()
+            print(f"time to predict with {len(graph_krrs)} graphkernelridge : {str(end - start)}")
 
         # PRINT RESULTS
         lines = []
@@ -1146,7 +1161,7 @@ def evaluate_regression_preimage(model, val_dataset, device, save_dir, print_as_
             x_sh *= v
         x = all_res[:, :x_sh].reshape(all_res.shape[0], *x_shape)
         adj = all_res[:, x_sh:].reshape(all_res.shape[0], *adj_shape)
-        if print_as_mol:
+        if print_as_mol and val_dataset.atomic_num_list is not None:
             from utils.graphs.mol_utils import check_validity, save_mol_png
             atomic_num_list = val_dataset.atomic_num_list
             valid_mols = check_validity(adj, x, atomic_num_list)['valid_mols']
@@ -1233,7 +1248,7 @@ def evaluate_regression_preimage2(model, val_dataset, device, save_dir, n_y=50, 
             x_sh *= v
         x = all_res[:, :x_sh].reshape(all_res.shape[0], *x_shape)
         adj = all_res[:, x_sh:].reshape(all_res.shape[0], *adj_shape)
-        if print_as_mol:
+        if print_as_mol and val_dataset.atomic_num_list is not None:
             from utils.graphs.mol_utils import check_validity, save_mol_png
             atomic_num_list = val_dataset.atomic_num_list
             results = check_validity(adj, x, atomic_num_list, with_idx=True)
@@ -1430,7 +1445,7 @@ def evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=20, n
             xm = x[n * (n_interpolation + 2):(n + 1) * (n_interpolation + 2)]
             adjm = adj[n * (n_interpolation + 2):(n + 1) * (n_interpolation + 2)]
 
-            if print_as_mol:
+            if print_as_mol and atomic_num_list is not None:
                 interpolation_mols = [valid_mol(construct_mol(x_elem, adj_elem, atomic_num_list))
                                       for x_elem, adj_elem in zip(xm, adjm)]
                 valid_mols = [mol for mol in interpolation_mols if mol is not None]

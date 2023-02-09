@@ -110,8 +110,8 @@ if __name__ == '__main__':
         # val_dataset = ImDataset(dataset_name=dataset_name, test=True)
 
     # reduce train dataset size (fitting too long)
-    # print('Train dataset reduced in order to accelerate. (stratified)')
-    # train_dataset.reduce_regression_dataset(0.2, stratified=True)
+    print('Train dataset reduced in order to accelerate. (stratified)')
+    train_dataset.reduce_regression_dataset(0.1, stratified=True)
     # val_dataset.reduce_regression_dataset(0.5, stratified=True)
 
     n_dim = dataset.get_n_dim()

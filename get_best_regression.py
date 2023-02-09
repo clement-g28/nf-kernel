@@ -48,8 +48,8 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
         eval_dataset.permute_graphs_in_dataset()
 
     # TEST
-    start_from = None
-    # start_from = 289
+    # start_from = None
+    start_from = 266
     for i, model_loading_params in enumerate(t_model_params):
         if start_from is not None and i < start_from:
             continue
@@ -164,36 +164,6 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
                 best_score_str = score_str
                 # save_modelhyperparams(zlinridge, param_gridlin, save_dir, model_type, 'zlinear', scaler_used=False)
         else:
-            loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
-
-            Z = []
-            tlabels = []
-            with torch.no_grad():
-                for j, data in enumerate(loader):
-                    inp, labels = data
-                    inp = train_dataset.format_data(inp, None, None, device)
-                    labels = labels.to(device)
-                    log_p, distloss, logdet, out = model(inp, labels)
-                    Z.append(out.detach().cpu().numpy())
-                    tlabels.append(labels.detach().cpu().numpy())
-            Z = np.concatenate(Z, axis=0).reshape(len(train_dataset), -1)
-            tlabels = np.concatenate(tlabels, axis=0)
-
-            # Learn Ridge
-            # zlinridge = make_pipeline(StandardScaler(), KernelRidge(kernel='linear', alpha=0.1))
-            # zlinridge = Ridge(alpha=1.0)
-            # zlinridge.fit(Z, tlabels)
-            param_gridlin = [{'Ridge__alpha': np.concatenate((np.logspace(-5, 2, 11), np.array([1])))}]
-            model_type = ('Ridge', Ridge())
-            scaler = False
-            zlinridge = learn_or_load_modelhyperparams(Z, tlabels, 'zlinear', param_gridlin, save_dir,
-                                                       model_type=model_type, scaler=scaler, save=False,
-                                                       force_train=True)
-            # kernel_name = 'linear'
-            # param_gridlin = [{'Ridge__kernel': [kernel_name], 'Ridge__alpha': np.linspace(0, 10, 11)}]
-            # zlinridge = learn_or_load_modelhyperparams(Z, tlabels, kernel_name, param_gridlin, save_dir,
-            #                                            model_type=('Ridge', KernelRidge()), scaler=False)
-
             val_loader = eval_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
 
             val_inZ = []
@@ -622,37 +592,37 @@ if __name__ == '__main__':
     best_i = evaluate_regression(t_model_params, train_dataset, val_dataset, full_dataset=dataset, save_dir=save_dir,
                                  device=device, with_train=True, reg_use_var=reg_use_var)
 
-    model_loading_params = t_model_params[best_i]
-    if model_loading_params['model'] == 'cglow':
-        # Load model
-        model_single = CGlow(model_loading_params['n_channel'], model_loading_params['n_flow'],
-                             model_loading_params['n_block'], affine=model_loading_params['affine'],
-                             conv_lu=model_loading_params['conv_lu'],
-                             gaussian_params=model_loading_params['gaussian_params'],
-                             device=model_loading_params['device'], learn_mean=model_loading_params['learn_mean'])
-    elif model_loading_params['model'] == 'seqflow':
-        model_single = load_seqflow_model(model_loading_params['n_dim'], model_loading_params['n_flow'],
-                                          gaussian_params=model_loading_params['gaussian_params'],
-                                          learn_mean=model_loading_params['learn_mean'], reg_use_var=reg_use_var,
-                                          dataset=dataset)
-
-    elif model_loading_params['model'] == 'ffjord':
-        model_single = load_ffjord_model(model_loading_params['ffjord_args'], model_loading_params['n_dim'],
-                                         gaussian_params=model_loading_params['gaussian_params'],
-                                         learn_mean=model_loading_params['learn_mean'], reg_use_var=reg_use_var,
-                                         dataset=dataset)
-    elif model_loading_params['model'] == 'moflow':
-        args_moflow, _ = moflow_arguments().parse_known_args()
-        model_single = load_moflow_model(model_loading_params['moflow_args'],
-                                         gaussian_params=model_loading_params['gaussian_params'],
-                                         learn_mean=model_loading_params['learn_mean'], reg_use_var=reg_use_var,
-                                         dataset=dataset)
-
-    else:
-        assert False, 'unknown model type!'
-    model_single = WrappedModel(model_single)
-    model_single.load_state_dict(torch.load(model_loading_params['loading_path'], map_location=device))
-    model = model_single.module
-    model = model.to(device)
-    model.eval()
+    # model_loading_params = t_model_params[best_i]
+    # if model_loading_params['model'] == 'cglow':
+    #     # Load model
+    #     model_single = CGlow(model_loading_params['n_channel'], model_loading_params['n_flow'],
+    #                          model_loading_params['n_block'], affine=model_loading_params['affine'],
+    #                          conv_lu=model_loading_params['conv_lu'],
+    #                          gaussian_params=model_loading_params['gaussian_params'],
+    #                          device=model_loading_params['device'], learn_mean=model_loading_params['learn_mean'])
+    # elif model_loading_params['model'] == 'seqflow':
+    #     model_single = load_seqflow_model(model_loading_params['n_dim'], model_loading_params['n_flow'],
+    #                                       gaussian_params=model_loading_params['gaussian_params'],
+    #                                       learn_mean=model_loading_params['learn_mean'], reg_use_var=reg_use_var,
+    #                                       dataset=dataset)
+    #
+    # elif model_loading_params['model'] == 'ffjord':
+    #     model_single = load_ffjord_model(model_loading_params['ffjord_args'], model_loading_params['n_dim'],
+    #                                      gaussian_params=model_loading_params['gaussian_params'],
+    #                                      learn_mean=model_loading_params['learn_mean'], reg_use_var=reg_use_var,
+    #                                      dataset=dataset)
+    # elif model_loading_params['model'] == 'moflow':
+    #     args_moflow, _ = moflow_arguments().parse_known_args()
+    #     model_single = load_moflow_model(model_loading_params['moflow_args'],
+    #                                      gaussian_params=model_loading_params['gaussian_params'],
+    #                                      learn_mean=model_loading_params['learn_mean'], reg_use_var=reg_use_var,
+    #                                      dataset=dataset)
+    #
+    # else:
+    #     assert False, 'unknown model type!'
+    # model_single = WrappedModel(model_single)
+    # model_single.load_state_dict(torch.load(model_loading_params['loading_path'], map_location=device))
+    # model = model_single.module
+    # model = model.to(device)
+    # model.eval()
     # visualize_dataset(dataset, train_dataset, val_dataset, model, save_dir)

@@ -23,6 +23,8 @@ from moflow_lib.model import MoFlow, rescale_adj
 from graphnvp_lib.graph_nvp.hyperparams import Hyperparameters as GraphNVPHyperparams
 from graphnvp_lib.nvp_model import GraphNvpModel
 
+from utils.dataset import ClassificationGraphDataset, RegressionGraphDataset
+
 GRAPH_MODELS = ['moflow', 'graphnvp']
 IMAGE_MODELS = ['cglow']
 SIMPLE_MODELS = ['seqflow', 'ffjord']
@@ -90,6 +92,13 @@ class NF(nn.Module):
                 self.means = nn.Parameter(torch.cat(means, dim=0))
             else:
                 self.means = torch.cat(means, dim=0).to(device)
+
+    def init_means_to_points(self, dataset):
+        data = dataset.get_flattened_X()
+        n_means = []
+        for i in range(self.means.shape[0]):
+            n_means.append(torch.from_numpy(data[i]).double().unsqueeze(0))
+        self.means = nn.Parameter(torch.cat(n_means, dim=0))
 
     def calc_last_z_shape(self, input_size):
         return (input_size,)
@@ -520,6 +529,7 @@ class CMoFlow(NF):
         log_p = self.calculate_log_p(flat_z, label, self.means, self.gaussian_params)
 
         sum_log_det_jacs = torch.sum(torch.cat([logdet.unsqueeze(1) for logdet in sum_log_det_jacs], dim=1), dim=1)
+        # sum_log_det_jacs /= flat_z.shape[1]
         return log_p, distloss, sum_log_det_jacs, flat_z
 
     def reverse(self, z, reconstruct=False):
@@ -589,8 +599,10 @@ class CMoFlow(NF):
         lab_min = np.min(val_dataset.true_labels)
         lab_max = np.max(val_dataset.true_labels)
         ax1.scatter(x[:, 0], x[:, 1], c=y, vmin=lab_min, vmax=lab_max)
-        # add_col = [int(np.max(val_dataset.true_labels)) + i + 1 for i in range(np_means.shape[0])]
-        add_col = [lab_min, lab_max]
+        if isinstance(val_dataset, ClassificationGraphDataset):
+            add_col = [int(np.max(val_dataset.true_labels)) + i + 1 for i in range(np_means.shape[0])]
+        else:
+            add_col = [lab_min, lab_max]
         y = np.concatenate((y, np.array(add_col)), axis=0)
         ax2.scatter(z[:, 0], z[:, 1], c=y, vmin=lab_min, vmax=lab_max)
 

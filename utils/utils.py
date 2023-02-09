@@ -95,11 +95,7 @@ class AverageMeter(object):
 
 def initialize_gaussian_params(dataset, al_list, isotrope=False, dim_per_label=30, fixed_eigval=None):
     uni = np.unique(dataset.true_labels)
-    n_dim = dataset.X[0].shape[0]
-    for sh in dataset.X[0].shape[1:]:
-        n_dim *= sh
-    assert dim_per_label <= math.floor(
-        n_dim / len(uni)), 'dim_per_label is too big not enough dimensions for all classes'
+    n_dim = dataset.get_n_dim()
     gaussian_params = []
     if isotrope:
         for i, label in enumerate(uni):

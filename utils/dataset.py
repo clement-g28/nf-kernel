@@ -18,12 +18,13 @@ import pickle
 
 from sklearn.datasets import load_iris, load_diabetes, load_breast_cancer, make_moons, make_swiss_roll
 from utils import visualize_flow
+from torch_geometric.datasets.tu_dataset import TUDataset
 
 SIMPLE_DATASETS = ['single_moon', 'double_moon', 'iris', 'bcancer']
 IMAGE_DATASETS = ['mnist']
 SIMPLE_REGRESSION_DATASETS = ['swissroll', 'diabetes', 'waterquality', 'aquatoxi', 'fishtoxi', 'trafficflow']
 GRAPH_REGRESSION_DATASETS = ['qm7', 'qm9', 'freesolv', 'esol', 'lipo', 'fishtoxi']
-GRAPH_CLASSIFICATION_DATASETS = []
+GRAPH_CLASSIFICATION_DATASETS = ['toxcast', 'AIDS', 'Letter-med']
 
 
 # abstract base kernel dataset class
@@ -693,7 +694,12 @@ from utils.graphs.utils_datasets import transform_graph_permutation
 import multiprocessing
 import itertools
 
-ATOMIC_NUM_MAP = {'C': 6, 'N': 7, 'O': 8, 'F': 9, 'P': 15, 'S': 16, 'Cl': 17, 'Br': 35, 'I': 53}
+ATOMIC_NUM_MAP = {'C': 6, 'N': 7, 'O': 8, 'F': 9, 'P': 15, 'S': 16, 'Cl': 17, 'Br': 35, 'I': 53, 'Si': 14, 'Ba': 56,
+                  'Nd': 60, 'Dy': 66, 'In': 49, 'Sb': 51, 'Co': 27, 'B': 5, 'Ca': 20, 'Ni': 28, 'Na': 11, 'Se': 34,
+                  'Tl': 81, 'Cd': 48, 'Yb': 70, 'Li': 3, 'Cr': 24, 'Sn': 50, 'Hg': 80, 'Mn': 25, 'K': 19, 'As': 33,
+                  'Bi': 83, 'Mo': 42, 'Mg': 12, 'Au': 79, 'Zr': 40, 'Zn': 30, 'Cu': 29, 'Fe': 26, 'Eu': 63, 'Al': 13,
+                  'Pt': 78, 'Sr': 38, 'Sc': 21, 'Ti': 22, 'Ag': 47, 'Pb': 82, 'Pd': 46, 'Be': 4, 'Ge': 32,
+                  'V': 23, 'Gd': 64, 'Ru': 44, 'Te': 52, 'W': 74, 'Rh': 45, 'Ga': 31, 'Ho': 67, 'Tb': 65}
 
 
 def chunks(lst, n):
@@ -716,15 +722,22 @@ class GraphDataset(BaseDataset):
         (train_dataset, test_dataset), self.label_map = self.load_dataset(dataset_name)
         if len(train_dataset) == 3:
             xs, adjs, y = train_dataset
-            xs_test, adjs_test, y_test = test_dataset
         else:
             xs, adjs, self.smiles, y = train_dataset
-            xs_test, adjs_test, self.smiles_test, y_test = test_dataset
         y = np.array(y).squeeze()
-        test_dataset = (list(zip(xs_test, adjs_test)), np.array(y_test).squeeze())
+        if test_dataset is not None:
+            if len(train_dataset) == 3:
+                xs_test, adjs_test, y_test = test_dataset
+            else:
+                xs_test, adjs_test, self.smiles_test, y_test = test_dataset
+            test_dataset = (list(zip(xs_test, adjs_test)), np.array(y_test).squeeze())
 
         self.transform = transform_graph_permutation if transform == 'permutation' else None
-        self.atomic_num_list = [ATOMIC_NUM_MAP[label] for label, _ in self.label_map.items()] + [0]
+        if self.label_map is not None:
+            self.atomic_num_list = [ATOMIC_NUM_MAP[label] for label, _ in self.label_map.items()] + [0]
+        else:
+            print('Not a molecule dataset -> no atom_num conversion.')
+            self.atomic_num_list = None
         graphs = list(zip(xs, adjs))
 
         # Graphs for tests
@@ -1132,23 +1145,123 @@ class ClassificationGraphDataset(GraphDataset):
         super().__init__(dataset_name, transform=transform)
 
     def get_dataset_params(self):
-        atom_type_list = [key for key, val in self.label_map.items()]
-        if self.dataset_name == 'qm7':
-            # atom_type_list = ['C', 'N', 'S', 'O']
+        if self.label_map is not None:
+            node_type_list = [key for key, val in self.label_map.items()]
+        else:
+            node_type_list = [i for i in range(self.X[0][0].shape[-1]-1)] # -1 because of virtual node
+        if self.dataset_name == 'toxcast':
             b_n_type = 4
-            # b_n_squeeze = 1
-            b_n_squeeze = 7
-            a_n_node = 7
-            a_n_type = len(atom_type_list) + 1  # 5
-        # result = {'atom_type_list': atom_type_list, 'b_n_type': b_n_type, 'b_n_squeeze': b_n_squeeze,
-        #           'a_n_node': a_n_node, 'a_n_type': a_n_type}
-        # return result
+            b_n_squeeze = 10
+            a_n_node = 30
+            a_n_type = len(node_type_list) + 1  # 5
+        elif self.dataset_name == 'AIDS':
+            b_n_type = 4
+            b_n_squeeze = 13
+            a_n_node = 13
+            a_n_type = len(node_type_list) + 1  # 5
+        elif self.dataset_name == 'Letter-med':
+            b_n_type = 2
+            b_n_squeeze = 3
+            a_n_node = 9
+            a_n_type = len(node_type_list) + 1  # 5
+        else:
+            assert False, 'unknown dataset'
+        result = {'atom_type_list': node_type_list, 'b_n_type': b_n_type, 'b_n_squeeze': b_n_squeeze,
+                  'a_n_node': a_n_node, 'a_n_type': a_n_type}
+        return result
+
+    @staticmethod
+    def convert_tud_dataset(dataset):
+        n_nodes = []
+        idxs = []
+        filter_n_nodes = 13
+        max_num_node = 0
+        for i, graph in enumerate(dataset):
+            if graph.num_nodes <= filter_n_nodes:
+                idxs.append(i)
+                n_nodes.append(graph.num_nodes)
+                if graph.num_nodes > max_num_node:
+                    max_num_node = graph.num_nodes
+        dataset_size = len(n_nodes)
+        # hist = np.histogram(n_nodes, bins=range(0, max_num_node + 1))
+        num_edge_features = dataset.num_edge_features if dataset.num_edge_features > 0 else 1
+        num_node_features = dataset.num_node_features if dataset.num_node_features > 0 else 1
+
+        X = np.zeros((dataset_size, max_num_node, num_node_features + 1))
+        A = np.zeros((dataset_size, num_edge_features + 1, max_num_node, max_num_node))
+        A[:, -1, :, :] = 1
+        Y = np.zeros((dataset_size)).astype(np.int)
+
+        for ig in range(dataset_size):
+            graph = dataset[idxs[ig]]
+            n_node = graph.num_nodes
+            X[ig, :n_node, :-1] = graph.x if graph.x.shape[-1] > 0 else torch.ones(graph.x.shape[0],1)
+            # virtual nodes
+            X[ig, n_node:, -1] = 1
+            edge_index = graph.edge_index.detach().cpu().numpy().transpose()
+            edge_attr = graph.edge_attr if graph.edge_attr is not None else torch.ones(edge_index.shape[0])
+            for n, (i, j) in enumerate(edge_index):
+                A[ig, :num_edge_features, i, j] = edge_attr[n]
+                # virtual edges
+                A[ig, -1, i, j] = 0
+            Y[ig] = graph.y
+        return X, A, Y
 
     @staticmethod
     def load_dataset(name):
         path = './datasets'
+        test_dataset = None
 
-        # return results, label_map
+        exist_dataset = os.path.exists(f'{path}/{name}_data.npy') if path is not None else False
+        if exist_dataset:
+            if name == 'aids':
+                X = np.load(f'{path}/{name}_X.npy')
+                A = np.load(f'{path}/{name}_A.npy')
+                Y = np.load(f'{path}/{name}_Y.npy')
+                dataset = (X, A, Y)
+                results = (dataset, test_dataset)
+                ordered_labels = ['C', 'O', 'N', 'Cl', 'F', 'S', 'Se', 'P', 'Na', 'I', 'Co', 'Br', 'Li', 'Si', 'Mg',
+                                  'Cu',
+                                  'As', 'B', 'Pt', 'Ru', 'K', 'Pd', 'Au', 'Te', 'W', 'Rh', 'Zn', 'Bi', 'Pb', 'Ge', 'Sb',
+                                  'Sn', 'Ga', 'Hg', 'Ho', 'Tl', 'Ni', 'Tb']
+                label_map = {label: i for i, label in enumerate(ordered_labels)}
+            else:
+                assert False, 'unknown dataset'
+        else:
+            if name in ['toxcast']:
+                results, label_map = get_molecular_dataset_mp(name=name, data_path=path)
+
+                # TO TEST DATASETS
+                # tasks, (train_dataset, valid_dataset, test_dataset), transformers = dc.molnet.load_toxcast(featurizer='Raw')
+                # n_atoms = []
+                # label_map = {}
+                # for mol in train_dataset.X:
+                #     n_atoms.append(mol.GetNumAtoms())
+                #     for atom in mol.GetAtoms():
+                #         if atom.GetSymbol() not in label_map:
+                #             label_map[atom.GetSymbol()] = len(label_map) + 1
+                # hist = np.histogram(n_atoms, bins=range(0, max(n_atoms) + 1))
+            elif name in ['AIDS', 'Letter-med']:
+                dset = TUDataset(path, name=name)
+                X, A, Y = ClassificationGraphDataset.convert_tud_dataset(dset)
+
+                results = ((X, A, Y), test_dataset)
+                if name == 'AIDS':
+                    ordered_labels = ['C', 'O', 'N', 'Cl', 'F', 'S', 'Se', 'P', 'Na', 'I', 'Co', 'Br', 'Li', 'Si', 'Mg',
+                                      'Cu',
+                                      'As', 'B', 'Pt', 'Ru', 'K', 'Pd', 'Au', 'Te', 'W', 'Rh', 'Zn', 'Bi', 'Pb', 'Ge', 'Sb',
+                                      'Sn', 'Ga', 'Hg', 'Ho', 'Tl', 'Ni', 'Tb']
+                    label_map = {label: i for i, label in enumerate(ordered_labels)}
+                else:
+                    label_map = None
+
+                np.save(f'{path}/{name}_X.npy', X)
+                np.save(f'{path}/{name}_A.npy', A)
+                np.save(f'{path}/{name}_Y.npy', Y)
+            else:
+                assert False, 'unknown dataset'
+
+        return results, label_map
 
     def is_regression_dataset(self):
         return False

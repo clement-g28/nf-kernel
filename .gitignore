@@ -1,6 +1,9 @@
 .idea
 *.npz
 *.log
+datasets/AIDS
+datasets/Letter-med
+datasets/toxcast-featurized
 datasets/delaney-featurized
 datasets/freesolv-featurized
 datasets/lipo-featurized
