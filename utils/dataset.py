@@ -1272,19 +1272,22 @@ class ClassificationGraphDataset(GraphDataset):
         path = './datasets'
         test_dataset = None
 
-        exist_dataset = os.path.exists(f'{path}/{name}_data.npy') if path is not None else False
+        exist_dataset = os.path.exists(f'{path}/{name}_X.npy') if path is not None else False
         if exist_dataset:
-            if name == 'aids':
+            if name in ['AIDS', 'Letter-med']:
                 X = np.load(f'{path}/{name}_X.npy')
                 A = np.load(f'{path}/{name}_A.npy')
                 Y = np.load(f'{path}/{name}_Y.npy')
                 dataset = (X, A, Y)
                 results = (dataset, test_dataset)
-                ordered_labels = ['C', 'O', 'N', 'Cl', 'F', 'S', 'Se', 'P', 'Na', 'I', 'Co', 'Br', 'Li', 'Si', 'Mg',
-                                  'Cu',
-                                  'As', 'B', 'Pt', 'Ru', 'K', 'Pd', 'Au', 'Te', 'W', 'Rh', 'Zn', 'Bi', 'Pb', 'Ge', 'Sb',
-                                  'Sn', 'Ga', 'Hg', 'Ho', 'Tl', 'Ni', 'Tb']
-                label_map = {label: i for i, label in enumerate(ordered_labels)}
+                if name == 'AIDS':
+                    ordered_labels = ['C', 'O', 'N', 'Cl', 'F', 'S', 'Se', 'P', 'Na', 'I', 'Co', 'Br', 'Li', 'Si', 'Mg',
+                                      'Cu',
+                                      'As', 'B', 'Pt', 'Ru', 'K', 'Pd', 'Au', 'Te', 'W', 'Rh', 'Zn', 'Bi', 'Pb', 'Ge', 'Sb',
+                                      'Sn', 'Ga', 'Hg', 'Ho', 'Tl', 'Ni', 'Tb']
+                    label_map = {label: i for i, label in enumerate(ordered_labels)}
+                else:
+                    label_map = None
             else:
                 assert False, 'unknown dataset'
         else:
