@@ -1275,6 +1275,7 @@ class ClassificationGraphDataset(GraphDataset):
         test_dataset = None
 
         exist_dataset = os.path.exists(f'{path}/{name}_X.npy') if path is not None else False
+        #dset = TUDataset(path, name='DBLP_v1', use_node_attr=False, use_edge_attr=True)
         if exist_dataset:
             if name in ['AIDS', 'Letter-med']:
                 X = np.load(f'{path}/{name}_X.npy')

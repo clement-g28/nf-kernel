@@ -444,6 +444,7 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
             val_dataset.permute_graphs_in_dataset()
             # OUR APPROACH EVALUATION
             if model is not None:
+                batch_size = 200 if 200 < len(val_dataset) else int(len(val_dataset) / 2)
                 val_loader = val_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
 
                 start = time.time()
