@@ -805,7 +805,7 @@ class GraphDataset(BaseDataset):
         if self.idx is None:
             self.idx = n_idx
         else:
-            self.idx = self.idx[n_idx]
+            self.idx = np.array(self.idx)[n_idx].tolist()
 
     # overwrite
     def load_split(self, load_path):
