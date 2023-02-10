@@ -365,7 +365,8 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
     ksvc_params = [
         {'SVC__kernel': ['rbf'], 'SVC__gamma': np.logspace(-5, 3, 10),
          'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))},
-        {'SVC__kernel': ['poly'], 'SVC__gamma': np.logspace(-5, 3, 5), 'SVC__degree': np.linspace(1, 2, 2),
+        {'SVC__kernel': ['poly'], 'SVC__gamma': np.logspace(-5, 3, 5),
+         'SVC__degree': np.linspace(1, 4, 4).astype(np.int),
          'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))},
         {'SVC__kernel': ['sigmoid'], 'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))}
     ]
@@ -935,7 +936,7 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
     ]
     # krr_params = [
     #     {'Ridge__kernel': ['rbf'], 'Ridge__alpha': np.linspace(0, 10, 11)},
-    #     {'Ridge__kernel': ['poly'], 'Ridge__degree': np.linspace(1, 4, 4),
+    #     {'Ridge__kernel': ['poly'], 'Ridge__degree': np.linspace(1, 4, 4).astype(np.int),
     #      'Ridge__alpha': np.linspace(0, 10, 11)},
     #     {'Ridge__kernel': ['sigmoid'], 'Ridge__alpha': np.linspace(0, 10, 11)}
     # ]
