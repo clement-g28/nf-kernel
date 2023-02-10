@@ -134,10 +134,14 @@ if __name__ == "__main__":
     # initialize gaussian params
     eigval_list = [mean_of_eigval for i in range(dim_per_label)]
 
-    gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list,
-                                                            isotrope=True,
-                                                            dim_per_label=dim_per_label,
-                                                            fixed_eigval=fixed_eigval)
+    if not dataset.is_regression_dataset():
+        gaussian_params = initialize_gaussian_params(dataset, eigval_list, isotrope=True,
+                                                     dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
+    else:
+        gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list,
+                                                                isotrope=True,
+                                                                dim_per_label=dim_per_label,
+                                                                fixed_eigval=fixed_eigval)
 
     learn_mean = True
     if model_type == 'cglow':
