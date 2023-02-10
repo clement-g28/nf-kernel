@@ -297,9 +297,13 @@ def projection_evaluation(model, train_dataset, val_dataset, gaussian_params, z_
 
 
 def evaluate_classification(model, train_dataset, val_dataset, save_dir, device, fithyperparam=True):
+    if isinstance(train_dataset, GraphDataset):
+        train_dataset.permute_graphs_in_dataset()
+        val_dataset.permute_graphs_in_dataset()
+
     # Compute results with our approach if not None
     if model is not None:
-        batch_size = 20
+        batch_size = 200
         loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
 
         start = time.time()
@@ -308,8 +312,9 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
         model.eval()
         with torch.no_grad():
             for j, data in enumerate(loader):
-                inp = data[0].float().to(device)
-                labels = data[1].to(device)
+                inp, labels = data
+                inp = train_dataset.format_data(inp, None, None, device)
+                labels = labels.to(device)
                 log_p, distloss, logdet, out = model(inp, labels)
                 Z.append(out.detach().cpu().numpy())
                 tlabels.append(labels.detach().cpu().numpy())
@@ -320,88 +325,36 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
 
         # Learn SVC
         start = time.time()
-        zlinsvc = make_pipeline(StandardScaler(), SVC(kernel='linear'))
-        zlinsvc.fit(Z, tlabels)
+        kernel_name = 'zlinear'
+        if fithyperparam:
+            param_gridlin = [
+                {'SVC__kernel': ['linear'], 'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))}]
+            model_type = ('SVC', SVC())
+            scaler = False
+            zlinsvc = learn_or_load_modelhyperparams(Z, tlabels, kernel_name, param_gridlin, save_dir,
+                                                     model_type=model_type, scaler=scaler, save=False,
+                                                     force_train=True)
+        else:
+            zlinsvc = make_pipeline(StandardScaler(), SVC(kernel='linear', C=1.0))
+            zlinsvc.fit(Z, tlabels)
+            print(f'Fitting done.')
         print(zlinsvc)
         end = time.time()
         print(f"time to fit linear svc in Z : {str(end - start)}")
 
-        val_loader = val_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
-
-        start = time.time()
-        val_inZ = []
-        elabels = []
-        with torch.no_grad():
-            for j, data in enumerate(val_loader):
-                inp = data[0].float().to(device)
-                labels = data[1].to(device)
-                log_p, distloss, logdet, out = model(inp, labels)
-                val_inZ.append(out.detach().cpu().numpy())
-                elabels.append(labels.detach().cpu().numpy())
-        val_inZ = np.concatenate(val_inZ, axis=0).reshape(len(val_dataset), -1)
-        elabels = np.concatenate(elabels, axis=0)
-        end = time.time()
-        print(f"time to get Z_val from X_val : {str(end - start)}")
-
-        zsvc_score = zlinsvc.score(val_inZ, elabels)
-        print(f'Our approach : {zsvc_score}')
-
-        # Misclassified data
-        predictions = zlinsvc.predict(val_inZ)
-        misclassif_i = np.where((predictions == elabels) == False)
-        if misclassif_i[0].shape[0] > 0:
-            z_sample = torch.from_numpy(val_inZ[misclassif_i].reshape(misclassif_i[0].shape[0], *z_shape)).float().to(
-                device)
-            with torch.no_grad():
-                images = model.reverse(z_sample).cpu().data
-            images = val_dataset.rescale(images)
-            print('Misclassification:')
-            print('Real labels :' + str(elabels[misclassif_i]))
-            print('Predicted labels :' + str(predictions[misclassif_i]))
-
-        if train_dataset.dataset_name == 'mnist':
-            nrow = math.floor(math.sqrt(images.shape[0]))
-            utils.save_image(
-                images,
-                f"{save_dir}/misclassif.png",
-                normalize=True,
-                nrow=nrow,
-                range=(0, 255),
-            )
-
-            # write in images pred and true labels
-            ndarr = images.numpy()
-            res = []
-            margin = 10
-            shape = (ndarr[0].shape[0], ndarr[0].shape[1] + margin, ndarr[0].shape[2] + 2 * margin)
-            for j, im_arr in enumerate(ndarr):
-                im = np.zeros(shape)
-                im[:, margin:, margin:-margin] = im_arr[:, :, :]
-                im = im.squeeze()
-                img = Image.fromarray(im)
-                draw = ImageDraw.Draw(img)
-                draw.text((0, 0), f'P:{predictions[misclassif_i[0][j]]} R:{elabels[misclassif_i[0][j]]}', 255)
-                res.append(np.expand_dims(np.array(img).reshape(shape), axis=0))
-            res = torch.from_numpy(np.concatenate(res, axis=0)).to(torch.float32)
-            utils.save_image(
-                res,
-                f"{save_dir}/misclassif_PR.png",
-                normalize=True,
-                nrow=nrow,
-                range=(0, 255),
-            )
-
-    X_train = train_dataset.X.reshape(train_dataset.X.shape[0], -1)
+    # KERNELS FIT
+    X_train = train_dataset.get_flattened_X()
     labels_train = train_dataset.true_labels
 
     start = time.time()
     kernel_name = 'linear'
     if fithyperparam:
-        param_gridlin = [{'SVC__kernel': [kernel_name], 'SVC__C': np.logspace(-5, 3, 10)}]
+        param_gridlin = [
+            {'SVC__kernel': [kernel_name], 'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))}]
         linsvc = learn_or_load_modelhyperparams(X_train, labels_train, kernel_name, param_gridlin, save_dir,
-                                                model_type=('SVC', SVC()), scaler=True)
+                                                model_type=('SVC', SVC()), scaler=False)
     else:
-        linsvc = make_pipeline(StandardScaler(), SVC(kernel=kernel_name))
+        linsvc = make_pipeline(StandardScaler(), SVC(kernel=kernel_name, C=1.0))
         linsvc.fit(X_train, labels_train)
         print(f'Fitting done.')
     end = time.time()
@@ -410,10 +363,11 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
     # krr_types = ['linear', 'poly', 'rbf', 'sigmoid', 'cosine']
     ksvc_types = ['rbf', 'poly', 'sigmoid']
     ksvc_params = [
-        {'SVC__kernel': ['rbf'], 'SVC__gamma': np.logspace(-5, 3, 10), 'SVC__C': np.logspace(-5, 3, 10)},
+        {'SVC__kernel': ['rbf'], 'SVC__gamma': np.logspace(-5, 3, 10),
+         'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))},
         {'SVC__kernel': ['poly'], 'SVC__gamma': np.logspace(-5, 3, 5), 'SVC__degree': np.linspace(1, 2, 2),
-         'SVC__C': np.logspace(-5, -3, 2)},
-        {'SVC__kernel': ['sigmoid'], 'SVC__C': np.logspace(-5, 3, 10)}
+         'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))},
+        {'SVC__kernel': ['sigmoid'], 'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))}
     ]
 
     ksvcs = [None] * len(ksvc_types)
@@ -423,30 +377,287 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
             ksvcs[i] = learn_or_load_modelhyperparams(X_train, labels_train, ksvc_type, [ksvc_params[i]], save_dir,
                                                       model_type=('SVC', SVC()), scaler=True)
         else:
-            ksvcs[i] = make_pipeline(StandardScaler(), SVC(kernel=ksvc_type))
+            ksvcs[i] = make_pipeline(StandardScaler(), SVC(kernel=ksvc_type, C=1.0))
             ksvcs[i].fit(X_train, labels_train)
             print(f'Fitting done.')
         end = time.time()
         print(f"time to fit {ksvc_type} svc : {str(end - start)}")
 
-    X_val = val_dataset.X.reshape(val_dataset.X.shape[0], -1)
-    labels_val = val_dataset.true_labels
+    # GRAPH KERNELS FIT
+    if isinstance(train_dataset, GraphDataset):
+        def compute_kernel(name, dataset, edge_to_node, normalize, wl_height=10):
+            if name == 'wl':
+                K = compute_wl_kernel(dataset, wl_height=wl_height, edge_to_node=edge_to_node,
+                                      normalize=normalize)
+            elif name == 'sp':
+                K = compute_sp_kernel(dataset, normalize=normalize, edge_to_node=edge_to_node)
+            elif name == 'mslap':
+                K = compute_mslap_kernel(dataset, normalize=normalize, edge_to_node=edge_to_node)
+            elif name == 'hadcode':
+                K = compute_hadcode_kernel(dataset, normalize=normalize, edge_to_node=edge_to_node)
+            else:
+                assert False, f'unknown graph kernel: {graph_kernel}'
+            return K
 
-    ksvc_scores = []
-    for ksvc in ksvcs:
-        ksvc_scores.append([])
+        wl_height = 15
+        edge_to_node = True
+        normalize = False
+        graph_kernel_names = ['wl', 'sp', 'hadcode']
+        # graph_kernel_names = ['wl', 'sp']
+        graph_kernels = []
+        graph_svc_params = []
+        for graph_kernel in graph_kernel_names:
+            K = compute_kernel(graph_kernel, train_dataset, edge_to_node=edge_to_node, normalize=normalize,
+                               wl_height=wl_height)
+            graph_kernels.append(('precomputed', K, graph_kernel))
+            graph_svc_params.append(
+                {'SVC_kernel': ['precomputed'], 'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))})
 
-    svc_score = linsvc.score(X_val, labels_val)
+        graph_ksvcs = [None] * len(graph_kernels)
+        for i, (krr_type, K, name) in enumerate(graph_kernels):
+            start = time.time()
+            if fithyperparam:
+                graph_ksvcs[i] = learn_or_load_modelhyperparams(K, labels_train, name, [graph_svc_params[i]],
+                                                                save_dir,
+                                                                model_type=('SVC', SVC()), scaler=False)
+            else:
+                graph_ksvcs[i] = make_pipeline(StandardScaler(), SVC(kernel=name, C=1.0))
+                graph_ksvcs[i].fit(K, labels_train)
+                print(f'Fitting done.')
+            end = time.time()
+            print(f"time to fit {krr_type} ridge : {str(end - start)}")
 
-    for i, ksvc in enumerate(ksvcs):
-        ksvc_score = ksvc.score(X_val, labels_val)
-        ksvc_scores[i].append(ksvc_score)
+    if isinstance(train_dataset, GraphDataset):
+        n_permutation = 10
+        our_scores = []
+        our_scores_train = []
+        svc_scores = []
+        ksvc_scores = []
+        for ksvc in ksvcs:
+            ksvc_scores.append([])
+        ksvc_graph_scores = []
+        for graph_ksvc in graph_ksvcs:
+            ksvc_graph_scores.append([])
 
-    print('Predictions scores :')
-    print(f'SVC : {np.mean(svc_score)}')
-    for j, kpca_type in enumerate(ksvc_types):
-        print(f'KernelSVC ({kpca_type}) : {np.mean(ksvc_scores[j])}')
-    print(f'Our approach : {zsvc_score}')
+        for n_perm in range(n_permutation):
+            val_dataset.permute_graphs_in_dataset()
+            # OUR APPROACH EVALUATION
+            if model is not None:
+                val_loader = val_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+
+                start = time.time()
+                val_inZ = []
+                elabels = []
+                with torch.no_grad():
+                    for j, data in enumerate(val_loader):
+                        inp, labels = data
+                        inp = val_dataset.format_data(inp, None, None, device)
+                        labels = labels.to(device)
+                        log_p, distloss, logdet, out = model(inp, labels)
+                        val_inZ.append(out.detach().cpu().numpy())
+                        elabels.append(labels.detach().cpu().numpy())
+                val_inZ = np.concatenate(val_inZ, axis=0).reshape(len(val_dataset), -1)
+                elabels = np.concatenate(elabels, axis=0)
+                end = time.time()
+                print(f"time to get Z_val from X_val : {str(end - start)}")
+
+                start = time.time()
+                zsvc_score = zlinsvc.score(val_inZ, elabels)
+                our_scores.append(zsvc_score)
+                end = time.time()
+                print(f"time to predict with zlinsvc : {str(end - start)}")
+
+                # See on train
+                start = time.time()
+                zsvc_score = zlinsvc.score(Z, tlabels)
+                our_scores_train.append(zsvc_score)
+                end = time.time()
+                print(f"time to predict with zlinsvc (on train) : {str(end - start)}")
+
+            # KERNELS EVALUATION
+            X_val = val_dataset.get_flattened_X()
+            labels_val = val_dataset.true_labels
+
+            start = time.time()
+            svc_score = linsvc.score(X_val, labels_val)
+            svc_scores.append(svc_score)
+            end = time.time()
+            print(f"time to predict with xlinridge : {str(end - start)}")
+
+            start = time.time()
+            for i, ksvc in enumerate(ksvcs):
+                ksvc_score = ksvc.score(X_val, labels_val)
+                ksvc_scores[i].append(ksvc_score)
+            end = time.time()
+            print(f"time to predict with {len(ksvcs)} kernelridge : {str(end - start)}")
+
+            start = time.time()
+            # GRAPH KERNELS EVALUATION
+            for i, graph_ksvc in enumerate(graph_ksvcs):
+                K_val = compute_kernel(graph_kernels[i][2], (val_dataset, train_dataset), edge_to_node=edge_to_node,
+                                       normalize=normalize, wl_height=wl_height)
+                graph_ksvc_score = graph_ksvc.score(K_val, labels_val)
+                ksvc_graph_scores[i].append(graph_ksvc_score)
+            end = time.time()
+            print(f"time to predict with {len(graph_ksvcs)} graphkernelridge : {str(end - start)}")
+
+        # PRINT RESULTS
+        lines = []
+        print('Predictions scores :')
+        svc_mean_score = np.mean(svc_scores)
+        svc_std_score = np.std(svc_scores)
+        score_str = f'Ridge R2: {svc_scores} \n' \
+                    f'Mean Scores: {svc_mean_score} \n' \
+                    f'Std Scores: {svc_std_score}'
+        print(score_str)
+        lines += [score_str, '\n']
+
+        for j, ksvc_type in enumerate(ksvc_types):
+            scores = []
+            for ksvc_score in ksvc_scores[j]:
+                scores.append(ksvc_score)
+            mean_score = np.mean(scores)
+            std_score = np.std(scores)
+            score_str = f'KernelRidge ({ksvc_type}): {scores} \n' \
+                        f'Mean Scores: {mean_score} \n' \
+                        f'Std Scores: {std_score}'
+            print(score_str)
+            lines += [score_str, '\n']
+
+        for j, graph_ksvc in enumerate(graph_ksvcs):
+            scores = []
+            for graph_ksvc_score in ksvc_graph_scores[j]:
+                scores.append(graph_ksvc_score)
+            mean_score = np.mean(scores)
+            std_score = np.std(scores)
+            score_str = f'GraphKernelRidge ({graph_kernels[j][2]}): {scores} \n' \
+                        f'Mean Scores: {mean_score} \n' \
+                        f'Std Scores: {std_score}'
+            print(score_str)
+            lines += [score_str, '\n']
+
+        mean_score = np.mean(our_scores)
+        std_score = np.std(our_scores)
+        score_str = f'Our approach {our_scores} \n' \
+                    f'Mean Scores: {mean_score} \n' \
+                    f'Std Scores: {std_score}'
+        print(score_str)
+        lines += [score_str, '\n']
+        mean_score = np.mean(our_scores_train)
+        std_score = np.std(our_scores_train)
+        score_str = f'(On train) Our approach: {our_scores_train} \n' \
+                    f'Mean Scores: {mean_score} \n' \
+                    f'Std Scores: {std_score}'
+        print(score_str)
+        lines += [score_str, '\n']
+
+    else:
+        # OUR APPROACH EVALUATION
+        if model is not None:
+            val_loader = val_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+
+            start = time.time()
+            val_inZ = []
+            elabels = []
+            with torch.no_grad():
+                for j, data in enumerate(val_loader):
+                    inp, labels = data
+                    inp = val_dataset.format_data(inp, None, None, device)
+                    labels = labels.to(device)
+                    log_p, distloss, logdet, out = model(inp, labels)
+                    val_inZ.append(out.detach().cpu().numpy())
+                    elabels.append(labels.detach().cpu().numpy())
+            val_inZ = np.concatenate(val_inZ, axis=0).reshape(len(val_dataset), -1)
+            elabels = np.concatenate(elabels, axis=0)
+            end = time.time()
+            print(f"time to get Z_val from X_val : {str(end - start)}")
+
+            zsvc_score = zlinsvc.score(val_inZ, elabels)
+            print(f'Our approach : {zsvc_score}')
+
+            t_zsvc_score = zlinsvc.score(Z, tlabels)
+            print(f'(On Train) Our approach : {t_zsvc_score}')
+
+            # Misclassified data
+            predictions = zlinsvc.predict(val_inZ)
+            misclassif_i = np.where((predictions == elabels) == False)
+            if misclassif_i[0].shape[0] > 0:
+                z_sample = torch.from_numpy(
+                    val_inZ[misclassif_i].reshape(misclassif_i[0].shape[0], *z_shape)).float().to(
+                    device)
+                with torch.no_grad():
+                    images = model.reverse(z_sample).cpu().data
+                images = val_dataset.rescale(images)
+                print('Misclassification:')
+                print('Real labels :' + str(elabels[misclassif_i]))
+                print('Predicted labels :' + str(predictions[misclassif_i]))
+
+            if train_dataset.dataset_name == 'mnist':
+                nrow = math.floor(math.sqrt(images.shape[0]))
+                utils.save_image(
+                    images,
+                    f"{save_dir}/misclassif.png",
+                    normalize=True,
+                    nrow=nrow,
+                    range=(0, 255),
+                )
+
+                # write in images pred and true labels
+                ndarr = images.numpy()
+                res = []
+                margin = 10
+                shape = (ndarr[0].shape[0], ndarr[0].shape[1] + margin, ndarr[0].shape[2] + 2 * margin)
+                for j, im_arr in enumerate(ndarr):
+                    im = np.zeros(shape)
+                    im[:, margin:, margin:-margin] = im_arr[:, :, :]
+                    im = im.squeeze()
+                    img = Image.fromarray(im)
+                    draw = ImageDraw.Draw(img)
+                    draw.text((0, 0), f'P:{predictions[misclassif_i[0][j]]} R:{elabels[misclassif_i[0][j]]}', 255)
+                    res.append(np.expand_dims(np.array(img).reshape(shape), axis=0))
+                res = torch.from_numpy(np.concatenate(res, axis=0)).to(torch.float32)
+                utils.save_image(
+                    res,
+                    f"{save_dir}/misclassif_PR.png",
+                    normalize=True,
+                    nrow=nrow,
+                    range=(0, 255),
+                )
+
+        # KERNELS EVALUATION
+        X_val = val_dataset.get_flattened_X()
+        labels_val = val_dataset.true_labels
+
+        ksvc_scores = []
+        for ksvc in ksvcs:
+            ksvc_scores.append([])
+
+        svc_score = linsvc.score(X_val, labels_val)
+
+        for i, ksvc in enumerate(ksvcs):
+            ksvc_score = ksvc.score(X_val, labels_val)
+            ksvc_scores[i].append(ksvc_score)
+
+        lines = []
+        print('Predictions scores :')
+        score_str = f'SVC Linear: {svc_score}'
+        print(score_str)
+        lines += [score_str, '\n']
+        for j, krr_type in enumerate(ksvc_types):
+            score_str = f'KernelRidge ({krr_type}):{np.mean(ksvc_scores[j])}'
+            print(score_str)
+            lines += [score_str, '\n']
+
+        if model is not None:
+            score_str = f'Our approach: {zsvc_score}'
+            print(score_str)
+            lines += [score_str, '\n']
+            score_str = f'(On train) Our approach: {t_zsvc_score}'
+            print(score_str)
+            lines += [score_str, '\n']
+
+    with open(f"{save_dir}/eval_res.txt", 'w') as f:
+        f.writelines(lines)
 
 
 def generate_meanclasses(model, dataset, device):
@@ -1040,22 +1251,6 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
             krr_scores[i].append((krr_r2_score, krr_mae_score, krr_mse_score))
 
         lines = []
-        # GRAPH KERNELS EVALUATION
-        if isinstance(train_dataset, GraphDataset):
-            for i, graph_krr in enumerate(graph_krrs):
-                K_val = compute_kernel(graph_kernels[i][2], (val_dataset, train_dataset), edge_to_node=edge_to_node,
-                                       normalize=normalize, wl_height=wl_height)
-                # K_val = compute_wl_kernel((val_dataset, train_dataset), wl_height=wl_height, edge_to_node=edge_to_node,
-                #                           normalize=normalize)
-                graph_krr_r2_score = graph_krr.score(K_val, labels_val)
-                graph_krr_mae_score = np.abs(graph_krr.predict(K_val) - labels_val).mean()
-                graph_krr_mse_score = np.power(graph_krr.predict(K_val) - labels_val, 2).mean()
-
-                score_str = f'GraphKernelRidge ({graph_kernels[i][2]}) R2: {graph_krr_r2_score}, ' \
-                            f'MSE: {graph_krr_mse_score}, MAE: {graph_krr_mae_score}'
-                print(score_str)
-                lines += [score_str, '\n']
-
         print('Predictions scores :')
         score_str = f'Ridge R2: {ridge_r2_score}, MSE: {ridge_mse_score}, MAE: {ridge_mae_score}'
         print(score_str)
@@ -1186,7 +1381,8 @@ def evaluate_regression_preimage(model, val_dataset, device, save_dir, print_as_
                 path = f'{save_dir}/generated_means_graphs/'
                 os.makedirs(path, exist_ok=True)
                 title = '\^y:' + str(round(val_dataset.true_labels[i], 2))
-                save_nx_graph(graph, inv_map, save_path=f'{path}/{str(i).zfill(4)}', title=title, n_atom_type=x.shape[-1] - 1,
+                save_nx_graph(graph, inv_map, save_path=f'{path}/{str(i).zfill(4)}', title=title,
+                              n_atom_type=x.shape[-1] - 1,
                               colors=node_colors)
 
 
