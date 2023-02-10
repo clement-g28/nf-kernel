@@ -1231,7 +1231,7 @@ class ClassificationGraphDataset(GraphDataset):
         return result
 
     @staticmethod
-    def convert_tud_dataset(dataset):
+    def convert_tud_dataset(dataset, node_features):
         n_nodes = []
         idxs = []
         filter_n_nodes = 13
@@ -1247,7 +1247,8 @@ class ClassificationGraphDataset(GraphDataset):
         num_edge_features = dataset.num_edge_features if dataset.num_edge_features > 0 else 1
         num_node_features = dataset.num_node_features if dataset.num_node_features > 0 else 1
 
-        X = np.zeros((dataset_size, max_num_node, num_node_features + 1))
+        x_feature_shape = num_node_features if node_features else num_node_features + 1  # if label +1 for virtual node
+        X = np.zeros((dataset_size, max_num_node, x_feature_shape))
         A = np.zeros((dataset_size, num_edge_features + 1, max_num_node, max_num_node))
         A[:, -1, :, :] = 1
         Y = np.zeros((dataset_size)).astype(np.int)
@@ -1255,9 +1256,10 @@ class ClassificationGraphDataset(GraphDataset):
         for ig in range(dataset_size):
             graph = dataset[idxs[ig]]
             n_node = graph.num_nodes
-            X[ig, :n_node, :-1] = graph.x if graph.x.shape[-1] > 0 else torch.ones(graph.x.shape[0], 1)
-            # virtual nodes
-            X[ig, n_node:, -1] = 1
+            X[ig, :n_node, :num_node_features] = graph.x if graph.x.shape[-1] > 0 else torch.ones(graph.x.shape[0], 1)
+            # virtual nodes if label node
+            if not node_features:
+                X[ig, n_node:, -1] = 1
             edge_index = graph.edge_index.detach().cpu().numpy().transpose()
             edge_attr = graph.edge_attr if graph.edge_attr is not None else torch.ones(edge_index.shape[0])
             for n, (i, j) in enumerate(edge_index):
@@ -1283,7 +1285,8 @@ class ClassificationGraphDataset(GraphDataset):
                 if name == 'AIDS':
                     ordered_labels = ['C', 'O', 'N', 'Cl', 'F', 'S', 'Se', 'P', 'Na', 'I', 'Co', 'Br', 'Li', 'Si', 'Mg',
                                       'Cu',
-                                      'As', 'B', 'Pt', 'Ru', 'K', 'Pd', 'Au', 'Te', 'W', 'Rh', 'Zn', 'Bi', 'Pb', 'Ge', 'Sb',
+                                      'As', 'B', 'Pt', 'Ru', 'K', 'Pd', 'Au', 'Te', 'W', 'Rh', 'Zn', 'Bi', 'Pb', 'Ge',
+                                      'Sb',
                                       'Sn', 'Ga', 'Hg', 'Ho', 'Tl', 'Ni', 'Tb']
                     label_map = {label: i for i, label in enumerate(ordered_labels)}
                 else:
@@ -1305,8 +1308,9 @@ class ClassificationGraphDataset(GraphDataset):
                 #             label_map[atom.GetSymbol()] = len(label_map) + 1
                 # hist = np.histogram(n_atoms, bins=range(0, max(n_atoms) + 1))
             elif name in ['AIDS', 'Letter-med']:
-                dset = TUDataset(path, name=name)
-                X, A, Y = ClassificationGraphDataset.convert_tud_dataset(dset)
+                node_features = name in ['Letter-med']  # features if not node labels (e.g Letter-med (x,y))
+                dset = TUDataset(path, name=name, use_node_attr=node_features, use_edge_attr=True)
+                X, A, Y = ClassificationGraphDataset.convert_tud_dataset(dset, node_features)
 
                 results = ((X, A, Y), test_dataset)
                 if name == 'AIDS':
