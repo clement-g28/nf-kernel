@@ -181,7 +181,7 @@ if __name__ == "__main__":
 
     eval_type = args.eval_type
     if eval_type == 'classification':
-        dataset_name_eval = ['mnist', 'double_moon', 'iris', 'bcancer']
+        dataset_name_eval = ['mnist', 'double_moon', 'iris', 'bcancer'] + GRAPH_CLASSIFICATION_DATASETS
         assert dataset_name in dataset_name_eval, f'Classification can only be evaluated on {dataset_name_eval}'
         evaluate_classification(model, train_dataset, val_dataset, save_dir, device)
     elif eval_type == 'generation':
