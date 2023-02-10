@@ -320,7 +320,12 @@ if __name__ == "__main__":
         else:
             dim_per_label = args.dim_per_label
 
-    folder_path = tune.get_trial_dir()
+    from datetime import datetime
+    date = datetime.now().strftime("%d_%m_%Y_%H_%M_%S")
+
+    folder_path = f'./checkpoint/{args.dataset}/{args.model}/ray_idx/{date}'
+    create_folder(folder_path)
+
     path = f'{folder_path}/train_idx'
     train_dset.save_split(path)
     if val_dset is not None:
