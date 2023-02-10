@@ -26,11 +26,13 @@ from utils.models import load_seqflow_model, load_ffjord_model, load_moflow_mode
 from utils.models import IMAGE_MODELS, SIMPLE_MODELS, GRAPH_MODELS
 
 from get_best_regression import evaluate_regression, visualize_dataset
-
+from get_best_classification import evaluate_classification
 
 if __name__ == '__main__':
     parser = testing_arguments()
     parser.add_argument("--method", default=0, type=int, help='select between [0,1,2]')
+    parser.add_argument("--eval_type", default='regression', type=str, choices=['regression', 'classification'],
+                        help='select the evaluation type')
     args = parser.parse_args()
 
     set_seed(0)
@@ -110,8 +112,8 @@ if __name__ == '__main__':
         # val_dataset = ImDataset(dataset_name=dataset_name, test=True)
 
     # reduce train dataset size (fitting too long)
-    print('Train dataset reduced in order to accelerate. (stratified)')
-    train_dataset.reduce_regression_dataset(0.1, stratified=True)
+    # print('Train dataset reduced in order to accelerate. (stratified)')
+    # train_dataset.reduce_regression_dataset(0.1, stratified=True)
     # val_dataset.reduce_regression_dataset(0.5, stratified=True)
 
     n_dim = dataset.get_n_dim()
@@ -154,11 +156,17 @@ if __name__ == '__main__':
     save_dir = './save'
     create_folder(save_dir)
 
+
     def loading_func(model, path):
         model_state, optimizer_state = torch.load(path, map_location=device)
         model.load_state_dict(model_state)
         return model
 
-    best_i = evaluate_regression(t_model_params, train_dataset, val_dataset, full_dataset=dataset, save_dir=save_dir,
-                                 device=device, with_train=True, reg_use_var=reg_use_var, cus_load_func=loading_func)
 
+    if args.eval_type == 'regression':
+        best_i = evaluate_regression(t_model_params, train_dataset, val_dataset, full_dataset=dataset,
+                                     save_dir=save_dir, device=device, with_train=True, reg_use_var=reg_use_var,
+                                     cus_load_func=loading_func)
+    elif args.eval_type == 'classification':
+        best_i = evaluate_classification(t_model_params, train_dataset, val_dataset, full_dataset=dataset,
+                                         save_dir=save_dir, device=device, with_train=True, cus_load_func=loading_func)
