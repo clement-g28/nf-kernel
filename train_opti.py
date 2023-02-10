@@ -259,10 +259,8 @@ if __name__ == "__main__":
     else:
         transform = []
 
-    noise_str = ''
     if args.with_noise is not None:  # ((dataset.X / 255 -dataset.norm_mean) / dataset.norm_std).std() *1/5 =.2
         transform += [AddGaussianNoise(0., args.with_noise)]
-        noise_str = '_noise' + str(args.with_noise).replace('.', '')
 
     transform = transforms.Compose(transform)
 
@@ -283,22 +281,15 @@ if __name__ == "__main__":
     else:
         assert False, 'unknown dataset'
 
-    redclass_str = ''
     if args.reduce_class_size:
         dataset.reduce_dataset('every_class', how_many=args.reduce_class_size)
-        red_str = f'_redclass{args.reduce_class_size}'
 
-    redlabel_str = ''
     if args.unique_label:
         dataset.reduce_dataset('one_class', label=args.unique_label)
         dataset.true_labels[:] = 0
-        redlabel_str = f'_label{args.unique_label}'
     elif args.multi_label is not None:
         labels = list(map(int, args.multi_label.strip('[]').split(',')))
         dataset.reduce_dataset('multi_class', label=labels)
-        redlabel_str = f'_multilabel'
-        for label in labels:
-            redlabel_str += '-' + str(label)
 
     validation = args.validation
     if validation > 0:
@@ -329,41 +320,11 @@ if __name__ == "__main__":
         else:
             dim_per_label = args.dim_per_label
 
-    fixed_eigval = None
-    eigval_str = ''
-    if args.set_eigval_manually is None:
-        mean_of_eigval_str = str(args.mean_of_eigval).replace('.', '-')
-        if args.uniform_eigval:
-            eigval_str = f'_eigvaluniform{mean_of_eigval_str}'
-        elif args.gaussian_eigval is not None:
-            g_param = list(map(float, args.gaussian_eigval.strip('[]').split(',')))
-            std_str = str(g_param[1]).replace('.', '-')
-            eigval_str = f'_eigvalgaussian{mean_of_eigval_str}std{std_str}'
-        else:
-            assert False, 'No distribution selected; use uniform_eigval or gaussian_eigval arguments'
-    else:
-        eigval_str = args.set_eigval_manually.strip('[]').replace(',', '-')
-        eigval_str = f'_manualeigval{eigval_str}'
-
-    reg_use_var_str = f''
-    if args.reg_use_var:
-        reg_use_var_str = f'_usevar'
-
-    folder_path = f'{args.dataset}/{args.model}/'
-
-    lmean_str = f'_lmean{args.beta}' if not args.fix_mean else ''
-    isotrope_str = '_isotrope' if args.isotrope_gaussian else ''
-    folder_path += f'_nfkernel{lmean_str}{isotrope_str}{eigval_str}{noise_str}' \
-                   f'{redclass_str}{redlabel_str}_dimperlab{dim_per_label}{reg_use_var_str}'
-
-    folder_path += '_testray'
-
-    create_folder(f'./checkpoint/{folder_path}')
-
-    path = f'./checkpoint/{folder_path}/train_idx'
+    folder_path = tune.get_trial_dir()
+    path = f'{folder_path}/train_idx'
     train_dset.save_split(path)
     if val_dset is not None:
-        path = f'./checkpoint/{folder_path}/val_idx'
+        path = f'{folder_path}/val_idx'
         val_dset.save_split(path)
 
     config = {
