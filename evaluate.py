@@ -412,7 +412,7 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
                                wl_height=wl_height)
             graph_kernels.append(('precomputed', K, graph_kernel))
             graph_svc_params.append(
-                {'SVC_kernel': ['precomputed'], 'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))})
+                {'SVC__kernel': ['precomputed'], 'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))})
 
         graph_ksvcs = [None] * len(graph_kernels)
         for i, (krr_type, K, name) in enumerate(graph_kernels):
