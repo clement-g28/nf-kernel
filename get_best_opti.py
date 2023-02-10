@@ -80,8 +80,8 @@ if __name__ == '__main__':
     print(saves)
 
     # Load the splits of the dataset used in the training phase
-    train_idx_path = f'/train_idx.npy'
-    val_idx_path = f'/val_idx.npy'
+    train_idx_path = f'./train_idx.npy'
+    val_idx_path = f'./val_idx.npy'
     if os.path.exists(train_idx_path):
         print('Loading train idx...')
         train_dataset = dataset.duplicate()
