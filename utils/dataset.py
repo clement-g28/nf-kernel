@@ -150,19 +150,6 @@ class BaseDataset(Dataset):
             if stratified:
                 class_sample_count = np.histogram(self.true_labels)[0]
                 idxs = np.argsort(self.true_labels)
-                # probs = np.zeros(len(self))
-                # done = 0
-                # for i in range(len(class_sample_count)):
-                #     probs[idxs[done:done + class_sample_count[i]]] = class_sample_count[i]
-                #     done += class_sample_count[i]
-                # probs = 1 / torch.Tensor(probs / self.true_labels.shape[0])
-                # sampler = torch.utils.data.sampler.WeightedRandomSampler(probs,
-                #                                                          math.floor(self.X.shape[0] * validation),
-                #                                                          replacement=False)
-                # val_idx = []
-                # for idx in sampler:
-                #     val_idx.append(idx)
-
                 done = 0
                 val_idx = []
                 for i in range(len(class_sample_count)):
@@ -175,28 +162,9 @@ class BaseDataset(Dataset):
             else:
                 val_idx = random.sample(range(0, self.X.shape[0]), k=math.floor(self.X.shape[0] * validation))
 
-            if isinstance(self.X, list):  # Graphs
-                train_idx = [idx for idx in range(len(self.X)) if idx not in val_idx]
-                x, adj = list(zip(*self.X))
-                x = np.array(x)
-                adj = np.array(adj)
-                val_x = x[val_idx]
-                val_adj = adj[val_idx]
-                val_X = []
-                for i in range(len(val_idx)):
-                    val_X.append((val_x[i], val_adj[i]))
-                val_dataset.X = val_X
-                train_x = x[train_idx]
-                train_adj = adj[train_idx]
-                train_X = []
-                for i in range(len(train_idx)):
-                    train_X.append((train_x[i], train_adj[i]))
-                train_dataset.X = train_X
-
-            else:
-                val_dataset.X = self.X[val_idx]
-                train_idx = [idx for idx in range(self.X.shape[0]) if idx not in val_idx]
-                train_dataset.X = self.X[train_idx]
+            val_dataset.X = self.X[val_idx]
+            train_idx = [idx for idx in range(self.X.shape[0]) if idx not in val_idx]
+            train_dataset.X = self.X[train_idx]
             val_dataset.true_labels = self.true_labels[val_idx]
 
             train_dataset.true_labels = self.true_labels[train_idx]
@@ -226,18 +194,7 @@ class BaseDataset(Dataset):
         else:
             n_idx = random.sample(range(0, self.X.shape[0]), k=math.floor(self.X.shape[0] * ratio))
 
-        if isinstance(self.X, list):  # Graphs
-            x, adj = list(zip(*self.X))
-            x = np.array(x)
-            adj = np.array(adj)
-            n_x = x[n_idx]
-            n_adj = adj[n_idx]
-            n_X = []
-            for i in range(len(n_idx)):
-                n_X.append((n_x[i], n_adj[i]))
-            self.X = n_X
-        else:
-            self.X = self.X[n_idx]
+        self.X = self.X[n_idx]
         self.true_labels = self.true_labels[n_idx]
 
         if self.idx is None:
@@ -757,13 +714,117 @@ class GraphDataset(BaseDataset):
         # if self.is_regression_dataset():
         #     self.label_mindist = self.init_labelmin()
 
+    # overwrite
+    def reduce_dataset(self, reduce_type, label=None, how_many=None, reduce_from_ori=True):
+        raise NotImplementedError
+
+    # overwrite
+    def split_dataset(self, validation, stratified=False):
+        val_dataset = copy.deepcopy(self)
+        train_dataset = copy.deepcopy(self)
+        if self.test_dataset is not None:
+            print('Test dataset known, split using the test dataset...')
+            val_dataset.X = self.test_dataset[0]
+            val_dataset.true_labels = self.test_dataset[1]
+            val_dataset.test_dataset = None
+            val_dataset.idx = None
+
+            train_dataset.test_dataset = None
+        else:
+            if stratified:
+                class_sample_count = np.histogram(self.true_labels)[0]
+                idxs = np.argsort(self.true_labels)
+                done = 0
+                val_idx = []
+                for i in range(len(class_sample_count)):
+                    nb_idx = math.floor(class_sample_count[i] * validation)
+                    if nb_idx == 0 and class_sample_count[i] > 1:
+                        nb_idx = 1
+                    val_idx += random.sample(list(idxs[done:done + class_sample_count[i]]), k=nb_idx)
+                    done += class_sample_count[i]
+            else:
+                val_idx = random.sample(range(0, len(self.X)), k=math.floor(len(self.X) * validation))
+
+            train_idx = [idx for idx in range(len(self.X)) if idx not in val_idx]
+            x, adj = list(zip(*self.X))
+            x = np.array(x)
+            adj = np.array(adj)
+            val_x = x[val_idx]
+            val_adj = adj[val_idx]
+            val_X = []
+            for i in range(len(val_idx)):
+                val_X.append((val_x[i], val_adj[i]))
+            val_dataset.X = val_X
+            train_x = x[train_idx]
+            train_adj = adj[train_idx]
+            train_X = []
+            for i in range(len(train_idx)):
+                train_X.append((train_x[i], train_adj[i]))
+            train_dataset.X = train_X
+
+            val_dataset.true_labels = self.true_labels[val_idx]
+            train_dataset.true_labels = self.true_labels[train_idx]
+
+            if self.idx is None:
+                val_dataset.idx = val_idx
+                train_dataset.idx = train_idx
+            else:
+                val_dataset.idx = self.idx[val_idx]
+                train_dataset.idx = self.idx[train_idx]
+
+        return train_dataset, val_dataset
+
+    # overwrite
+    def reduce_regression_dataset(self, ratio, stratified=True):
+        if stratified:
+            class_sample_count = np.histogram(self.true_labels)[0]
+            idxs = np.argsort(self.true_labels)
+
+            done = 0
+            n_idx = []
+            for i in range(len(class_sample_count)):
+                nb_idx = math.floor(class_sample_count[i] * ratio)
+                if nb_idx == 0 and class_sample_count[i] > 1:
+                    nb_idx = 1
+                n_idx += random.sample(list(idxs[done:done + class_sample_count[i]]), k=nb_idx)
+                done += class_sample_count[i]
+        else:
+            n_idx = random.sample(range(0, len(self.X)), k=math.floor(len(self.X) * ratio))
+
+        x, adj = list(zip(*self.X))
+        x = np.array(x)
+        adj = np.array(adj)
+        n_x = x[n_idx]
+        n_adj = adj[n_idx]
+        n_X = []
+        for i in range(len(n_idx)):
+            n_X.append((n_x[i], n_adj[i]))
+        self.X = n_X
+        self.true_labels = self.true_labels[n_idx]
+
+        if self.idx is None:
+            self.idx = n_idx
+        else:
+            self.idx = self.idx[n_idx]
+
+    # overwrite
+    def load_split(self, load_path):
+        if os.path.exists(load_path):
+            self.idx = np.load(load_path)
+            x, adj = list(zip(*self.ori_X))
+            x = np.array(x)
+            adj = np.array(adj)
+            train_x = x[self.idx]
+            train_adj = adj[self.idx]
+            train_X = []
+            for i in range(len(self.idx)):
+                train_X.append((train_x[i], train_adj[i]))
+            self.X = train_X
+            self.true_labels = self.ori_true_labels[self.idx]
+        else:
+            assert False, f'No file to load split at the path : {load_path}'
+
     def permute_graphs_in_dataset(self):
-        # r = list(zip(*self.X))
-        # res = []
-        # for t in r:
-        #     res.append(np.concatenate([np.expand_dims(v, axis=0) for v in t], axis=0))
-        # result = transform_graph_permutation(*res)
-        #
         for i in range(len(self.X)):
             self.X[i] = transform_graph_permutation(*self.X[i])
 
@@ -969,8 +1030,6 @@ class GraphDataset(BaseDataset):
         if self.transform:
             sample = self.transform(*sample)
 
-        # sample = tuple([*sample, self.y[idx]])
-
         return sample, y
 
     # def init_labelmin(self):
@@ -990,10 +1049,6 @@ class GraphDataset(BaseDataset):
     #
     #     return mean_dist_neig
     #     # return label_mindist
-
-    def reduce_dataset(self, reduce_type, label=None, how_many=None, reduce_from_ori=True):
-        assert self.dataset_name not in SIMPLE_REGRESSION_DATASETS, "the dataset can\'t be reduced (regression dataset)"
-        return self.reduce_dataset(reduce_type, label, how_many, reduce_from_ori)
 
     @staticmethod
     def format_data(input, n_bits, n_bins, device):
@@ -1139,8 +1194,13 @@ class RegressionGraphDataset(GraphDataset):
     def is_regression_dataset(self):
         return True
 
+    # overwrite
+    def reduce_dataset(self, reduce_type, label=None, how_many=None, reduce_from_ori=True):
+        assert False, "the dataset can\'t be reduced (regression dataset)"
+
 
 class ClassificationGraphDataset(GraphDataset):
+
     def __init__(self, dataset_name, transform=None):
         super().__init__(dataset_name, transform=transform)
 
@@ -1148,7 +1208,7 @@ class ClassificationGraphDataset(GraphDataset):
         if self.label_map is not None:
             node_type_list = [key for key, val in self.label_map.items()]
         else:
-            node_type_list = [i for i in range(self.X[0][0].shape[-1]-1)] # -1 because of virtual node
+            node_type_list = [i for i in range(self.X[0][0].shape[-1] - 1)]  # -1 because of virtual node
         if self.dataset_name == 'toxcast':
             b_n_type = 4
             b_n_squeeze = 10
@@ -1195,7 +1255,7 @@ class ClassificationGraphDataset(GraphDataset):
         for ig in range(dataset_size):
             graph = dataset[idxs[ig]]
             n_node = graph.num_nodes
-            X[ig, :n_node, :-1] = graph.x if graph.x.shape[-1] > 0 else torch.ones(graph.x.shape[0],1)
+            X[ig, :n_node, :-1] = graph.x if graph.x.shape[-1] > 0 else torch.ones(graph.x.shape[0], 1)
             # virtual nodes
             X[ig, n_node:, -1] = 1
             edge_index = graph.edge_index.detach().cpu().numpy().transpose()
@@ -1249,7 +1309,8 @@ class ClassificationGraphDataset(GraphDataset):
                 if name == 'AIDS':
                     ordered_labels = ['C', 'O', 'N', 'Cl', 'F', 'S', 'Se', 'P', 'Na', 'I', 'Co', 'Br', 'Li', 'Si', 'Mg',
                                       'Cu',
-                                      'As', 'B', 'Pt', 'Ru', 'K', 'Pd', 'Au', 'Te', 'W', 'Rh', 'Zn', 'Bi', 'Pb', 'Ge', 'Sb',
+                                      'As', 'B', 'Pt', 'Ru', 'K', 'Pd', 'Au', 'Te', 'W', 'Rh', 'Zn', 'Bi', 'Pb', 'Ge',
+                                      'Sb',
                                       'Sn', 'Ga', 'Hg', 'Ho', 'Tl', 'Ni', 'Tb']
                     label_map = {label: i for i, label in enumerate(ordered_labels)}
                 else:
@@ -1265,3 +1326,6 @@ class ClassificationGraphDataset(GraphDataset):
 
     def is_regression_dataset(self):
         return False
+
+    def reduce_dataset(self, reduce_type, label=None, how_many=None, reduce_from_ori=True):
+        raise NotImplementedError
