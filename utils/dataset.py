@@ -24,7 +24,7 @@ SIMPLE_DATASETS = ['single_moon', 'double_moon', 'iris', 'bcancer']
 IMAGE_DATASETS = ['mnist']
 SIMPLE_REGRESSION_DATASETS = ['swissroll', 'diabetes', 'waterquality', 'aquatoxi', 'fishtoxi', 'trafficflow']
 GRAPH_REGRESSION_DATASETS = ['qm7', 'qm9', 'freesolv', 'esol', 'lipo', 'fishtoxi']
-GRAPH_CLASSIFICATION_DATASETS = ['toxcast', 'AIDS', 'Letter-med']
+GRAPH_CLASSIFICATION_DATASETS = ['toxcast', 'AIDS', 'Letter-med', 'MUTAG']
 
 
 # abstract base kernel dataset class
@@ -40,6 +40,8 @@ class BaseDataset(Dataset):
         self.reduce_type = 'all'
 
         self.test_dataset = test_dataset
+
+        self.in_size = -1
 
     def __len__(self):
         return len(self.X)
@@ -231,8 +233,8 @@ class SimpleDataset(BaseDataset):
         self.transform = transform
         ori_X, ori_true_labels, test_dataset = self.load_dataset(dataset_name)
         super().__init__(ori_X, ori_true_labels, test_dataset)
-        print('Z and K are not initialized in constructor')
-        self.im_size = ori_X.shape[-1]
+
+        self.in_size = ori_X.shape[-1]
 
         self.current_mode = 'XY'
         self.get_func = self.get_XY_item
@@ -520,7 +522,7 @@ class ImDataset(BaseDataset):
         # test with denoise loss
         self.noise_transform = noise_transform
         self.n_channel = dset.data.shape[1]
-        self.im_size = dset.data.shape[-1]
+        self.in_size = dset.data.shape[-1]
 
         ori_X = dset.data if isinstance(dset.data, np.ndarray) else dset.data.numpy()
         ori_true_labels = dset.targets if isinstance(dset.targets, np.ndarray) else np.array(dset.targets)
@@ -573,7 +575,7 @@ class ImDataset(BaseDataset):
         return input
 
     def format_loss(self, log_p, logdet, n_bins):
-        n_pixel = self.im_size * self.im_size * 3
+        n_pixel = self.in_size * self.in_size * 3
 
         loss = -math.log(n_bins) * n_pixel
         loss = loss + logdet + log_p
@@ -707,9 +709,6 @@ class GraphDataset(BaseDataset):
 
         super().__init__(graphs, y, test_dataset)
         # self.Gn = self.init_graphs_mp()
-
-        print('Z and K are not initialized in constructor')
-        self.im_size = -1
 
         # if self.is_regression_dataset():
         #     self.label_mindist = self.init_labelmin()
@@ -1224,6 +1223,12 @@ class ClassificationGraphDataset(GraphDataset):
             b_n_squeeze = 3
             a_n_node = 9
             a_n_type = len(node_type_list) + 1  # 5
+        elif self.dataset_name == 'MUTAG':
+            # b_n_type = 5
+            b_n_type = 4
+            b_n_squeeze = 14
+            a_n_node = 28
+            a_n_type = len(node_type_list) + 1  # 5
         else:
             assert False, 'unknown dataset'
         result = {'atom_type_list': node_type_list, 'b_n_type': b_n_type, 'b_n_squeeze': b_n_squeeze,
@@ -1231,10 +1236,10 @@ class ClassificationGraphDataset(GraphDataset):
         return result
 
     @staticmethod
-    def convert_tud_dataset(dataset, node_features):
+    def convert_tud_dataset(dataset, node_features, filter_n_nodes=13):
         n_nodes = []
         idxs = []
-        filter_n_nodes = 13
+        filter_n_nodes = filter_n_nodes if filter_n_nodes is not None else math.inf
         max_num_node = 0
         for i, graph in enumerate(dataset):
             if graph.num_nodes <= filter_n_nodes:
@@ -1270,14 +1275,46 @@ class ClassificationGraphDataset(GraphDataset):
         return X, A, Y
 
     @staticmethod
+    def get_filter_size(dataset_name):
+        if dataset_name == 'AIDS':
+            return 22
+        elif dataset_name == 'MUTAG':
+            return None
+        elif dataset_name == 'Letter-med':
+            return None
+
+    @staticmethod
+    def clear_aromatic_molecule_bonds_from_dataset(X, A, label_map):
+        import rdkit.Chem as Chem
+        from utils.graphs.mol_utils import construct_mol
+        from utils.graphs.molecular_graph_utils import get_atoms_adj_from_mol, atoms_to_one_hot
+        virtual_bond_idx = 4
+        custom_bond_assignement = [Chem.rdchem.BondType.AROMATIC, Chem.rdchem.BondType.SINGLE,
+                                   Chem.rdchem.BondType.DOUBLE, Chem.rdchem.BondType.TRIPLE]
+
+        atomic_num_list = [ATOMIC_NUM_MAP[label] for label, _ in label_map.items()] + [0]
+        max_num_nodes = X.shape[1]
+        n_X = np.zeros_like(X)
+        n_A = np.zeros((A.shape[0], A.shape[1] - 1, *A.shape[2:]))
+        for i, (x, adj) in enumerate(zip(X, A)):
+            mol = construct_mol(x, adj, atomic_num_list, custom_bond_assignement=custom_bond_assignement,
+                                virtual_bond_idx=virtual_bond_idx)
+            Chem.Kekulize(mol, clearAromaticFlags=True)
+            nx, nadj, _ = get_atoms_adj_from_mol(mol, max_num_nodes=max_num_nodes, label_map=label_map)
+            nx = atoms_to_one_hot(nx, label_map)
+            n_X[i, :] = nx
+            n_A[i, :] = nadj
+        return n_X, n_A
+
+    @staticmethod
     def load_dataset(name):
         path = './datasets'
         test_dataset = None
 
         exist_dataset = os.path.exists(f'{path}/{name}_X.npy') if path is not None else False
-        #dset = TUDataset(path, name='DBLP_v1', use_node_attr=False, use_edge_attr=True)
+        # dset = TUDataset(path, name='DBLP_v1', use_node_attr=False, use_edge_attr=True)
         if exist_dataset:
-            if name in ['AIDS', 'Letter-med']:
+            if name in ['AIDS', 'Letter-med', 'MUTAG']:
                 X = np.load(f'{path}/{name}_X.npy')
                 A = np.load(f'{path}/{name}_A.npy')
                 Y = np.load(f'{path}/{name}_Y.npy')
@@ -1289,7 +1326,10 @@ class ClassificationGraphDataset(GraphDataset):
                                       'As', 'B', 'Pt', 'Ru', 'K', 'Pd', 'Au', 'Te', 'W', 'Rh', 'Zn', 'Bi', 'Pb', 'Ge',
                                       'Sb',
                                       'Sn', 'Ga', 'Hg', 'Ho', 'Tl', 'Ni', 'Tb']
-                    label_map = {label: i for i, label in enumerate(ordered_labels)}
+                    label_map = {label: i + 1 for i, label in enumerate(ordered_labels)}
+                elif name == 'MUTAG':
+                    ordered_labels = ['C', 'N', 'O', 'F', 'I', 'Cl', 'Br']
+                    label_map = {label: i + 1 for i, label in enumerate(ordered_labels)}
                 else:
                     label_map = None
             else:
@@ -1308,19 +1348,23 @@ class ClassificationGraphDataset(GraphDataset):
                 #         if atom.GetSymbol() not in label_map:
                 #             label_map[atom.GetSymbol()] = len(label_map) + 1
                 # hist = np.histogram(n_atoms, bins=range(0, max(n_atoms) + 1))
-            elif name in ['AIDS', 'Letter-med']:
+            elif name in ['AIDS', 'Letter-med', 'MUTAG']:
                 node_features = name in ['Letter-med']  # features if not node labels (e.g Letter-med (x,y))
                 dset = TUDataset(path, name=name, use_node_attr=node_features, use_edge_attr=True)
-                X, A, Y = ClassificationGraphDataset.convert_tud_dataset(dset, node_features)
+                filter_n_nodes = ClassificationGraphDataset.get_filter_size(name)
+                X, A, Y = ClassificationGraphDataset.convert_tud_dataset(dset, node_features,
+                                                                         filter_n_nodes=filter_n_nodes)
 
                 results = ((X, A, Y), test_dataset)
                 if name == 'AIDS':
                     ordered_labels = ['C', 'O', 'N', 'Cl', 'F', 'S', 'Se', 'P', 'Na', 'I', 'Co', 'Br', 'Li', 'Si', 'Mg',
-                                      'Cu',
-                                      'As', 'B', 'Pt', 'Ru', 'K', 'Pd', 'Au', 'Te', 'W', 'Rh', 'Zn', 'Bi', 'Pb', 'Ge',
-                                      'Sb',
-                                      'Sn', 'Ga', 'Hg', 'Ho', 'Tl', 'Ni', 'Tb']
-                    label_map = {label: i for i, label in enumerate(ordered_labels)}
+                                      'Cu', 'As', 'B', 'Pt', 'Ru', 'K', 'Pd', 'Au', 'Te', 'W', 'Rh', 'Zn', 'Bi', 'Pb',
+                                      'Ge', 'Sb', 'Sn', 'Ga', 'Hg', 'Ho', 'Tl', 'Ni', 'Tb']
+                    label_map = {label: i + 1 for i, label in enumerate(ordered_labels)}
+                elif name == 'MUTAG':
+                    ordered_labels = ['C', 'N', 'O', 'F', 'I', 'Cl', 'Br']
+                    label_map = {label: i + 1 for i, label in enumerate(ordered_labels)}
+                    X, A = ClassificationGraphDataset.clear_aromatic_molecule_bonds_from_dataset(X, A, label_map)
                 else:
                     label_map = None
 

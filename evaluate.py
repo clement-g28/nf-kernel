@@ -1,41 +1,38 @@
-import networkx as nx
 import numpy as np
 from PIL import Image, ImageDraw
-import time
 import math
 import os
 import re
+import time
+
+import matplotlib.pyplot as plt
+import numpy as np
 import torch
+from PIL import Image, ImageDraw
+from sklearn.decomposition import PCA, KernelPCA
+from sklearn.kernel_ridge import KernelRidge
+from sklearn.linear_model import Ridge
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.svm import SVC
 from torchvision import utils
 
-from utils.utils import set_seed, create_folder, save_every_pic, initialize_gaussian_params, \
-    initialize_regression_gaussian_params, save_fig, initialize_tmp_regression_gaussian_params
-
 from utils.custom_glow import CGlow, WrappedModel
-from utils.models import load_seqflow_model, load_ffjord_model, load_moflow_model
-from utils.models import IMAGE_MODELS, SIMPLE_MODELS, GRAPH_MODELS
 from utils.dataset import ImDataset, SimpleDataset, GraphDataset, RegressionGraphDataset, ClassificationGraphDataset, \
     SIMPLE_DATASETS, SIMPLE_REGRESSION_DATASETS, IMAGE_DATASETS, GRAPH_REGRESSION_DATASETS, \
     GRAPH_CLASSIFICATION_DATASETS
 from utils.density import construct_covariance
+from utils.graphs.graph_utils import format, organise_data
+from utils.graphs.graph_utils import save_nx_graph
+from utils.graphs.kernels import compute_wl_kernel, compute_sp_kernel, compute_mslap_kernel, compute_hadcode_kernel
+from utils.graphs.mol_utils import valid_mol, construct_mol
+from utils.models import GRAPH_MODELS
+from utils.models import load_seqflow_model, load_ffjord_model, load_moflow_model
 from utils.testing import learn_or_load_modelhyperparams, generate_sample, project_inZ, testing_arguments, noise_data
 from utils.testing import project_between
 from utils.training import ffjord_arguments, cglow_arguments, moflow_arguments
-from sklearn.metrics.pairwise import rbf_kernel
-from utils.graphs.kernels import compute_wl_kernel, compute_sp_kernel, compute_mslap_kernel, compute_hadcode_kernel
-from utils.graphs.mol_utils import valid_mol, construct_mol
-
-from sklearn.decomposition import PCA, KernelPCA
-from sklearn.kernel_ridge import KernelRidge
-from sklearn.linear_model import Ridge
-
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler
-from sklearn.svm import SVC
-
-from utils.graphs.graph_utils import save_nx_graph
-from utils.graphs.graph_utils import format, organise_data
-import matplotlib.pyplot as plt
+from utils.utils import set_seed, create_folder, save_every_pic, initialize_gaussian_params, \
+    initialize_regression_gaussian_params, save_fig, initialize_tmp_regression_gaussian_params
 
 
 def test_generation_on_eigvec(model_single, gaussian_params, z_shape, how_much_dim, device, sample_per_label=10,
@@ -1316,24 +1313,34 @@ def create_figures_XZ(model, train_dataset, save_path, device, std_noise=0.1, on
     return X, Z
 
 
-def evaluate_regression_preimage(model, val_dataset, device, save_dir, print_as_mol=True,
-                                 print_as_graph=True):
-    batch_size = 20
+def evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, print_as_graph=True,
+                      eval_type='regression', batch_size=20):
+    assert eval_type in ['regression', 'classification'], 'unknown pre-image generation evaluation type'
 
-    y_min = model.label_min
-    y_max = model.label_max
-    model_means = model.means[:2].detach().cpu().numpy()
-    samples = []
-    # true_X = val_dataset.X
-    true_X = val_dataset.get_flattened_X()
-    for i, y in enumerate(val_dataset.true_labels):
-        # mean, cov = model.get_regression_gaussian_sampling_parameters(y)
-        alpha_y = (y - y_min) / (y_max - y_min)
-        mean = alpha_y * model_means[0] + (1 - alpha_y) * model_means[1]
-        samples.append(np.expand_dims(mean, axis=0))
+    if eval_type == 'regression':
+        y_min = model.label_min
+        y_max = model.label_max
+        model_means = model.means[:2].detach().cpu().numpy()
+        samples = []
+        # true_X = val_dataset.X
+        true_X = val_dataset.get_flattened_X()
+        for i, y in enumerate(val_dataset.true_labels):
+            # mean, cov = model.get_regression_gaussian_sampling_parameters(y)
+            alpha_y = (y - y_min) / (y_max - y_min)
+            mean = alpha_y * model_means[0] + (1 - alpha_y) * model_means[1]
+            samples.append(np.expand_dims(mean, axis=0))
+    else:
+        model_means = model.means[:2].detach().cpu().numpy()
+        samples = []
+        # true_X = val_dataset.X
+        true_X = val_dataset.get_flattened_X()
+        for i, y in enumerate(val_dataset.true_labels):
+            mean = model_means[y]
+            samples.append(np.expand_dims(mean, axis=0))
+
     samples = np.concatenate(samples, axis=0)
 
-    z_shape = model.calc_last_z_shape(val_dataset.im_size)
+    z_shape = model.calc_last_z_shape(val_dataset.in_size)
     nb_batch = math.ceil(samples.shape[0] / batch_size)
     all_res = []
     samples = torch.from_numpy(samples)
@@ -1358,9 +1365,21 @@ def evaluate_regression_preimage(model, val_dataset, device, save_dir, print_as_
             x_sh *= v
         x = all_res[:, :x_sh].reshape(all_res.shape[0], *x_shape)
         adj = all_res[:, x_sh:].reshape(all_res.shape[0], *adj_shape)
+
+        # Test if we are using different adj shape
+        # if val_dataset.dataset_name in ['MUTAG']:
+        #     from rdkit import Chem
+        #     virtual_bond_idx = 4
+        #     custom_bond_assignement = [Chem.rdchem.BondType.AROMATIC, Chem.rdchem.BondType.SINGLE,
+        #                                Chem.rdchem.BondType.DOUBLE, Chem.rdchem.BondType.TRIPLE]
+        # else:
+        #     virtual_bond_idx = 3
+        #     custom_bond_assignement = None
         if print_as_mol and val_dataset.atomic_num_list is not None:
             from utils.graphs.mol_utils import check_validity, save_mol_png
             atomic_num_list = val_dataset.atomic_num_list
+            # valid_mols = check_validity(adj, x, atomic_num_list, custom_bond_assignement=custom_bond_assignement,
+            #                             virtual_bond_idx=virtual_bond_idx)['valid_mols']
             valid_mols = check_validity(adj, x, atomic_num_list)['valid_mols']
             mol_dir = os.path.join(save_dir, 'generated_means')
             os.makedirs(mol_dir, exist_ok=True)
@@ -1388,39 +1407,56 @@ def evaluate_regression_preimage(model, val_dataset, device, save_dir, print_as_
                               colors=node_colors)
 
 
-def evaluate_regression_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_by_y=20, print_as_mol=True,
-                                  print_as_graph=True):
-    batch_size = 20
+def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_by_y=20, print_as_mol=True,
+                       print_as_graph=True, eval_type='regression', batch_size=20):
+    assert eval_type in ['regression', 'classification'], 'unknown pre-image generation evaluation type'
 
-    y_min = model.label_min
-    y_max = model.label_max
-    ys = np.linspace(y_min, y_max, n_y)
     model_means = model.means[:2].detach().cpu().numpy()
-    covariance_matrix = construct_covariance(model.eigvecs.cpu()[0].squeeze(), model.eigvals.cpu()[0].squeeze())
+    # covariance_matrix = construct_covariance(model.eigvecs.cpu()[0].squeeze(), model.eigvals.cpu()[0].squeeze())
+    covariance_matrix = model.covariance_matrix
     samples = []
     datasets_close_samples = []
     datasets_close_y = []
     import scipy
     n_closest = 10
+
+    if eval_type == 'regression':
+        y_min = model.label_min
+        y_max = model.label_max
+        ys = np.linspace(y_min, y_max, n_y)
+    else:
+        ys = np.unique(val_dataset.true_labels)
+
     close_samples_dist = scipy.spatial.distance.cdist(np.expand_dims(ys, axis=1),
                                                       np.expand_dims(val_dataset.true_labels, axis=1))
     close_samples_idx = np.argsort(close_samples_dist, axis=1)
-    for i, y in enumerate(ys):
-        # mean, cov = model.get_regression_gaussian_sampling_parameters(y)
-        alpha_y = (y - y_min) / (y_max - y_min)
-        mean = alpha_y * model_means[0] + (1 - alpha_y) * model_means[1]
-        z = np.random.multivariate_normal(mean, covariance_matrix, n_samples_by_y)
-        # samples.append(np.expand_dims(mean, axis=0))
-        samples.append(z)
 
-        # Get close samples in dataset w.r.t the y property
-        datasets_close_samples.append(np.array(val_dataset.X)[close_samples_idx[i, :n_closest]])
-        datasets_close_y.append(val_dataset.true_labels[close_samples_idx[i, :n_closest]])
+    if eval_type == 'regression':
+        for i, y in enumerate(ys):
+            # mean, cov = model.get_regression_gaussian_sampling_parameters(y)
+            alpha_y = (y - y_min) / (y_max - y_min)
+            mean = alpha_y * model_means[0] + (1 - alpha_y) * model_means[1]
+            z = np.random.multivariate_normal(mean, covariance_matrix, n_samples_by_y)
+            # samples.append(np.expand_dims(mean, axis=0))
+            samples.append(z)
+
+            # Get close samples in dataset w.r.t the y property
+            datasets_close_samples.append(np.array(val_dataset.X)[close_samples_idx[i, :n_closest]])
+            datasets_close_y.append(val_dataset.true_labels[close_samples_idx[i, :n_closest]])
+    else:
+        for i, y in enumerate(ys):
+            mean = model_means[y]
+            z = np.random.multivariate_normal(mean, covariance_matrix, n_samples_by_y)
+            samples.append(z)
+
+            # Get close samples in dataset w.r.t the y property
+            datasets_close_samples.append(np.array(val_dataset.X)[close_samples_idx[i, :n_closest]])
+            datasets_close_y.append(val_dataset.true_labels[close_samples_idx[i, :n_closest]])
     samples = np.concatenate(samples, axis=0)
     datasets_close_samples = np.concatenate([np.expand_dims(samples, 0) for samples in datasets_close_samples],
                                             axis=0).transpose(0, 2, 1)
 
-    z_shape = model.calc_last_z_shape(val_dataset.im_size)
+    z_shape = model.calc_last_z_shape(val_dataset.in_size)
     nb_batch = math.ceil(samples.shape[0] / batch_size)
     all_res = []
     samples = torch.from_numpy(samples)
@@ -1446,9 +1482,22 @@ def evaluate_regression_preimage2(model, val_dataset, device, save_dir, n_y=50, 
             x_sh *= v
         x = all_res[:, :x_sh].reshape(all_res.shape[0], *x_shape)
         adj = all_res[:, x_sh:].reshape(all_res.shape[0], *adj_shape)
+
+        # Test if we are using different adj shape
+        # if val_dataset.dataset_name in ['MUTAG']:
+        #     from rdkit import Chem
+        #     virtual_bond_idx = 4
+        #     custom_bond_assignement = [Chem.rdchem.BondType.AROMATIC, Chem.rdchem.BondType.SINGLE,
+        #                                Chem.rdchem.BondType.DOUBLE, Chem.rdchem.BondType.TRIPLE]
+        # else:
+        #     virtual_bond_idx = 3
+        #     custom_bond_assignement = None
         if print_as_mol and val_dataset.atomic_num_list is not None:
             from utils.graphs.mol_utils import check_validity, save_mol_png
             atomic_num_list = val_dataset.atomic_num_list
+            # results = check_validity(adj, x, atomic_num_list, with_idx=True,
+            #                          custom_bond_assignement=custom_bond_assignement,
+            #                          virtual_bond_idx=virtual_bond_idx)
             results = check_validity(adj, x, atomic_num_list, with_idx=True)
             valid_mols = results['valid_mols']
             valid_smiles = results['valid_smiles']
@@ -1471,6 +1520,9 @@ def evaluate_regression_preimage2(model, val_dataset, device, save_dir, n_y=50, 
                 close_y = datasets_close_y[y_idx]
                 c_x = np.concatenate([np.expand_dims(v, axis=0) for v in close_samples_x], axis=0)
                 c_adj = np.concatenate([np.expand_dims(v, axis=0) for v in close_samples_adj], axis=0)
+                # results = check_validity(c_adj, c_x, atomic_num_list, return_unique=False, debug=False,
+                #                          custom_bond_assignement=custom_bond_assignement,
+                #                          virtual_bond_idx=virtual_bond_idx)
                 results = check_validity(c_adj, c_x, atomic_num_list, return_unique=False, debug=False)
                 close_mols = results['valid_mols']
                 close_smiles = results['valid_smiles']
@@ -1635,7 +1687,7 @@ def evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=20, n
         atomic_num_list = val_dataset.atomic_num_list
 
         from rdkit import Chem, DataStructs
-        from rdkit.Chem import Draw, AllChem, Descriptors
+        from rdkit.Chem import Draw, AllChem
         from ordered_set import OrderedSet
 
         # Interps
@@ -1932,19 +1984,25 @@ if __name__ == "__main__":
         dataset_name_eval = ['mnist', 'double_moon', 'iris', 'bcancer'] + GRAPH_CLASSIFICATION_DATASETS
         assert dataset_name in dataset_name_eval, f'Classification can only be evaluated on {dataset_name_eval}'
         evaluate_classification(model, train_dataset, val_dataset, save_dir, device)
+        _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
+                                 only_Z=isinstance(dataset, GraphDataset))
+        evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, print_as_graph=True,
+                          eval_type=eval_type)
+        evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=10,
+                           print_as_mol=True, print_as_graph=True, eval_type=eval_type)
     elif eval_type == 'generation':
         dataset_name_eval = ['mnist']
         assert dataset_name in dataset_name_eval, f'Generation can only be evaluated on {dataset_name_eval}'
         # GENERATION
         how_much = [1, 10, 30, 50, 78]
-        img_size = dataset.im_size
+        img_size = dataset.in_size
         z_shape = model_single.calc_last_z_shape(img_size)
         for n in how_much:
             test_generation_on_eigvec(model, gaussian_params=gaussian_params, z_shape=z_shape, how_much_dim=n,
                                       device=device, sample_per_label=10, save_dir=save_dir)
         generate_meanclasses(model, train_dataset, device)
     elif eval_type == 'projection':
-        img_size = dataset.im_size
+        img_size = dataset.in_size
         z_shape = model_single.calc_last_z_shape(img_size)
         # PROJECTIONS
         if dataset_name == 'mnist':
@@ -1968,8 +2026,8 @@ if __name__ == "__main__":
         evaluate_regression(model, train_dataset, val_dataset, save_dir, device)
         _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
                                  only_Z=isinstance(dataset, GraphDataset))
-        evaluate_regression_preimage(model, val_dataset, device, save_dir, print_as_mol=True, print_as_graph=True)
-        evaluate_regression_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=10,
-                                      print_as_mol=True, print_as_graph=True)
+        evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, print_as_graph=True)
+        evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=10,
+                           print_as_mol=True, print_as_graph=True)
         evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z,
                                 print_as_mol=True, print_as_graph=True)

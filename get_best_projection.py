@@ -196,7 +196,7 @@ if __name__ == '__main__':
     else:
         assert False, 'unknown dataset'
 
-    img_size = dataset.im_size
+    img_size = dataset.in_size
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

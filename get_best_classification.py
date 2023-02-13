@@ -27,7 +27,7 @@ from utils.testing import learn_or_load_modelhyperparams
 
 
 def evaluate_classification(t_model_params, train_dataset, eval_dataset, full_dataset, save_dir, device,
-                            with_train=False, cus_load_func=None):
+                            with_train=False, cus_load_func=None, batch_size=200):
     svc_scores = []
 
     best_score = 0
@@ -84,7 +84,6 @@ def evaluate_classification(t_model_params, train_dataset, eval_dataset, full_da
         model = model.to(device)
         model.eval()
 
-        batch_size = 200
         loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
 
         Z = []
@@ -203,6 +202,8 @@ def evaluate_classification(t_model_params, train_dataset, eval_dataset, full_da
                 best_score_str_train = score_str
                 save_modelhyperparams(svc, param_gridlin, save_dir, model_type, 'zlinear_train', scaler_used=False)
 
+        model.del_model_from_gpu()
+
     model_loading_params = t_model_params[best_i]
     if model_loading_params['model'] == 'cglow':
         # Load model
@@ -230,9 +231,8 @@ def evaluate_classification(t_model_params, train_dataset, eval_dataset, full_da
         assert False, 'unknown model type!'
 
     if not cus_load_func:
-        model_single = WrappedModel(model_single)
-        model_single.load_state_dict(torch.load(model_loading_params['loading_path'], map_location=device))
-        model = model_single.module
+        model = WrappedModel(model_single)
+        model.load_state_dict(torch.load(model_loading_params['loading_path'], map_location=device))
     else:
         model = cus_load_func(model_single, model_loading_params['loading_path'])
     torch.save(
@@ -468,4 +468,4 @@ if __name__ == '__main__':
     create_folder(save_dir)
 
     evaluate_classification(t_model_params, train_dataset, val_dataset, full_dataset=dataset, save_dir=save_dir,
-                            device=device, with_train=True)
+                            device=device, with_train=True, batch_size=10)

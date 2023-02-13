@@ -247,6 +247,8 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
                 best_score_str = score_str
                 save_modelhyperparams(zlinridge, param_gridlin, save_dir, model_type, 'zlinear', scaler_used=False)
 
+        model.del_model_from_gpu()
+
     model_loading_params = t_model_params[best_i]
     if model_loading_params['model'] == 'cglow':
         # Load model

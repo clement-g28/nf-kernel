@@ -100,14 +100,14 @@ def init_model(var, noise, dataset):
         folder_path += f'b{args_cglow.n_block}_f{args_cglow.n_flow}'
     elif args.model == 'seqflow':
         args_seqflow, _ = seqflow_arguments().parse_known_args()
-        model_single = load_seqflow_model(dataset.im_size, args_seqflow.n_flow, gaussian_params=gaussian_params,
+        model_single = load_seqflow_model(dataset.in_size, args_seqflow.n_flow, gaussian_params=gaussian_params,
                                           learn_mean=not args.fix_mean, reg_use_var=args.reg_use_var,
                                           dataset=dataset)
         folder_path += f'f{args_seqflow.n_flow}'
     elif args.model == 'ffjord':
         args_ffjord, _ = ffjord_arguments().parse_known_args()
         # args_ffjord.n_block = args.n_block
-        model_single = load_ffjord_model(args_ffjord, dataset.im_size, gaussian_params=gaussian_params,
+        model_single = load_ffjord_model(args_ffjord, dataset.in_size, gaussian_params=gaussian_params,
                                          learn_mean=not args.fix_mean, reg_use_var=args.reg_use_var, dataset=dataset)
         folder_path += f'b{args_ffjord.n_block}'
     elif args.model == 'moflow':

@@ -6,7 +6,8 @@ from rdkit.Chem import Draw
 import re
 
 atom_decoder_m = {0: 6, 1: 7, 2: 8, 3: 9}
-bond_decoder_m = {1: Chem.rdchem.BondType.SINGLE, 2: Chem.rdchem.BondType.DOUBLE, 3: Chem.rdchem.BondType.TRIPLE}
+bond_decoder_m = {1: Chem.rdchem.BondType.SINGLE, 2: Chem.rdchem.BondType.DOUBLE, 3: Chem.rdchem.BondType.TRIPLE,
+                  12: Chem.rdchem.BondType.AROMATIC}
 ATOM_VALENCY = {6: 4, 7: 3, 8: 2, 9: 1, 15: 3, 16: 2, 17: 1, 35: 1, 53: 1}
 
 
@@ -61,7 +62,7 @@ def Tensor2Mol(A, x):
     return mol
 
 
-def construct_mol(x, A, atomic_num_list):
+def construct_mol(x, A, atomic_num_list, custom_bond_assignement=None, virtual_bond_idx=3):
     """
 
     :param x:  (9,5)
@@ -84,8 +85,11 @@ def construct_mol(x, A, atomic_num_list):
     adj = np.argmax(A, axis=0)
     adj = np.array(adj)
     adj = adj[atoms_exist, :][:, atoms_exist]
-    adj[adj == 3] = -1
+    adj[adj == virtual_bond_idx] = -1
     adj += 1
+    if custom_bond_assignement is not None:
+        for i in range(1, len(custom_bond_assignement)+1):
+            adj[adj == i] = custom_bond_assignement[i-1]
     for start, end in zip(*np.nonzero(adj)):
         if start > end:
             mol.AddBond(int(start), int(end), bond_decoder_m[adj[start, end]])
@@ -237,7 +241,8 @@ def adj_to_smiles(adj, x, atomic_num_list):
 
 
 def check_validity(adj, x, atomic_num_list, gpu=-1, return_unique=True,
-                   correct_validity=True, largest_connected_comp=True, debug=True, with_idx=False):
+                   correct_validity=True, largest_connected_comp=True, debug=True, with_idx=False,
+                   custom_bond_assignement=None, virtual_bond_idx=3):
     """
 
     :param adj:  (100,4,9,9)
@@ -254,7 +259,8 @@ def check_validity(adj, x, atomic_num_list, gpu=-1, return_unique=True,
         # valid = [valid_mol_can_with_seg(construct_mol_with_validation(x_elem, adj_elem, atomic_num_list)) # valid_mol_can_with_seg
         #          for x_elem, adj_elem in zip(x, adj)]
         for i, (x_elem, adj_elem) in enumerate(zip(x, adj)):
-            mol = construct_mol(x_elem, adj_elem, atomic_num_list)
+            mol = construct_mol(x_elem, adj_elem, atomic_num_list, custom_bond_assignement=custom_bond_assignement,
+                                virtual_bond_idx=virtual_bond_idx)
             # Chem.Kekulize(mol, clearAromaticFlags=True)
             cmol = correct_mol(mol)
             vcmol = valid_mol_can_with_seg(cmol,
@@ -263,7 +269,9 @@ def check_validity(adj, x, atomic_num_list, gpu=-1, return_unique=True,
             valid.append(vcmol)
     else:
         for i, (x_elem, adj_elem) in enumerate(zip(x, adj)):
-            valid.append(valid_mol(construct_mol(x_elem, adj_elem, atomic_num_list)))
+            valid.append(
+                valid_mol(construct_mol(x_elem, adj_elem, atomic_num_list, custom_bond_assignement=custom_bond_assignement,
+                                        virtual_bond_idx=virtual_bond_idx)))
     valid = [mol for mol in valid if mol is not None]  # len()=valid number, say 794
     idxs = [i for i, mol in enumerate(valid) if mol is not None]
     if debug:

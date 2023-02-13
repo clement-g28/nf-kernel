@@ -31,8 +31,8 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 
-from evaluate import evaluate_regression, create_figures_XZ, evaluate_regression_preimage, \
-    evaluate_regression_preimage2, evaluate_distances, evaluate_classification, generate_meanclasses, \
+from evaluate import evaluate_regression, create_figures_XZ, evaluate_preimage, \
+    evaluate_preimage2, evaluate_distances, evaluate_classification, generate_meanclasses, \
     test_generation_on_eigvec, evaluate_projection_1model, evaluate_interpolations
 
 if __name__ == "__main__":
@@ -188,19 +188,25 @@ if __name__ == "__main__":
         dataset_name_eval = ['mnist', 'double_moon', 'iris', 'bcancer'] + GRAPH_CLASSIFICATION_DATASETS
         assert dataset_name in dataset_name_eval, f'Classification can only be evaluated on {dataset_name_eval}'
         evaluate_classification(model, train_dataset, val_dataset, save_dir, device)
+        _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
+                                 only_Z=isinstance(dataset, GraphDataset))
+        evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, print_as_graph=True,
+                          eval_type='classification')
+        evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=10,
+                           print_as_mol=True, print_as_graph=True, eval_type='classification')
     elif eval_type == 'generation':
         dataset_name_eval = ['mnist']
         assert dataset_name in dataset_name_eval, f'Generation can only be evaluated on {dataset_name_eval}'
         # GENERATION
         how_much = [1, 10, 30, 50, 78]
-        img_size = dataset.im_size
+        img_size = dataset.in_size
         z_shape = model_single.calc_last_z_shape(img_size)
         for n in how_much:
             test_generation_on_eigvec(model, gaussian_params=gaussian_params, z_shape=z_shape, how_much_dim=n,
                                       device=device, sample_per_label=10, save_dir=save_dir)
         generate_meanclasses(model, train_dataset, device)
     elif eval_type == 'projection':
-        img_size = dataset.im_size
+        img_size = dataset.in_size
         z_shape = model_single.calc_last_z_shape(img_size)
         # PROJECTIONS
         if dataset_name == 'mnist':
@@ -224,8 +230,8 @@ if __name__ == "__main__":
         evaluate_regression(model, train_dataset, val_dataset, save_dir, device)
         _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
                                  only_Z=isinstance(dataset, GraphDataset))
-        evaluate_regression_preimage(model, val_dataset, device, save_dir, print_as_mol=True, print_as_graph=True)
-        evaluate_regression_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=10,
-                                      print_as_mol=True, print_as_graph=True)
+        evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, print_as_graph=True)
+        evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=10,
+                           print_as_mol=True, print_as_graph=True)
         evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z,
                                 print_as_mol=True, print_as_graph=True)

@@ -75,23 +75,32 @@ class NF(nn.Module):
                 eigenvec = gaussian_param[1]
                 eigenval = gaussian_param[2]
                 self.dim_per_lab = np.count_nonzero(eigenval > 1)
-                covariance_matrix = construct_covariance(eigenvec, eigenval)
-                determinant = np.linalg.det(covariance_matrix)
-                inverse_matrix = np.linalg.inv(covariance_matrix)
+                self.covariance_matrix = construct_covariance(eigenvec, eigenval)
+                determinant = np.linalg.det(self.covariance_matrix)
+                inverse_matrix = np.linalg.inv(self.covariance_matrix)
                 means.append(torch.from_numpy(mean).unsqueeze(0))
                 self.gaussian_params.append((torch.from_numpy(inverse_matrix).to(device),
                                              determinant))
-                indexes = np.argsort(-eigenval, kind='mergesort')
-                eigenvec = eigenvec[indexes]
-                eigenval = eigenval[indexes]
-                self.eigvals.append(torch.from_numpy(eigenval).unsqueeze(0).to(device))
-                self.eigvecs.append(torch.from_numpy(eigenvec).unsqueeze(0).to(device))
-            self.eigvals = torch.cat(self.eigvals, dim=0).to(torch.float32)
-            self.eigvecs = torch.cat(self.eigvecs, dim=0).to(torch.float32)
+            #     indexes = np.argsort(-eigenval, kind='mergesort')
+            #     eigenvec = eigenvec[indexes]
+            #     eigenval = eigenval[indexes]
+            #     self.eigvals.append(torch.from_numpy(eigenval).unsqueeze(0))
+            #     self.eigvecs.append(torch.from_numpy(eigenvec).unsqueeze(0))
+            # self.eigvals = torch.cat(self.eigvals, dim=0).to(torch.float32)
+            # self.eigvecs = torch.cat(self.eigvecs, dim=0).to(torch.float32)
             if learn_mean:
                 self.means = nn.Parameter(torch.cat(means, dim=0))
             else:
                 self.means = torch.cat(means, dim=0).to(device)
+
+    def del_model_from_gpu(self):
+        self.means = nn.Parameter(self.means.detach().cpu())
+        self.gaussian_params = [(inv_cov.detach().cpu(), det) for inv_cov, det in self.gaussian_params]
+        self.model = self.model.cpu()
+        del self.means
+        del self.gaussian_params
+        del self.model
+        torch.cuda.empty_cache()
 
     def init_means_to_points(self, dataset):
         data = dataset.get_flattened_X()
@@ -627,7 +636,7 @@ def load_graphnvp_model(args_model, gaussian_params, learn_mean=True, device='cu
     gnn_channels = {'gcn': gnn_channels_gcn, 'hidden': gnn_channels_hidden}
     num_atoms = dset_params['a_n_node']
     num_rels = dset_params['b_n_type']
-    num_atom_types = len(dset_params['atom_type_list']) +1
+    num_atom_types = len(dset_params['atom_type_list']) + 1
     model_params = GraphNVPHyperparams(args_model.num_gcn_layer, num_atoms, num_rels,
                                        num_atom_types,
                                        num_masks=num_masks, mask_size=mask_size, num_coupling=num_coupling,
