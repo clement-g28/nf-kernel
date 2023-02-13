@@ -76,11 +76,17 @@ class NF(nn.Module):
                 eigenval = gaussian_param[2]
                 self.dim_per_lab = np.count_nonzero(eigenval > 1)
                 self.covariance_matrix = construct_covariance(eigenvec, eigenval)
-                determinant = np.linalg.det(self.covariance_matrix)
-                inverse_matrix = np.linalg.inv(self.covariance_matrix)
+                # compute faster determinant and inverse using the diagonal property
+                determinant = np.prod(eigenval)
+                inverse_matrix = self.covariance_matrix
+                inverse_matrix[np.diag_indices(inverse_matrix.shape[0])] = 1 / np.diag(inverse_matrix)
+                # determinant = np.linalg.det(self.covariance_matrix)
+                # inverse_matrix = np.linalg.inv(self.covariance_matrix)
                 means.append(torch.from_numpy(mean).unsqueeze(0))
                 self.gaussian_params.append((torch.from_numpy(inverse_matrix).to(device),
                                              determinant))
+                # self.gaussian_params.append((torch.from_numpy(inverse_matrix),
+                #                              determinant))
             #     indexes = np.argsort(-eigenval, kind='mergesort')
             #     eigenvec = eigenvec[indexes]
             #     eigenval = eigenval[indexes]
@@ -188,7 +194,7 @@ class NF(nn.Module):
             variance = self.label_mindist / (self.label_max - self.label_min)
             variance = variance * (self.means[1] - self.means[0])
             variance = torch.where(variance <= 0, torch.ones_like(variance), variance)
-            inv_cov = self.gaussian_params[0][0] * (1 / variance)
+            inv_cov = self.gaussian_params[0][0].to(z.device) * (1 / variance)
             det = self.gaussian_params[0][1]
             for v in variance:
                 det = det * v
@@ -252,7 +258,7 @@ class NF(nn.Module):
             variance = self.label_mindist / (self.label_max - self.label_min)
             variance = variance * (means[1] - means[0]).abs()
         # variance = torch.ones_like(variance)*0.1
-        inv_cov = self.gaussian_params[0][0] * (1 / variance)
+        inv_cov = self.gaussian_params[0][0].to(means.device) * (1 / variance)
         det = self.gaussian_params[0][1]
         for v in variance:
             det = det * v

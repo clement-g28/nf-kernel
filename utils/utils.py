@@ -110,8 +110,7 @@ def initialize_gaussian_params(dataset, al_list, isotrope=False, dim_per_label=3
             eigenvecs = np.zeros((n_dim, n_dim))
             np.fill_diagonal(eigenvecs, 1)
             if fixed_eigval is None:
-                be = np.exp(
-                    1 / (n_dim - dim_per_label) * np.log(1 / math.pow(sum(al_list) / len(al_list), dim_per_label)))
+                be = np.power(1/(math.pow(sum(al_list) / len(al_list), dim_per_label)), 1/(n_dim - dim_per_label))
                 eigenvals = np.ones(n_dim) * be
                 eigenvals[dim_per_label * i:dim_per_label * (i + 1)] = al_list
             else:

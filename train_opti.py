@@ -333,11 +333,11 @@ if __name__ == "__main__":
         val_dset.save_split(path)
 
     config = {
-        "var": tune.uniform(1.0, 1.0),
-        "beta": tune.randint(1, 200),
+        "var": tune.uniform(1.0, 10.0),
+        "beta": tune.randint(1, 10),
         "noise": tune.uniform(0.2, 0.9),
-        "lr": tune.loguniform(1e-4, 0.005),
-        "batch_size": tune.choice([40, 60, 80])
+        "lr": tune.loguniform(1e-4, 0.0005),
+        "batch_size": tune.choice([10])
     }
     scheduler = ASHAScheduler(
         metric="accuracy",

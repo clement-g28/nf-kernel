@@ -24,7 +24,7 @@ SIMPLE_DATASETS = ['single_moon', 'double_moon', 'iris', 'bcancer']
 IMAGE_DATASETS = ['mnist']
 SIMPLE_REGRESSION_DATASETS = ['swissroll', 'diabetes', 'waterquality', 'aquatoxi', 'fishtoxi', 'trafficflow']
 GRAPH_REGRESSION_DATASETS = ['qm7', 'qm9', 'freesolv', 'esol', 'lipo', 'fishtoxi']
-GRAPH_CLASSIFICATION_DATASETS = ['toxcast', 'AIDS', 'Letter-med', 'MUTAG']
+GRAPH_CLASSIFICATION_DATASETS = ['toxcast', 'AIDS', 'Letter-med', 'MUTAG', 'COIL-DEL']
 
 
 # abstract base kernel dataset class
@@ -1229,6 +1229,12 @@ class ClassificationGraphDataset(GraphDataset):
             b_n_squeeze = 14
             a_n_node = 28
             a_n_type = len(node_type_list) + 1  # 5
+        elif self.dataset_name == 'COIL-DEL':
+            # b_n_type = 5
+            b_n_type = 3
+            b_n_squeeze = 30
+            a_n_node = 60
+            a_n_type = len(node_type_list) + 1  # 5
         else:
             assert False, 'unknown dataset'
         result = {'atom_type_list': node_type_list, 'b_n_type': b_n_type, 'b_n_squeeze': b_n_squeeze,
@@ -1282,6 +1288,8 @@ class ClassificationGraphDataset(GraphDataset):
             return None
         elif dataset_name == 'Letter-med':
             return None
+        elif dataset_name == 'COIL-DEL':
+            return 60
 
     @staticmethod
     def clear_aromatic_molecule_bonds_from_dataset(X, A, label_map):
@@ -1314,7 +1322,7 @@ class ClassificationGraphDataset(GraphDataset):
         exist_dataset = os.path.exists(f'{path}/{name}_X.npy') if path is not None else False
         # dset = TUDataset(path, name='DBLP_v1', use_node_attr=False, use_edge_attr=True)
         if exist_dataset:
-            if name in ['AIDS', 'Letter-med', 'MUTAG']:
+            if name in ['AIDS', 'Letter-med', 'MUTAG', 'COIL-DEL']:
                 X = np.load(f'{path}/{name}_X.npy')
                 A = np.load(f'{path}/{name}_A.npy')
                 Y = np.load(f'{path}/{name}_Y.npy')
@@ -1348,8 +1356,8 @@ class ClassificationGraphDataset(GraphDataset):
                 #         if atom.GetSymbol() not in label_map:
                 #             label_map[atom.GetSymbol()] = len(label_map) + 1
                 # hist = np.histogram(n_atoms, bins=range(0, max(n_atoms) + 1))
-            elif name in ['AIDS', 'Letter-med', 'MUTAG']:
-                node_features = name in ['Letter-med']  # features if not node labels (e.g Letter-med (x,y))
+            elif name in ['AIDS', 'Letter-med', 'MUTAG', 'COIL-DEL']:
+                node_features = name in ['Letter-med', 'COIL-DEL']  # features if not node labels (e.g Letter-med (x,y))
                 dset = TUDataset(path, name=name, use_node_attr=node_features, use_edge_attr=True)
                 filter_n_nodes = ClassificationGraphDataset.get_filter_size(name)
                 X, A, Y = ClassificationGraphDataset.convert_tud_dataset(dset, node_features,
