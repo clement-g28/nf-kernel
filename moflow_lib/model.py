@@ -122,6 +122,7 @@ class MoFlow(nn.Module):
         self.b_size = self.a_n_node * self.a_n_node * self.b_n_type
         self.a_size = self.a_n_node * self.a_n_type
         self.noise_scale = hyper_params.noise_scale
+        self.noise_scale_x = hyper_params.noise_scale_x if hyper_params.noise_scale_x is not None else self.noise_scale
         if hyper_params.learn_dist:
             self.ln_var = nn.Parameter(torch.zeros(1))  # (torch.zeros(2))  2 is worse than 1
         else:
@@ -160,10 +161,10 @@ class MoFlow(nn.Module):
         # add uniform noise to node feature matrices
         # + noise didn't change log-det. 1. change to logit transform 2. *0.9 ---> *other value???
         if self.training:
-            if self.noise_scale == 0:
+            if self.noise_scale_x == 0:
                 h = h / 2.0 - 0.5 + torch.rand_like(x) * 0.4  # / 2.0  similar to X + U(0, 0.8)   *0.5*0.8=0.4
             else:
-                h = h + torch.rand_like(x) * self.noise_scale  # noise_scale default 0.9
+                h = h + torch.rand_like(x) * self.noise_scale_x  # noise_scale default 0.9
             # h, log_det_logit_x = logit_pre_process(h) # to delete
         h, sum_log_det_jacs_x = self.atom_model(adj_normalized, h)
         # sum_log_det_jacs_x = sum_log_det_jacs_x + log_det_logit_x  # to delete

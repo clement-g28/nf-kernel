@@ -103,6 +103,9 @@ def moflow_arguments():
     parser.add_argument('-s', '--seed', type=int, default=1, help='Random seed to use')
     parser.add_argument('--learn_dist', type=strtobool, default='true', help='learn the distribution of feature matrix')
     parser.add_argument('--noise_scale', type=float, default=0.6, help='x + torch.rand(x.shape) * noise_scale')
+    parser.add_argument('--noise_scale_x', type=float, default=None, help='use this argument to precise another noise '
+                                                                          'scale to apply on x, while noise_scale is '
+                                                                          'applied to adj')
 
     return parser
 

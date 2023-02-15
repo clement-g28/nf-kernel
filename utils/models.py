@@ -626,7 +626,8 @@ def load_moflow_model(args_moflow, gaussian_params, learn_mean=True, device='cud
                                      a_affine=True,
                                      learn_dist=args_moflow.learn_dist,
                                      seed=args_moflow.seed,
-                                     noise_scale=args_moflow.noise_scale
+                                     noise_scale=args_moflow.noise_scale,
+                                     noise_scale_x=args_moflow.noise_scale_x
                                      )
     if print:
         model_params.print()

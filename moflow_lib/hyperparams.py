@@ -13,7 +13,7 @@ class Hyperparameters:
                  a_n_node=-1, a_n_type=-1, a_hidden_gnn=None, a_hidden_lin=None, a_n_flow=-1, a_n_block=1,
                  mask_row_size_list=None, mask_row_stride_list=None, a_affine=True,
                  # General
-                 path=None, learn_dist=True, seed=1, noise_scale=0.6):
+                 path=None, learn_dist=True, seed=1, noise_scale=0.6, noise_scale_x=None):
         """
 
         :param b_n_type: Number of bond types/channels
@@ -58,6 +58,7 @@ class Hyperparameters:
         self.learn_dist = learn_dist  # 1
         self.seed = seed  # 1
         self.noise_scale = noise_scale
+        self.noise_scale_x = noise_scale_x
 
         # load function in the initialization by path argument
         if path is not None:
