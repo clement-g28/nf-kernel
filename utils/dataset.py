@@ -669,8 +669,9 @@ def chunks(lst, n):
 
 def mp_create_graph_func(input_args):
     # input_args is a tuple of ([(x,adj),(x2,adj2),...],label_names dict, create_graph_function)
-    chunk, label_names, create_graph_fun = input_args
-    return [create_graph_fun(*chunk[i], label_names=label_names, i=i) for i in range(len(chunk))]
+    chunk, label_names, create_graph_fun, attributed_node = input_args
+    return [create_graph_fun(*chunk[i], label_names=label_names, i=i, attributed_node=attributed_node) for i in
+            range(len(chunk))]
 
 
 class GraphDataset(BaseDataset):
@@ -700,18 +701,24 @@ class GraphDataset(BaseDataset):
         graphs = list(zip(xs, adjs))
 
         # Graphs for tests
-        self.label_names = {'node_labels': ['atom_type'], 'node_attrs': ['atom_type'], 'edge_labels': ['bond_type'],
-                            'edge_attrs': ['bond_type']}
-        self.node_labels = self.label_names['node_labels']
-        self.node_attrs = self.label_names['node_attrs']
-        self.edge_labels = self.label_names['edge_labels']
-        self.edge_attrs = self.label_names['edge_attrs']
+        self.define_networkx_labels()
 
         super().__init__(graphs, y, test_dataset)
         # self.Gn = self.init_graphs_mp()
 
         # if self.is_regression_dataset():
         #     self.label_mindist = self.init_labelmin()
+
+    def is_attributed_node_dataset(self):
+        return self.dataset_name in ['Letter-med']
+
+    def define_networkx_labels(self):
+        self.label_names = {'node_labels': ['node_attr'], 'node_attrs': ['node_attr'], 'edge_labels': ['bond_attr'],
+                            'edge_attrs': ['bond_attr']}
+        self.node_labels = self.label_names['node_labels']
+        self.node_attrs = self.label_names['node_attrs']
+        self.edge_labels = self.label_names['edge_labels']
+        self.edge_attrs = self.label_names['edge_attrs']
 
     # overwrite
     def reduce_dataset(self, reduce_type, label=None, how_many=None, reduce_from_ori=True):
@@ -845,19 +852,22 @@ class GraphDataset(BaseDataset):
             n_adj *= sh
         return n_x + n_adj
 
-    def get_nx_graphs(self, edge_to_node=False, data=None):
+    def get_nx_graphs(self, edge_to_node=False, data=None, attributed_node=False):
         function = self.create_node_labeled_only_graph if edge_to_node else self.create_node_and_edge_labeled_graph
-        return self.init_graphs_mp(function, data=data)
+        return self.init_graphs_mp(function, data=data, attributed_node=attributed_node)
 
-    def init_graphs_mp(self, function, data=None):
+    def init_graphs_mp(self, function, data=None, attributed_node=False):
         data = data if data is not None else self.X
-        pool = multiprocessing.Pool()
-        returns = pool.map(mp_create_graph_func, [(chunk, self.label_names, function) for chunk in
-                                                  chunks(data, os.cpu_count())])
-        pool.close()
-        return list(itertools.chain.from_iterable(returns))
+        # pool = multiprocessing.Pool()
+        # returns = pool.map(mp_create_graph_func, [(chunk, self.label_names, function, attributed_node) for chunk in
+        #                                           chunks(data, os.cpu_count())])
+        # pool.close()
+        returns = [function(*data[i], label_names=self.label_names, i=i, attributed_node=attributed_node)
+                   for i in range(len(data))]
+        return returns
+        # return list(itertools.chain.from_iterable(returns))
 
-    def create_node_and_edge_labeled_graph(self, x, full_adj, label_names=None, i=None):
+    def create_node_and_edge_labeled_graph(self, x, full_adj, label_names=None, i=None, attributed_node=False):
         # i: int used as the graph's name
         if label_names is None:
             label_names = self.label_names
@@ -874,6 +884,12 @@ class GraphDataset(BaseDataset):
         edges = zip(rows.tolist(), cols.tolist())
         gr.add_edges_from(edges)
 
+        # case 1 node, no edge
+        if len(gr.nodes) == 0 and np.unique(x, axis=0).shape[0] > 1:
+            for i, x_i in enumerate(x):
+                if (x_i != np.zeros(x_i.shape)).all():
+                    gr.add_node(i)
+
         # NaN check (wrong output), return empty graph
         if len(gr.nodes) == 0 or math.isnan(x[0][0]):
             gr.clear()
@@ -882,26 +898,42 @@ class GraphDataset(BaseDataset):
         virtual_nodes = []
         # node attributes
         for i_node in gr.nodes:
-            attr_node = np.where(x[i_node] == np.max(x, axis=1)[i_node])[0][0]
+            if not attributed_node:
+                attr_node = np.where(x[i_node] == np.max(x, axis=1)[i_node])[0][0]
 
-            # virtual node check (normally not used if the model has been trained)
-            if attr_node == x.shape[1] - 1:
-                virtual_nodes.append(i_node)
+                # virtual node check (normally not used if the model has been trained)
+                if attr_node == x.shape[1] - 1:
+                    virtual_nodes.append(i_node)
 
-            gr.nodes[i_node]['attributes'] = [str(attr_node)]
-            # node_label
-            for i, a_name in enumerate(gr.graph['node_labels']):
-                gr.nodes[i_node][a_name] = str(attr_node)
-            for i, a_name in enumerate(gr.graph['node_attrs']):
-                gr.nodes[i_node][a_name] = str(attr_node)
-            for edge in gr.edges(data=True):
-                edge[2][label_names['edge_labels'][0]] = np.where(full_adj[:, edge[0], edge[1]])[0][0]
+                gr.nodes[i_node]['attributes'] = [str(attr_node)]
+                # node_label
+                for i, a_name in enumerate(gr.graph['node_labels']):
+                    gr.nodes[i_node][a_name] = str(attr_node)
+                for i, a_name in enumerate(gr.graph['node_attrs']):
+                    gr.nodes[i_node][a_name] = str(attr_node)
+                for edge in gr.edges(data=True):
+                    edge[2][label_names['edge_labels'][0]] = np.where(full_adj[:, edge[0], edge[1]])[0][0]
+            else:
+                attr_node = x[i_node]
+
+                gr.nodes[i_node]['node_attr'] = tuple(attr_node)
+                # node_label
+                # for i, a_name in enumerate(gr.graph['node_attrs']):
+                #     gr.nodes[i_node][a_name] = attr_node[i]
+                for edge in gr.edges(data=True):
+                    edge[2][label_names['edge_labels'][0]] = np.where(full_adj[:, edge[0], edge[1]])[0][0]
+
+                # virtual node check
+                if (attr_node == np.zeros(2)).all():
+                    virtual_nodes.append(i_node)
 
         for node in virtual_nodes:
             gr.remove_node(node)
         return gr
 
-    def create_node_labeled_only_graph(self, x, full_adj, label_names=None, i=None):
+    def create_node_labeled_only_graph(self, x, full_adj, label_names=None, i=None, attributed_node=False):
+        assert not attributed_node, 'node only graphs creation (edge -> node) support only labeled node/edge,' \
+                                    ' not attributed'
         # i: int used as the graph's name
         if label_names is None:
             label_names = self.label_names
@@ -970,20 +1002,22 @@ class GraphDataset(BaseDataset):
                     gr.remove_node(n1)
         return gr
 
-    def get_full_graphs(self, data=None):
-        return self.full_graphs_mp(data=data)
+    def get_full_graphs(self, data=None, attributed_node=False):
+        return self.full_graphs_mp(data=data, attributed_node=attributed_node)
 
-    def full_graphs_mp(self, data=None):
+    def full_graphs_mp(self, data=None, attributed_node=False):
         data = data if data is not None else self.X
-        pool = multiprocessing.Pool()
-        returns = pool.map(mp_create_graph_func, [(chunk, self.label_names, self.create_full_graph) for chunk in
-                                                  chunks(data, os.cpu_count())])
-        pool.close()
-        # returns = [self.create_full_graph(*data[i], label_names=self.label_names, i=i) for i in range(len(data))]
-        # return returns
-        return list(itertools.chain.from_iterable(returns))
+        # pool = multiprocessing.Pool()
+        # returns = pool.map(mp_create_graph_func,
+        #                    [(chunk, self.label_names, self.create_full_graph, attributed_node) for chunk in
+        #                     chunks(data, os.cpu_count())])
+        # pool.close()
+        returns = [self.create_full_graph(*data[i], label_names=self.label_names, i=i, attributed_node=attributed_node)
+                   for i in range(len(data))]
+        return returns
+        # return list(itertools.chain.from_iterable(returns))
 
-    def create_full_graph(self, x, full_adj, label_names=None, i=None):
+    def create_full_graph(self, x, full_adj, label_names=None, i=None, attributed_node=False):
         # i: int used as the graph's name
         if label_names is None:
             label_names = self.label_names
@@ -1001,22 +1035,32 @@ class GraphDataset(BaseDataset):
 
         # node attributes
         for i_node in gr.nodes:
-            # If NaN only in the row
-            if np.isnan(np.nanmax(x[i_node])):
-                return None
+            if not attributed_node:
+                # If NaN only in the row
+                if np.isnan(np.nanmax(x[i_node])):
+                    return None
 
-            attr_node = np.where(x[i_node] == np.nanmax(x[i_node]))[0][0]
+                attr_node = np.where(x[i_node] == np.nanmax(x[i_node]))[0][0]
 
-            gr.nodes[i_node]['attributes'] = [str(attr_node)]
-            # node_label
-            for i, a_name in enumerate(gr.graph['node_labels']):
-                gr.nodes[i_node][a_name] = str(attr_node)
-            for i, a_name in enumerate(gr.graph['node_attrs']):
-                gr.nodes[i_node][a_name] = str(attr_node)
-            for edge in gr.edges(data=True):
-                edge[2][label_names['edge_labels'][0]] = np.where(full_adj[:, edge[0], edge[1]])[0][0]
+                gr.nodes[i_node]['attributes'] = [str(attr_node)]
+                # node_label
+                for i, a_name in enumerate(gr.graph['node_labels']):
+                    gr.nodes[i_node][a_name] = str(attr_node)
+                for i, a_name in enumerate(gr.graph['node_attrs']):
+                    gr.nodes[i_node][a_name] = str(attr_node)
+                for edge in gr.edges(data=True):
+                    edge[2][label_names['edge_labels'][0]] = np.where(full_adj[:, edge[0], edge[1]])[0][0]
+            else:
+                attr_node = x[i_node]
 
-        edge_labels = nx.get_edge_attributes(gr, "bond_type")
+                gr.nodes[i_node]['node_attr'] = tuple(attr_node)
+                # node_label
+                # for i, a_name in enumerate(gr.graph['node_attrs']):
+                #     gr.nodes[i_node][a_name] = attr_node[i]
+                for edge in gr.edges(data=True):
+                    edge[2][label_names['edge_labels'][0]] = np.where(full_adj[:, edge[0], edge[1]])[0][0]
+
+        edge_labels = nx.get_edge_attributes(gr, "bond_attr")
         # edges_no_virtual = {}
         for k, v in edge_labels.items():
             if v == full_adj.shape[0] - 1:

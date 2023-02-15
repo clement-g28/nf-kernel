@@ -1,39 +1,56 @@
 import numpy as np
 from grakel.kernels import WeisfeilerLehman, VertexHistogram, EdgeHistogram, MultiscaleLaplacian, HadamardCode, \
-    ShortestPath
+    ShortestPath, ShortestPathAttr, Propagation, PropagationAttr
 from grakel.utils import graph_from_networkx
 
 
-def compute_hadcode_kernel(datasets, base_grakel_kernel='vertexhistogram', normalize=False, edge_to_node=True):
-    graphs, tags = get_kernel_graphs(datasets, edge_to_node)
+def compute_hadcode_kernel(datasets, base_grakel_kernel='vertexhistogram', normalize=False, edge_to_node=True,
+                           attributed_node=False):
+    graphs, tags = get_kernel_graphs(datasets, edge_to_node, attributed_node=attributed_node)
 
     base_kernel = EdgeHistogram if base_grakel_kernel == 'edgehistogram' else VertexHistogram
     graph_kernel = HadamardCode(normalize=normalize, base_graph_kernel=base_kernel)
 
-    K = compute_gram_matrix(graph_kernel, graphs, tags, use_edge_labels=False)
+    K = compute_gram_matrix(graph_kernel, graphs, tags, use_edge_labels=not edge_to_node)
     return K
 
 
-def compute_mslap_kernel(datasets, normalize=False, edge_to_node=True):
-    graphs, tags = get_kernel_graphs(datasets, edge_to_node)
+def compute_mslap_kernel(datasets, normalize=False, edge_to_node=True, attributed_node=False):
+    graphs, tags = get_kernel_graphs(datasets, edge_to_node, attributed_node=attributed_node)
 
     graph_kernel = MultiscaleLaplacian(normalize=normalize)
 
-    K = compute_gram_matrix(graph_kernel, graphs, tags, use_edge_labels=False)
+    K = compute_gram_matrix(graph_kernel, graphs, tags, use_edge_labels=not edge_to_node)
     return K
 
 
-def compute_sp_kernel(datasets, normalize=False, edge_to_node=True):
-    graphs, tags = get_kernel_graphs(datasets, edge_to_node)
+def compute_propagation_kernel(datasets, normalize=False, edge_to_node=True, attributed_node=False):
+    graphs, tags = get_kernel_graphs(datasets, edge_to_node, attributed_node=attributed_node)
 
-    graph_kernel = ShortestPath(normalize=normalize, with_labels=True)
+    if attributed_node:
+        graph_kernel = PropagationAttr(normalize=normalize)
+    else:
+        graph_kernel = Propagation(normalize=normalize)
 
-    K = compute_gram_matrix(graph_kernel, graphs, tags, use_edge_labels=False)
+    K = compute_gram_matrix(graph_kernel, graphs, tags, use_edge_labels=not edge_to_node)
     return K
 
 
-def compute_wl_kernel(datasets, base_grakel_kernel='vertexhistogram', wl_height=10, normalize=False, edge_to_node=True):
-    graphs, tags = get_kernel_graphs(datasets, edge_to_node)
+def compute_sp_kernel(datasets, normalize=False, edge_to_node=True, attributed_node=False):
+    graphs, tags = get_kernel_graphs(datasets, edge_to_node, attributed_node=attributed_node)
+
+    if attributed_node:
+        graph_kernel = ShortestPathAttr(normalize=normalize)
+    else:
+        graph_kernel = ShortestPath(normalize=normalize, with_labels=True)
+
+    K = compute_gram_matrix(graph_kernel, graphs, tags, use_edge_labels=not edge_to_node)
+    return K
+
+
+def compute_wl_kernel(datasets, base_grakel_kernel='vertexhistogram', wl_height=10, normalize=False, edge_to_node=True,
+                      attributed_node=False):
+    graphs, tags = get_kernel_graphs(datasets, edge_to_node, attributed_node=attributed_node)
 
     base_kernel = EdgeHistogram if base_grakel_kernel == 'edgehistogram' else VertexHistogram
     graph_kernel = WeisfeilerLehman(n_iter=wl_height, base_graph_kernel=base_kernel, normalize=normalize)
@@ -43,11 +60,11 @@ def compute_wl_kernel(datasets, base_grakel_kernel='vertexhistogram', wl_height=
     return K
 
 
-def get_kernel_graphs(datasets, edge_to_node=True):
+def get_kernel_graphs(datasets, edge_to_node=True, attributed_node=False):
     if isinstance(datasets, tuple):
         graphs = []
         for dset in datasets:
-            graphs.append(dset.get_nx_graphs(edge_to_node=edge_to_node))
+            graphs.append(dset.get_nx_graphs(edge_to_node=edge_to_node, attributed_node=attributed_node))
         graphs = tuple(graphs)
         dataset = datasets[0]
         node_label_tag = dataset.node_labels[0]
@@ -56,7 +73,7 @@ def get_kernel_graphs(datasets, edge_to_node=True):
         dataset = datasets
         node_label_tag = dataset.node_labels[0]
         edge_label_tag = dataset.edge_labels[0]
-        graphs = dataset.get_nx_graphs(edge_to_node=edge_to_node)
+        graphs = dataset.get_nx_graphs(edge_to_node=edge_to_node, attributed_node=attributed_node)
 
     return graphs, (node_label_tag, edge_label_tag)
 

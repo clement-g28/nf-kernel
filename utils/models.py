@@ -70,15 +70,17 @@ class NF(nn.Module):
             self.gaussian_params = []
             self.eigvals = []
             self.eigvecs = []
+            self.covariance_matrices = []
             for gaussian_param in gaussian_params:
                 mean = gaussian_param[0]
                 eigenvec = gaussian_param[1]
                 eigenval = gaussian_param[2]
                 self.dim_per_lab = np.count_nonzero(eigenval > 1)
-                self.covariance_matrix = construct_covariance(eigenvec, eigenval)
+                covariance_matrix = construct_covariance(eigenvec, eigenval)
                 # compute faster determinant and inverse using the diagonal property
                 determinant = np.prod(eigenval)
-                inverse_matrix = self.covariance_matrix
+                self.covariance_matrices.append(covariance_matrix)
+                inverse_matrix = covariance_matrix.copy()
                 inverse_matrix[np.diag_indices(inverse_matrix.shape[0])] = 1 / np.diag(inverse_matrix)
                 # determinant = np.linalg.det(self.covariance_matrix)
                 # inverse_matrix = np.linalg.inv(self.covariance_matrix)

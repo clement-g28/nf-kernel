@@ -135,7 +135,7 @@ if __name__ == "__main__":
     eigval_list = [mean_of_eigval for i in range(dim_per_label)]
 
     if not dataset.is_regression_dataset():
-        gaussian_params = initialize_gaussian_params(dataset, eigval_list, isotrope=True,
+        gaussian_params = initialize_gaussian_params(dataset, eigval_list, isotrope=False,
                                                      dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
     else:
         gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list,

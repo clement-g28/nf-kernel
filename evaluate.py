@@ -23,8 +23,9 @@ from utils.dataset import ImDataset, SimpleDataset, GraphDataset, RegressionGrap
     GRAPH_CLASSIFICATION_DATASETS
 from utils.density import construct_covariance
 from utils.graphs.graph_utils import format, organise_data
-from utils.graphs.graph_utils import save_nx_graph
-from utils.graphs.kernels import compute_wl_kernel, compute_sp_kernel, compute_mslap_kernel, compute_hadcode_kernel
+from utils.graphs.graph_utils import save_nx_graph, save_nx_graph_attr
+from utils.graphs.kernels import compute_wl_kernel, compute_sp_kernel, compute_mslap_kernel, compute_hadcode_kernel, \
+    compute_propagation_kernel
 from utils.graphs.mol_utils import valid_mol, construct_mol
 from utils.models import GRAPH_MODELS
 from utils.models import load_seqflow_model, load_ffjord_model, load_moflow_model
@@ -358,13 +359,14 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
     print(f"time to fit linear svc : {str(end - start)}")
 
     # krr_types = ['linear', 'poly', 'rbf', 'sigmoid', 'cosine']
-    ksvc_types = ['rbf', 'poly', 'sigmoid']
+    # ksvc_types = ['rbf', 'poly', 'sigmoid']
+    ksvc_types = ['rbf', 'sigmoid']
     ksvc_params = [
         {'SVC__kernel': ['rbf'], 'SVC__gamma': np.logspace(-5, 3, 10),
          'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))},
-        {'SVC__kernel': ['poly'], 'SVC__gamma': np.logspace(-5, 3, 5),
-         'SVC__degree': np.linspace(1, 4, 4).astype(np.int),
-         'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))},
+        # {'SVC__kernel': ['poly'], 'SVC__gamma': np.logspace(-5, 3, 5),
+        #  'SVC__degree': np.linspace(1, 4, 4).astype(np.int),
+        #  'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))},
         {'SVC__kernel': ['sigmoid'], 'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))}
     ]
 
@@ -383,30 +385,42 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
 
     # GRAPH KERNELS FIT
     if isinstance(train_dataset, GraphDataset):
-        def compute_kernel(name, dataset, edge_to_node, normalize, wl_height=10):
+        def compute_kernel(name, dataset, edge_to_node, normalize, wl_height=10, attributed_node=False):
             if name == 'wl':
                 K = compute_wl_kernel(dataset, wl_height=wl_height, edge_to_node=edge_to_node,
-                                      normalize=normalize)
+                                      normalize=normalize, attributed_node=attributed_node)
+            elif name == 'prop':
+                K = compute_propagation_kernel(dataset, normalize=normalize, edge_to_node=edge_to_node,
+                                               attributed_node=attributed_node)
             elif name == 'sp':
-                K = compute_sp_kernel(dataset, normalize=normalize, edge_to_node=edge_to_node)
+                K = compute_sp_kernel(dataset, normalize=normalize, edge_to_node=edge_to_node,
+                                      attributed_node=attributed_node)
             elif name == 'mslap':
-                K = compute_mslap_kernel(dataset, normalize=normalize, edge_to_node=edge_to_node)
+                K = compute_mslap_kernel(dataset, normalize=normalize, edge_to_node=edge_to_node,
+                                         attributed_node=attributed_node)
             elif name == 'hadcode':
-                K = compute_hadcode_kernel(dataset, normalize=normalize, edge_to_node=edge_to_node)
+                K = compute_hadcode_kernel(dataset, normalize=normalize, edge_to_node=edge_to_node,
+                                           attributed_node=attributed_node)
             else:
                 assert False, f'unknown graph kernel: {graph_kernel}'
             return K
 
         wl_height = 15
-        edge_to_node = True
         normalize = False
-        graph_kernel_names = ['wl', 'sp', 'hadcode']
-        # graph_kernel_names = ['wl', 'sp']
+        if val_dataset.is_attributed_node_dataset():
+            graph_kernel_names = ['mslap']
+            # graph_kernel_names = ['prop']
+            attributed_node = True
+            edge_to_node = False
+        else:
+            graph_kernel_names = ['wl', 'sp', 'hadcode']
+            attributed_node = False
+            edge_to_node = True
         graph_kernels = []
         graph_svc_params = []
         for graph_kernel in graph_kernel_names:
             K = compute_kernel(graph_kernel, train_dataset, edge_to_node=edge_to_node, normalize=normalize,
-                               wl_height=wl_height)
+                               wl_height=wl_height, attributed_node=attributed_node)
             graph_kernels.append(('precomputed', K, graph_kernel))
             graph_svc_params.append(
                 {'SVC__kernel': ['precomputed'], 'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))})
@@ -464,14 +478,14 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
                 zsvc_score = zlinsvc.score(val_inZ, elabels)
                 our_scores.append(zsvc_score)
                 end = time.time()
-                print(f"time to predict with zlinsvc : {str(end - start)}")
+                print(f"time to predict with zlinSVC : {str(end - start)}")
 
                 # See on train
                 start = time.time()
                 zsvc_score = zlinsvc.score(Z, tlabels)
                 our_scores_train.append(zsvc_score)
                 end = time.time()
-                print(f"time to predict with zlinsvc (on train) : {str(end - start)}")
+                print(f"time to predict with zlinSVC (on train) : {str(end - start)}")
 
             # KERNELS EVALUATION
             X_val = val_dataset.get_flattened_X()
@@ -481,31 +495,31 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
             svc_score = linsvc.score(X_val, labels_val)
             svc_scores.append(svc_score)
             end = time.time()
-            print(f"time to predict with xlinridge : {str(end - start)}")
+            print(f"time to predict with xlinSVC : {str(end - start)}")
 
             start = time.time()
             for i, ksvc in enumerate(ksvcs):
                 ksvc_score = ksvc.score(X_val, labels_val)
                 ksvc_scores[i].append(ksvc_score)
             end = time.time()
-            print(f"time to predict with {len(ksvcs)} kernelridge : {str(end - start)}")
+            print(f"time to predict with {len(ksvcs)} kernelSVC : {str(end - start)}")
 
             start = time.time()
             # GRAPH KERNELS EVALUATION
             for i, graph_ksvc in enumerate(graph_ksvcs):
                 K_val = compute_kernel(graph_kernels[i][2], (val_dataset, train_dataset), edge_to_node=edge_to_node,
-                                       normalize=normalize, wl_height=wl_height)
+                                       normalize=normalize, wl_height=wl_height, attributed_node=attributed_node)
                 graph_ksvc_score = graph_ksvc.score(K_val, labels_val)
                 ksvc_graph_scores[i].append(graph_ksvc_score)
             end = time.time()
-            print(f"time to predict with {len(graph_ksvcs)} graphkernelridge : {str(end - start)}")
+            print(f"time to predict with {len(graph_ksvcs)} graphkernelSVC : {str(end - start)}")
 
         # PRINT RESULTS
         lines = []
         print('Predictions scores :')
         svc_mean_score = np.mean(svc_scores)
         svc_std_score = np.std(svc_scores)
-        score_str = f'Ridge R2: {svc_scores} \n' \
+        score_str = f'SVC R2: {svc_scores} \n' \
                     f'Mean Scores: {svc_mean_score} \n' \
                     f'Std Scores: {svc_std_score}'
         print(score_str)
@@ -517,7 +531,7 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
                 scores.append(ksvc_score)
             mean_score = np.mean(scores)
             std_score = np.std(scores)
-            score_str = f'KernelRidge ({ksvc_type}): {scores} \n' \
+            score_str = f'KernelSVC ({ksvc_type}): {scores} \n' \
                         f'Mean Scores: {mean_score} \n' \
                         f'Std Scores: {std_score}'
             print(score_str)
@@ -529,7 +543,7 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
                 scores.append(graph_ksvc_score)
             mean_score = np.mean(scores)
             std_score = np.std(scores)
-            score_str = f'GraphKernelRidge ({graph_kernels[j][2]}): {scores} \n' \
+            score_str = f'GraphKernelSVC ({graph_kernels[j][2]}): {scores} \n' \
                         f'Mean Scores: {mean_score} \n' \
                         f'Std Scores: {std_score}'
             print(score_str)
@@ -1310,6 +1324,12 @@ def create_figures_XZ(model, train_dataset, save_path, device, std_noise=0.1, on
 
     Z = np.concatenate(Z, axis=0).reshape(len(train_dataset), -1)
     save_fig(Z, tlabels, size=size_pt_fig, save_path=f'{save_path}/Z_space')
+
+    # PCA
+    pca = PCA(n_components=2)
+    pca.fit(Z)
+    pca_Z = pca.transform(Z)
+    save_fig(pca_Z, tlabels, size=size_pt_fig, save_path=f'{save_path}/PCA_Z_space')
     return X, Z
 
 
@@ -1320,7 +1340,7 @@ def evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, p
     if eval_type == 'regression':
         y_min = model.label_min
         y_max = model.label_max
-        model_means = model.means[:2].detach().cpu().numpy()
+        model_means = model.means.detach().cpu().numpy()
         samples = []
         # true_X = val_dataset.X
         true_X = val_dataset.get_flattened_X()
@@ -1330,7 +1350,7 @@ def evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, p
             mean = alpha_y * model_means[0] + (1 - alpha_y) * model_means[1]
             samples.append(np.expand_dims(mean, axis=0))
     else:
-        model_means = model.means[:2].detach().cpu().numpy()
+        model_means = model.means.detach().cpu().numpy()
         samples = []
         # true_X = val_dataset.X
         true_X = val_dataset.get_flattened_X()
@@ -1385,8 +1405,8 @@ def evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, p
             os.makedirs(mol_dir, exist_ok=True)
             for ind, mol in enumerate(valid_mols):
                 save_mol_png(mol, os.path.join(mol_dir, '{}.png'.format(ind)))
-        if print_as_graph:
 
+        if print_as_graph:
             # define the colormap
             cmap = plt.cm.jet
             # extract all colors from the .jet map
@@ -1394,26 +1414,33 @@ def evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, p
             n_type = x.shape[-1] - 1
             node_colors = [cmaplist[i * math.floor(len(cmaplist) / n_type)] for i in range(0, n_type)]
 
-            graphs = val_dataset.get_full_graphs(data=list(zip(x, adj)))
-            inv_map = {v: k for k, v in val_dataset.label_map.items()}
+            graphs = val_dataset.get_full_graphs(data=list(zip(x, adj)),
+                                                 attributed_node=val_dataset.is_attributed_node_dataset())
+            if val_dataset.label_map is None:
+                inv_map = {i + 1: str(i) for i in range(x.shape[-1])}
+            else:
+                inv_map = {v: k for k, v in val_dataset.label_map.items()}
             for i, graph in enumerate(graphs):
                 if graph is None:
                     continue
                 path = f'{save_dir}/generated_means_graphs/'
                 os.makedirs(path, exist_ok=True)
                 title = '\^y:' + str(round(val_dataset.true_labels[i], 2))
-                save_nx_graph(graph, inv_map, save_path=f'{path}/{str(i).zfill(4)}', title=title,
-                              n_atom_type=x.shape[-1] - 1,
-                              colors=node_colors)
+                if val_dataset.is_attributed_node_dataset():
+                    save_nx_graph_attr(graph, save_path=f'{path}/{str(i).zfill(4)}', title=title)
+                else:
+                    save_nx_graph(graph, inv_map, save_path=f'{path}/{str(i).zfill(4)}', title=title,
+                                  n_atom_type=x.shape[-1] - 1,
+                                  colors=node_colors)
 
 
 def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_by_y=20, print_as_mol=True,
                        print_as_graph=True, eval_type='regression', batch_size=20):
     assert eval_type in ['regression', 'classification'], 'unknown pre-image generation evaluation type'
 
-    model_means = model.means[:2].detach().cpu().numpy()
+    model_means = model.means.detach().cpu().numpy()
     # covariance_matrix = construct_covariance(model.eigvecs.cpu()[0].squeeze(), model.eigvals.cpu()[0].squeeze())
-    covariance_matrix = model.covariance_matrix
+    covariance_matrices = model.covariance_matrices
     samples = []
     datasets_close_samples = []
     datasets_close_y = []
@@ -1436,6 +1463,7 @@ def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_b
             # mean, cov = model.get_regression_gaussian_sampling_parameters(y)
             alpha_y = (y - y_min) / (y_max - y_min)
             mean = alpha_y * model_means[0] + (1 - alpha_y) * model_means[1]
+            covariance_matrix = covariance_matrices[0]
             z = np.random.multivariate_normal(mean, covariance_matrix, n_samples_by_y)
             # samples.append(np.expand_dims(mean, axis=0))
             samples.append(z)
@@ -1446,7 +1474,7 @@ def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_b
     else:
         for i, y in enumerate(ys):
             mean = model_means[y]
-            z = np.random.multivariate_normal(mean, covariance_matrix, n_samples_by_y)
+            z = np.random.multivariate_normal(mean, covariance_matrices[y], n_samples_by_y)
             samples.append(z)
 
             # Get close samples in dataset w.r.t the y property
@@ -1551,10 +1579,15 @@ def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_b
                           list(datasets_close_samples)]
             close_graphs = []
             for close_xadj_set in close_xadj:
-                close_graphs.append(val_dataset.get_full_graphs(data=list(zip(*close_xadj_set))))
+                close_graphs.append(val_dataset.get_full_graphs(data=list(zip(*close_xadj_set)),
+                                                                attributed_node=val_dataset.is_attributed_node_dataset()))
 
-            graphs = val_dataset.get_full_graphs(data=list(zip(x, adj)))
-            inv_map = {v: k for k, v in val_dataset.label_map.items()}
+            graphs = val_dataset.get_full_graphs(data=list(zip(x, adj)),
+                                                 attributed_node=val_dataset.is_attributed_node_dataset())
+            if val_dataset.label_map is None:
+                inv_map = {i + 1: str(i) for i in range(x.shape[-1])}
+            else:
+                inv_map = {v: k for k, v in val_dataset.label_map.items()}
             for i, graph in enumerate(graphs):
                 if graph is None:
                     continue
@@ -1566,17 +1599,23 @@ def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_b
                 path = f'{save_dir}/generated_samples_graphs/{str(i).zfill(4)}'
                 os.makedirs(path, exist_ok=True)
                 title = '\^y:' + str(round(all_ys[0], 2))
-                save_nx_graph(graph, inv_map, save_path=f'{path}/gen_{str(i).zfill(4)}', title=title,
-                              n_atom_type=x.shape[-1] - 1,
-                              colors=node_colors)
+                if val_dataset.is_attributed_node_dataset():
+                    save_nx_graph_attr(graph, save_path=f'{path}/gen_{str(i).zfill(4)}', title=title)
+                else:
+                    save_nx_graph(graph, inv_map, save_path=f'{path}/gen_{str(i).zfill(4)}', title=title,
+                                  n_atom_type=x.shape[-1] - 1,
+                                  colors=node_colors)
 
                 # closest graphs
                 close_graphs_i = close_graphs[y_idx]
                 for j, close_graph in enumerate(close_graphs_i):
                     title = 'y:' + str(round(all_ys[j], 2))
-                    save_nx_graph(close_graph, inv_map, save_path=f'{path}/{str(j).zfill(4)}_{str(i).zfill(4)}',
-                                  title=title,
-                                  n_atom_type=x.shape[-1] - 1, colors=node_colors)
+                    if val_dataset.is_attributed_node_dataset():
+                        save_nx_graph_attr(close_graph, save_path=f'{path}/{str(j).zfill(4)}_{str(i).zfill(4)}', title=title)
+                    else:
+                        save_nx_graph(close_graph, inv_map, save_path=f'{path}/{str(j).zfill(4)}_{str(i).zfill(4)}',
+                                      title=title,
+                                      n_atom_type=x.shape[-1] - 1, colors=node_colors)
                 # create grid
                 nrow = math.ceil(math.sqrt(n_closest))
                 images = organise_data(path, nrow=nrow)
@@ -1734,17 +1773,24 @@ def evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=20, n
                 img.save(
                     f'{save_dir}/generated_interp/{str(n).zfill(4)}_res_grid_valid{len(valid_mols)}_{len(interpolation_mols)}.png')
             if print_as_graph:
-                graphs = val_dataset.get_full_graphs(data=list(zip(xm, adjm)))
+                graphs = val_dataset.get_full_graphs(data=list(zip(xm, adjm)),
+                                                     attributed_node=val_dataset.is_attributed_node_dataset())
 
-                inv_map = {v: k for k, v in val_dataset.label_map.items()}
+                if val_dataset.label_map is None:
+                    inv_map = {i + 1: str(i) for i in range(x.shape[-1])}
+                else:
+                    inv_map = {v: k for k, v in val_dataset.label_map.items()}
                 path = f'{save_dir}/generated_interp_graphs/{str(n).zfill(4)}'
                 for i, graph in enumerate(graphs):
                     if graph is None:
                         continue
                     os.makedirs(path, exist_ok=True)
-                    save_nx_graph(graph, inv_map, save_path=f'{path}/{str(i).zfill(4)}_{str(n).zfill(4)}',
-                                  n_atom_type=x.shape[-1] - 1,
-                                  colors=node_colors)
+                    if val_dataset.is_attributed_node_dataset():
+                        save_nx_graph_attr(graph, save_path=f'{path}/{str(i).zfill(4)}_{str(n).zfill(4)}')
+                    else:
+                        save_nx_graph(graph, inv_map, save_path=f'{path}/{str(i).zfill(4)}_{str(n).zfill(4)}',
+                                      n_atom_type=x.shape[-1] - 1,
+                                      colors=node_colors)
                 # create grid
                 nrow = math.ceil(math.sqrt(n_interpolation + 2))
                 images = organise_data(path, nrow=nrow)

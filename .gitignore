@@ -1,6 +1,8 @@
 .idea
 *.npz
 *.log
+datasets/COIL-DEL
+datasets/MUTAG
 datasets/AIDS
 datasets/Letter-med
 datasets/toxcast-featurized
