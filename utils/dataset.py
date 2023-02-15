@@ -21,7 +21,7 @@ from utils import visualize_flow
 from torch_geometric.datasets.tu_dataset import TUDataset
 
 SIMPLE_DATASETS = ['single_moon', 'double_moon', 'iris', 'bcancer']
-IMAGE_DATASETS = ['mnist']
+IMAGE_DATASETS = ['mnist', 'cifar10']
 SIMPLE_REGRESSION_DATASETS = ['swissroll', 'diabetes', 'waterquality', 'aquatoxi', 'fishtoxi', 'trafficflow']
 GRAPH_REGRESSION_DATASETS = ['qm7', 'qm9', 'freesolv', 'esol', 'lipo', 'fishtoxi']
 GRAPH_CLASSIFICATION_DATASETS = ['toxcast', 'AIDS', 'Letter-med', 'MUTAG', 'COIL-DEL']
@@ -519,15 +519,16 @@ class ImDataset(BaseDataset):
                     self.rescale = self.rescale_val_to_im_with_norm
         if not hasattr(self, 'norm_mean'):
             self.rescale = self.rescale_val_to_im_without_norm
-        # test with denoise loss
-        self.noise_transform = noise_transform
-        self.n_channel = dset.data.shape[1]
-        self.in_size = dset.data.shape[-1]
 
         ori_X = dset.data if isinstance(dset.data, np.ndarray) else dset.data.numpy()
         ori_true_labels = dset.targets if isinstance(dset.targets, np.ndarray) else np.array(dset.targets)
         super().__init__(ori_X, ori_true_labels)
         print('Z and K are not initialized in constructor')
+
+        # test with denoise loss
+        self.noise_transform = noise_transform
+        self.n_channel = dset.data.shape[1]
+        self.in_size = dset.data.shape[-1]
 
         self.current_mode = 'XY'
         self.get_func = self.get_XY_item

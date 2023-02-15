@@ -28,17 +28,17 @@ class ActNorm(nn.Module):
             flatten = input.permute(1, 0, 2, 3).contiguous().view(input.shape[1], -1)
             mean = (
                 flatten.mean(1)
-                .unsqueeze(1)
-                .unsqueeze(2)
-                .unsqueeze(3)
-                .permute(1, 0, 2, 3)
+                    .unsqueeze(1)
+                    .unsqueeze(2)
+                    .unsqueeze(3)
+                    .permute(1, 0, 2, 3)
             )
             std = (
                 flatten.std(1)
-                .unsqueeze(1)
-                .unsqueeze(2)
-                .unsqueeze(3)
-                .permute(1, 0, 2, 3)
+                    .unsqueeze(1)
+                    .unsqueeze(2)
+                    .unsqueeze(3)
+                    .permute(1, 0, 2, 3)
             )
 
             self.loc.data.copy_(-mean)
@@ -296,41 +296,138 @@ class Block(nn.Module):
         return unsqueezed
 
 
-class CGlow(nn.Module):
-    def __init__(self, in_channel, n_flow, n_block, affine=True, conv_lu=True, gaussian_params=None, device='cuda:0',
-                 learn_mean=True):
-        super().__init__()
-        self.gp = gaussian_params
-        self.device = device
-        if gaussian_params is not None:
-            # self.means = []
-            means = []
-            self.gaussian_params = []
-            self.eigvals = []
-            self.eigvecs = []
-            for gaussian_param in gaussian_params:
-                mean = gaussian_param[0]
-                eigenvec = gaussian_param[1]
-                eigenval = gaussian_param[2]
-                self.dim_per_lab = np.count_nonzero(eigenval > 1)
-                covariance_matrix = construct_covariance(eigenvec, eigenval)
-                determinant = np.linalg.det(covariance_matrix)
-                inverse_matrix = np.linalg.inv(covariance_matrix)
-                means.append(torch.from_numpy(mean).unsqueeze(0))
-                self.gaussian_params.append((torch.from_numpy(inverse_matrix).to(device),
-                                             determinant))
-                indexes = np.argsort(-eigenval, kind='mergesort')
-                eigenvec = eigenvec[indexes]
-                eigenval = eigenval[indexes]
-                self.eigvals.append(torch.from_numpy(eigenval).unsqueeze(0).to(device))
-                self.eigvecs.append(torch.from_numpy(eigenvec).unsqueeze(0).to(device))
-            self.eigvals = torch.cat(self.eigvals, dim=0).to(torch.float32)
-            self.eigvecs = torch.cat(self.eigvecs, dim=0).to(torch.float32)
-            if learn_mean:
-                self.means = nn.Parameter(torch.cat(means, dim=0))
-            else:
-                self.means = torch.cat(means, dim=0).to(device)
+# class CGlow(nn.Module):
+#     def __init__(self, in_channel, n_flow, n_block, affine=True, conv_lu=True, gaussian_params=None, device='cuda:0',
+#                  learn_mean=True):
+#         super().__init__()
+#         self.gp = gaussian_params
+#         self.device = device
+#         if gaussian_params is not None:
+#             # self.means = []
+#             means = []
+#             self.gaussian_params = []
+#             self.eigvals = []
+#             self.eigvecs = []
+#             for gaussian_param in gaussian_params:
+#                 mean = gaussian_param[0]
+#                 eigenvec = gaussian_param[1]
+#                 eigenval = gaussian_param[2]
+#                 self.dim_per_lab = np.count_nonzero(eigenval > 1)
+#                 covariance_matrix = construct_covariance(eigenvec, eigenval)
+#                 determinant = np.linalg.det(covariance_matrix)
+#                 inverse_matrix = np.linalg.inv(covariance_matrix)
+#                 means.append(torch.from_numpy(mean).unsqueeze(0))
+#                 self.gaussian_params.append((torch.from_numpy(inverse_matrix).to(device),
+#                                              determinant))
+#                 indexes = np.argsort(-eigenval, kind='mergesort')
+#                 eigenvec = eigenvec[indexes]
+#                 eigenval = eigenval[indexes]
+#                 self.eigvals.append(torch.from_numpy(eigenval).unsqueeze(0).to(device))
+#                 self.eigvecs.append(torch.from_numpy(eigenvec).unsqueeze(0).to(device))
+#             self.eigvals = torch.cat(self.eigvals, dim=0).to(torch.float32)
+#             self.eigvecs = torch.cat(self.eigvecs, dim=0).to(torch.float32)
+#             if learn_mean:
+#                 self.means = nn.Parameter(torch.cat(means, dim=0))
+#             else:
+#                 self.means = torch.cat(means, dim=0).to(device)
+#
+#         self.blocks = nn.ModuleList()
+#         self.n_channel = in_channel
+#         self.n_block = n_block
+#         for i in range(n_block - 1):
+#             self.blocks.append(
+#                 Block(in_channel, n_flow, affine=affine, conv_lu=conv_lu))
+#             in_channel *= 4
+#         self.blocks.append(Block(in_channel, n_flow, split=False, affine=affine))
+#
+#     def calc_last_z_shape(self, input_size):
+#         n_channel = self.n_channel
+#         for i in range(self.n_block - 1):
+#             input_size //= 2
+#             n_channel *= 4
+#
+#         input_size //= 2
+#         z_shape = (n_channel * 4, input_size, input_size)
+#
+#         return z_shape
+#
+#     def forward(self, input, label, pair_with_noise=False):
+#         logdet = 0
+#         out = input
+#
+#         for block in self.blocks:
+#             out, det = block(out)
+#             logdet = logdet + det
+#
+#         log_p = calculate_log_p_with_gaussian_params(out, label, self.means, self.gaussian_params)
+#         distloss = torch.log(1 + torch.cdist(self.means, self.means).mean())
+#
+#         if pair_with_noise:
+#             # Div by 2 (z, noisy_z)
+#             d = int(out.shape[0] / 2)
+#             ori_z = out[:d]
+#             noisy_z = out[d:]
+#             ori_lab = label[:d]
+#             noisy_lab = label[d:]
+#             loss = denoise_loss(ori_z, noisy_z, ori_lab, noisy_lab, self.means, self.eigvals, self.eigvecs,
+#                                 self.dim_per_lab)
+#             return log_p, distloss, loss, logdet, out
+#
+#         return log_p, distloss, logdet, out
+#
+#     def reverse(self, z, reconstruct=False):
+#         for i, block in enumerate(self.blocks[::-1]):
+#             if i == 0:
+#                 input = block.reverse(z, z, reconstruct=reconstruct)
+#
+#             else:
+#                 input = block.reverse(input, z, reconstruct=reconstruct)
+#
+#         return input
+#
+#     def sample_evaluation(self, itr, train_dataset, val_dataset, z_shape, save_dir, writer=None):
+#         z_samples = []
+#         for i, gaussian_param in enumerate(self.gp):
+#             mean = self.means[i].detach().cpu().numpy().squeeze()
+#             eigenvec = gaussian_param[1]
+#             eigenval = gaussian_param[2]
+#             cov = construct_covariance(eigenvec, eigenval)
+#             z_sample = np.expand_dims(np.random.multivariate_normal(mean, cov).reshape(z_shape), axis=0)
+#             z_samples.append(z_sample)
+#         z_sample = torch.from_numpy(np.concatenate(z_samples, axis=0)).float().to(self.device)
+#
+#         images = self.reverse(z_sample).cpu().data
+#         images = train_dataset.rescale(images)
+#         utils.save_image(
+#             images,
+#             f"{save_dir}/sample/{str(itr + 1).zfill(6)}.png",
+#             normalize=True,
+#             nrow=10,
+#             range=(0, 255),
+#         )
+#         if writer is not None:
+#             img_grid = utils.make_grid(images, nrow=10, padding=2, pad_value=0, normalize=True,
+#                                        range=(0, 255), scale_each=False)
+#             writer.add_image('sample', img_grid)
+#
+#     def evaluate(self, itr, x, y, z, dataset, save_dir, writer=None):
+#         images = self.reverse(z).cpu().data
+#         images = dataset.rescale(images)
+#         utils.save_image(
+#             images,
+#             f"{save_dir}/sample/val_{str(itr + 1).zfill(6)}.png",
+#             normalize=True,
+#             nrow=10,
+#             range=(0, 255),
+#         )
+#         if writer is not None:
+#             img_grid = utils.make_grid(images, nrow=10, padding=2, pad_value=0, normalize=True,
+#                                        range=(0, 255), scale_each=False)
+#             writer.add_image('val', img_grid)
 
+class CGlow(nn.Module):
+    def __init__(self, in_channel, n_flow, n_block, affine=True, conv_lu=True):
+        super().__init__()
         self.blocks = nn.ModuleList()
         self.n_channel = in_channel
         self.n_block = n_block
@@ -340,18 +437,7 @@ class CGlow(nn.Module):
             in_channel *= 4
         self.blocks.append(Block(in_channel, n_flow, split=False, affine=affine))
 
-    def calc_last_z_shape(self, input_size):
-        n_channel = self.n_channel
-        for i in range(self.n_block - 1):
-            input_size //= 2
-            n_channel *= 4
-
-        input_size //= 2
-        z_shape = (n_channel * 4, input_size, input_size)
-
-        return z_shape
-
-    def forward(self, input, label, pair_with_noise=False):
+    def forward(self, input):
         logdet = 0
         out = input
 
@@ -359,21 +445,7 @@ class CGlow(nn.Module):
             out, det = block(out)
             logdet = logdet + det
 
-        log_p = calculate_log_p_with_gaussian_params(out, label, self.means, self.gaussian_params)
-        distloss = torch.log(1 + torch.cdist(self.means, self.means).mean())
-
-        if pair_with_noise:
-            # Div by 2 (z, noisy_z)
-            d = int(out.shape[0] / 2)
-            ori_z = out[:d]
-            noisy_z = out[d:]
-            ori_lab = label[:d]
-            noisy_lab = label[d:]
-            loss = denoise_loss(ori_z, noisy_z, ori_lab, noisy_lab, self.means, self.eigvals, self.eigvecs,
-                                self.dim_per_lab)
-            return log_p, distloss, loss, logdet, out
-
-        return log_p, distloss, logdet, out
+        return out, logdet
 
     def reverse(self, z, reconstruct=False):
         for i, block in enumerate(self.blocks[::-1]):
@@ -385,46 +457,6 @@ class CGlow(nn.Module):
 
         return input
 
-    def sample_evaluation(self, itr, train_dataset, val_dataset, z_shape, save_dir, writer=None):
-        z_samples = []
-        for i, gaussian_param in enumerate(self.gp):
-            mean = self.means[i].detach().cpu().numpy().squeeze()
-            eigenvec = gaussian_param[1]
-            eigenval = gaussian_param[2]
-            cov = construct_covariance(eigenvec, eigenval)
-            z_sample = np.expand_dims(np.random.multivariate_normal(mean, cov).reshape(z_shape), axis=0)
-            z_samples.append(z_sample)
-        z_sample = torch.from_numpy(np.concatenate(z_samples, axis=0)).float().to(self.device)
-
-        images = self.reverse(z_sample).cpu().data
-        images = train_dataset.rescale(images)
-        utils.save_image(
-            images,
-            f"{save_dir}/sample/{str(itr + 1).zfill(6)}.png",
-            normalize=True,
-            nrow=10,
-            range=(0, 255),
-        )
-        if writer is not None:
-            img_grid = utils.make_grid(images, nrow=10, padding=2, pad_value=0, normalize=True,
-                                       range=(0, 255), scale_each=False)
-            writer.add_image('sample', img_grid)
-
-    def evaluate(self, itr, x, y, z, dataset, save_dir, writer=None):
-        images = self.reverse(z).cpu().data
-        images = dataset.rescale(images)
-        utils.save_image(
-            images,
-            f"{save_dir}/sample/val_{str(itr + 1).zfill(6)}.png",
-            normalize=True,
-            nrow=10,
-            range=(0, 255),
-        )
-        if writer is not None:
-            img_grid = utils.make_grid(images, nrow=10, padding=2, pad_value=0, normalize=True,
-                                       range=(0, 255), scale_each=False)
-            writer.add_image('val', img_grid)
-
 
 class WrappedModel(nn.Module):
     def __init__(self, model):
@@ -434,28 +466,3 @@ class WrappedModel(nn.Module):
     def forward(self, x):
         return self.module(x)
 
-
-
-
-
-def denoise_loss(ori_z, noisy_z, ori_lab, noisy_lab, means, eigvals, eigvecs, k):
-    # ori_means = means[ori_lab]
-    # noisy_means = means[noisy_lab]
-    # ori_std = torch.sqrt(eigvals[ori_lab])
-    # noisy_std = torch.sqrt(eigvals[noisy_lab])
-    # ori_z_norm = (ori_z.reshape(ori_z.shape[0], -1) - ori_means) / ori_std
-    # noisy_z_norm = (noisy_z.reshape(noisy_z.shape[0], -1) - noisy_means) / noisy_std
-    #
-    # proj_z_noisy = (noisy_z_norm.unsqueeze(1) @ eigvecs[noisy_lab].permute(0, 2, 1)[:, :, :k]).squeeze()
-    # proj_z_ori = (ori_z_norm.unsqueeze(1) @ eigvecs[noisy_lab].permute(0, 2, 1)[:, :, :k]).squeeze()
-
-    proj_z_noisy = (noisy_z.reshape(noisy_z.shape[0], -1).unsqueeze(1) @ eigvecs[noisy_lab].permute(0, 2, 1)[:, :,
-                                                                         :k]).squeeze()
-    proj_z_ori = (ori_z.reshape(ori_z.shape[0], -1).unsqueeze(1) @ eigvecs[ori_lab].permute(0, 2, 1)[:, :,
-                                                                   :k]).squeeze()
-
-    # proj = (proj_z_noisy[:, :k].unsqueeze(1) @ eigvecs[noisy_lab][:, :k]).squeeze()
-    # loss = torch.mean(torch.pow(proj - ori_z_norm, 2))
-    loss = torch.mean(torch.pow(proj_z_noisy - proj_z_ori, 2), dim=1)
-    b_loss = torch.cat((loss, loss), dim=0)
-    return b_loss

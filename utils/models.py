@@ -25,6 +25,8 @@ from graphnvp_lib.nvp_model import GraphNvpModel
 
 from utils.dataset import ClassificationGraphDataset, RegressionGraphDataset
 
+from torchvision import utils as th_utils
+
 GRAPH_MODELS = ['moflow', 'graphnvp']
 IMAGE_MODELS = ['cglow']
 SIMPLE_MODELS = ['seqflow', 'ffjord']
@@ -480,6 +482,122 @@ class FFJORD(NF):
         plt.title(means_title + ', d=' + means_dist)
         plt.savefig(fig_filename)
         plt.close()
+
+
+def load_cglow_model(args_cglow, n_channel, gaussian_params, learn_mean=True, device='cuda:0', reg_use_var=False,
+                     dataset=None):
+    from utils.custom_glow import CGlow
+    model = CGlow(n_channel, args_cglow.n_flow, args_cglow.n_block, affine=args_cglow.affine,
+                  conv_lu=not args_cglow.no_lu)
+    model = GlowModel(model, gaussian_params=gaussian_params, device=device, learn_mean=learn_mean, dataset=dataset)
+    return model
+
+
+class GlowModel(NF):
+    def __init__(self, model, gaussian_params=None, device='cuda:0', learn_mean=True, dataset=None):
+        super().__init__(model, gaussian_params, device, learn_mean, dataset)
+
+    def downstream_process(self):
+        return -1
+
+    def upstream_process(self, loss):
+        return loss
+
+    def calc_last_z_shape(self, input_size):
+        n_channel = self.model.n_channel
+        for i in range(self.model.n_block - 1):
+            input_size //= 2
+            n_channel *= 4
+
+        input_size //= 2
+        z_shape = (n_channel * 4, input_size, input_size)
+
+        return z_shape
+
+    def denoise_loss(self, ori_z, noisy_z, ori_lab, noisy_lab, means, eigvals, eigvecs, k):
+        # ori_means = means[ori_lab]
+        # noisy_means = means[noisy_lab]
+        # ori_std = torch.sqrt(eigvals[ori_lab])
+        # noisy_std = torch.sqrt(eigvals[noisy_lab])
+        # ori_z_norm = (ori_z.reshape(ori_z.shape[0], -1) - ori_means) / ori_std
+        # noisy_z_norm = (noisy_z.reshape(noisy_z.shape[0], -1) - noisy_means) / noisy_std
+        #
+        # proj_z_noisy = (noisy_z_norm.unsqueeze(1) @ eigvecs[noisy_lab].permute(0, 2, 1)[:, :, :k]).squeeze()
+        # proj_z_ori = (ori_z_norm.unsqueeze(1) @ eigvecs[noisy_lab].permute(0, 2, 1)[:, :, :k]).squeeze()
+
+        proj_z_noisy = (noisy_z.reshape(noisy_z.shape[0], -1).unsqueeze(1) @ eigvecs[noisy_lab].permute(0, 2, 1)[:, :,
+                                                                             :k]).squeeze()
+        proj_z_ori = (ori_z.reshape(ori_z.shape[0], -1).unsqueeze(1) @ eigvecs[ori_lab].permute(0, 2, 1)[:, :,
+                                                                       :k]).squeeze()
+
+        # proj = (proj_z_noisy[:, :k].unsqueeze(1) @ eigvecs[noisy_lab][:, :k]).squeeze()
+        # loss = torch.mean(torch.pow(proj - ori_z_norm, 2))
+        loss = torch.mean(torch.pow(proj_z_noisy - proj_z_ori, 2), dim=1)
+        b_loss = torch.cat((loss, loss), dim=0)
+        return b_loss
+
+    def forward(self, input, label, pair_with_noise=False):
+        out, logdet = self.model(input)
+
+        log_p = calculate_log_p_with_gaussian_params(out, label, self.means, self.gaussian_params)
+        distloss = torch.log(1 + torch.cdist(self.means, self.means).mean())
+
+        if pair_with_noise:
+            # Div by 2 (z, noisy_z)
+            d = int(out.shape[0] / 2)
+            ori_z = out[:d]
+            noisy_z = out[d:]
+            ori_lab = label[:d]
+            noisy_lab = label[d:]
+            loss = self.denoise_loss(ori_z, noisy_z, ori_lab, noisy_lab, self.means, self.eigvals, self.eigvecs,
+                                     self.dim_per_lab)
+            return log_p, distloss, loss, logdet, out
+
+        return log_p, distloss, logdet, out
+
+    def reverse(self, z, reconstruct=False):
+        return self.model.reverse(z, reconstruct)
+
+    def sample_evaluation(self, itr, train_dataset, val_dataset, save_dir, writer=None, batch_size=200):
+        z_shape = self.calc_last_z_shape(val_dataset.in_size)
+        z_samples = []
+        for i, gaussian_param in enumerate(self.gp):
+            mean = self.means[i].detach().cpu().numpy().squeeze()
+            eigenvec = gaussian_param[1]
+            eigenval = gaussian_param[2]
+            cov = construct_covariance(eigenvec, eigenval)
+            z_sample = np.expand_dims(np.random.multivariate_normal(mean, cov).reshape(z_shape), axis=0)
+            z_samples.append(z_sample)
+        z_sample = torch.from_numpy(np.concatenate(z_samples, axis=0)).float().to(self.device)
+
+        images = self.reverse(z_sample).cpu().data
+        images = train_dataset.rescale(images)
+        th_utils.save_image(
+            images,
+            f"{save_dir}/sample/{str(itr + 1).zfill(6)}.png",
+            normalize=True,
+            nrow=10,
+            range=(0, 255),
+        )
+        if writer is not None:
+            img_grid = th_utils.make_grid(images, nrow=10, padding=2, pad_value=0, normalize=True,
+                                          range=(0, 255), scale_each=False)
+            writer.add_image('sample', img_grid)
+
+    def evaluate(self, itr, x, y, z, dataset, save_dir, writer=None):
+        images = self.reverse(z).cpu().data
+        images = dataset.rescale(images)
+        th_utils.save_image(
+            images,
+            f"{save_dir}/sample/val_{str(itr + 1).zfill(6)}.png",
+            normalize=True,
+            nrow=10,
+            range=(0, 255),
+        )
+        if writer is not None:
+            img_grid = th_utils.make_grid(images, nrow=10, padding=2, pad_value=0, normalize=True,
+                                          range=(0, 255), scale_each=False)
+            writer.add_image('val', img_grid)
 
 
 def load_moflow_model(args_moflow, gaussian_params, learn_mean=True, device='cuda:0', reg_use_var=False, dataset=None,

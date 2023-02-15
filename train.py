@@ -6,9 +6,8 @@ from torch import nn, optim
 from torch.utils.tensorboard import SummaryWriter
 from torchvision import transforms, utils
 
-from utils.custom_glow import CGlow
-from utils.models import load_seqflow_model, load_ffjord_model, load_moflow_model, load_graphnvp_model, GRAPH_MODELS, \
-    IMAGE_MODELS, SIMPLE_MODELS
+from utils.models import load_seqflow_model, load_ffjord_model, load_moflow_model, load_graphnvp_model, \
+    load_cglow_model, GRAPH_MODELS, IMAGE_MODELS, SIMPLE_MODELS
 from utils.training import training_arguments, ffjord_arguments, seqflow_arguments, cglow_arguments, moflow_arguments, \
     graphnvp_arguments, AddGaussianNoise, calc_loss
 from utils.dataset import ImDataset, SimpleDataset, GraphDataset, RegressionGraphDataset, ClassificationGraphDataset, \
@@ -320,9 +319,8 @@ if __name__ == "__main__":
     if args.model == 'cglow':
         args_cglow, _ = cglow_arguments().parse_known_args()
         n_channel = dataset.n_channel
-        model_single = CGlow(n_channel, args_cglow.n_flow, args_cglow.n_block, affine=args_cglow.affine,
-                             conv_lu=not args_cglow.no_lu,
-                             gaussian_params=gaussian_params, device=device, learn_mean=not args.fix_mean)
+        model_single = load_cglow_model(args_cglow, n_channel, gaussian_params=gaussian_params,
+                                        learn_mean=not args.fix_mean, device=device)
         folder_path += f'b{args_cglow.n_block}_f{args_cglow.n_flow}'
     elif args.model == 'seqflow':
         args_seqflow, _ = seqflow_arguments().parse_known_args()
@@ -353,7 +351,7 @@ if __name__ == "__main__":
     folder_path += f'_nfkernel{lmean_str}{isotrope_str}{eigval_str}{noise_str}' \
                    f'{redclass_str}{redlabel_str}_dimperlab{dim_per_label}{reg_use_var_str}'
 
-    # folder_path += '_testpy39'
+    folder_path += '_test'
 
     create_folder(f'./checkpoint/{folder_path}')
 
