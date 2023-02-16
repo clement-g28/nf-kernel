@@ -187,13 +187,13 @@ if __name__ == "__main__":
     if eval_type == 'classification':
         dataset_name_eval = ['mnist', 'double_moon', 'iris', 'bcancer'] + GRAPH_CLASSIFICATION_DATASETS
         assert dataset_name in dataset_name_eval, f'Classification can only be evaluated on {dataset_name_eval}'
-        evaluate_classification(model, train_dataset, val_dataset, save_dir, device)
+        predmodel = evaluate_classification(model, train_dataset, val_dataset, save_dir, device)
         _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
                                  only_Z=isinstance(dataset, GraphDataset))
         evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, print_as_graph=True,
-                          eval_type='classification')
+                          eval_type=eval_type)
         evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=10,
-                           print_as_mol=True, print_as_graph=True, eval_type='classification')
+                           print_as_mol=True, print_as_graph=True, eval_type=eval_type, predmodel=predmodel)
     elif eval_type == 'generation':
         dataset_name_eval = ['mnist']
         assert dataset_name in dataset_name_eval, f'Generation can only be evaluated on {dataset_name_eval}'
@@ -227,11 +227,11 @@ if __name__ == "__main__":
             assert dataset_name in dataset_name_eval, f'Projection can only be evaluated on {dataset_name_eval}'
     elif eval_type == 'regression':
         assert dataset.is_regression_dataset(), 'the dataset is not made for regression purposes'
-        evaluate_regression(model, train_dataset, val_dataset, save_dir, device)
+        predmodel = evaluate_regression(model, train_dataset, val_dataset, save_dir, device, save_res=False)
         _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
                                  only_Z=isinstance(dataset, GraphDataset))
         evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, print_as_graph=True)
         evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=10,
-                           print_as_mol=True, print_as_graph=True)
+                           print_as_mol=True, print_as_graph=True, predmodel=predmodel)
         evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z,
                                 print_as_mol=True, print_as_graph=True)

@@ -299,6 +299,8 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
         train_dataset.permute_graphs_in_dataset()
         val_dataset.permute_graphs_in_dataset()
 
+    zlinsvc = None
+
     # Compute results with our approach if not None
     if model is not None:
         batch_size = 200
@@ -672,6 +674,8 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
     with open(f"{save_dir}/eval_res.txt", 'w') as f:
         f.writelines(lines)
 
+    return zlinsvc
+
 
 def generate_meanclasses(model, dataset, device):
     model.eval()
@@ -864,11 +868,12 @@ def evaluate_distances(model, train_dataset, val_dataset, gaussian_params, z_sha
     return distances_results
 
 
-def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fithyperparam=True):
+def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fithyperparam=True, save_res=True):
     if isinstance(train_dataset, GraphDataset):
         train_dataset.permute_graphs_in_dataset()
         val_dataset.permute_graphs_in_dataset()
 
+    zlinridge = None
     batch_size = 200
     # Compute results with our approach if not None
     if model is not None:
@@ -938,9 +943,11 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
     print(f"time to fit linear ridge : {str(end - start)}")
 
     # krr_types = ['rbf', 'poly', 'sigmoid']
-    krr_types = ['rbf']
+    # krr_types = ['rbf']
+    krr_types = ['poly', 'sigmoid']
+    # krr_types = []
     krr_params = [
-        {'Ridge__kernel': ['rbf'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__alpha': np.logspace(-5, 2, 11)},
+        # {'Ridge__kernel': ['rbf'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__alpha': np.logspace(-5, 2, 11)},
         {'Ridge__kernel': ['poly'], 'Ridge__gamma': np.logspace(-5, 3, 5),
          'Ridge__degree': np.linspace(1, 4, 4).astype(np.int),
          'Ridge__alpha': np.logspace(-5, 2, 11)},
@@ -984,8 +991,9 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
         wl_height = 15
         edge_to_node = True
         normalize = False
-        graph_kernel_names = ['wl', 'sp', 'hadcode']
+        # graph_kernel_names = ['wl', 'sp', 'hadcode']
         # graph_kernel_names = ['wl', 'sp']
+        graph_kernel_names = []
         graph_kernels = []
         graph_krr_params = []
         for graph_kernel in graph_kernel_names:
@@ -1287,6 +1295,8 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
     with open(f"{save_dir}/eval_res.txt", 'w') as f:
         f.writelines(lines)
 
+    return zlinridge
+
 
 def create_figures_XZ(model, train_dataset, save_path, device, std_noise=0.1, only_Z=False):
     size_pt_fig = 5
@@ -1435,7 +1445,7 @@ def evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, p
 
 
 def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_by_y=20, print_as_mol=True,
-                       print_as_graph=True, eval_type='regression', batch_size=20):
+                       print_as_graph=True, eval_type='regression', batch_size=20, predmodel=None):
     assert eval_type in ['regression', 'classification'], 'unknown pre-image generation evaluation type'
 
     model_means = model.means.detach().cpu().numpy()
@@ -1458,6 +1468,7 @@ def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_b
                                                       np.expand_dims(val_dataset.true_labels, axis=1))
     close_samples_idx = np.argsort(close_samples_dist, axis=1)
 
+    pred_ys = []
     if eval_type == 'regression':
         for i, y in enumerate(ys):
             # mean, cov = model.get_regression_gaussian_sampling_parameters(y)
@@ -1468,6 +1479,9 @@ def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_b
             # samples.append(np.expand_dims(mean, axis=0))
             samples.append(z)
 
+            if predmodel is not None:
+                pred_ys.append(predmodel.predict(z))
+
             # Get close samples in dataset w.r.t the y property
             datasets_close_samples.append(np.array(val_dataset.X)[close_samples_idx[i, :n_closest]])
             datasets_close_y.append(val_dataset.true_labels[close_samples_idx[i, :n_closest]])
@@ -1477,9 +1491,14 @@ def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_b
             z = np.random.multivariate_normal(mean, covariance_matrices[y], n_samples_by_y)
             samples.append(z)
 
+            if predmodel is not None:
+                pred_ys.append(predmodel.predict(z))
+
             # Get close samples in dataset w.r.t the y property
             datasets_close_samples.append(np.array(val_dataset.X)[close_samples_idx[i, :n_closest]])
             datasets_close_y.append(val_dataset.true_labels[close_samples_idx[i, :n_closest]])
+    if predmodel is not None:
+        pred_ys = np.concatenate(pred_ys, axis=0)
     samples = np.concatenate(samples, axis=0)
     datasets_close_samples = np.concatenate([np.expand_dims(samples, 0) for samples in datasets_close_samples],
                                             axis=0).transpose(0, 2, 1)
@@ -1558,6 +1577,9 @@ def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_b
                 all_ys = [ys[y_idx]] + list(close_y)
                 legends_with_seed = [valid_smiles[ind]] + close_smiles
                 legends_with_seed[0] = legends_with_seed[0] + ', \^y:' + str(round(all_ys[0], 2))
+                if predmodel is not None:
+                    pred_y = pred_ys[mol_idx]
+                    legends_with_seed[0] = legends_with_seed[0] + ', pred_y:' + str(round(pred_y, 2))
                 legends_with_seed[1:] = [smile + ', y:' + str(round(y, 2)) for y, smile in
                                          zip(all_ys[1:], legends_with_seed[1:])]
                 img = Draw.MolsToGridImage(with_seeds, legends=legends_with_seed,
@@ -1599,6 +1621,9 @@ def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_b
                 path = f'{save_dir}/generated_samples_graphs/{str(i).zfill(4)}'
                 os.makedirs(path, exist_ok=True)
                 title = '\^y:' + str(round(all_ys[0], 2))
+                if predmodel is not None:
+                    pred_y = pred_ys[graph_idx]
+                    title = title + ', pred_y:' + str(round(pred_y, 2))
                 if val_dataset.is_attributed_node_dataset():
                     save_nx_graph_attr(graph, save_path=f'{path}/gen_{str(i).zfill(4)}', title=title)
                 else:
@@ -2029,13 +2054,13 @@ if __name__ == "__main__":
     if eval_type == 'classification':
         dataset_name_eval = ['mnist', 'double_moon', 'iris', 'bcancer'] + GRAPH_CLASSIFICATION_DATASETS
         assert dataset_name in dataset_name_eval, f'Classification can only be evaluated on {dataset_name_eval}'
-        evaluate_classification(model, train_dataset, val_dataset, save_dir, device)
+        predmodel = evaluate_classification(model, train_dataset, val_dataset, save_dir, device)
         _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
                                  only_Z=isinstance(dataset, GraphDataset))
         evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, print_as_graph=True,
                           eval_type=eval_type)
         evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=10,
-                           print_as_mol=True, print_as_graph=True, eval_type=eval_type)
+                           print_as_mol=True, print_as_graph=True, eval_type=eval_type, predmodel=predmodel)
     elif eval_type == 'generation':
         dataset_name_eval = ['mnist']
         assert dataset_name in dataset_name_eval, f'Generation can only be evaluated on {dataset_name_eval}'
@@ -2069,7 +2094,7 @@ if __name__ == "__main__":
             assert dataset_name in dataset_name_eval, f'Projection can only be evaluated on {dataset_name_eval}'
     elif eval_type == 'regression':
         assert dataset.is_regression_dataset(), 'the dataset is not made for regression purposes'
-        evaluate_regression(model, train_dataset, val_dataset, save_dir, device)
+        predmodel = evaluate_regression(model, train_dataset, val_dataset, save_dir, device)
         _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
                                  only_Z=isinstance(dataset, GraphDataset))
         evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, print_as_graph=True)

@@ -507,10 +507,10 @@ class SimpleDataset(BaseDataset):
 
 
 class ImDataset(BaseDataset):
-    def __init__(self, dataset_name, transform=None, test=False, noise_transform=None):
+    def __init__(self, dataset_name, transform=None, noise_transform=None):
         self.dataset_name = dataset_name
-        dset = ImDataset.load_image_dataset(dataset_name, transform, test)
-        self.transform = dset.transform
+        train_dataset, test_dataset = ImDataset.load_dataset(dataset_name, transform)
+        self.transform = train_dataset.transform
         if self.transform is not None:
             for tr in self.transform.transforms:
                 if isinstance(tr, transforms.Normalize):
@@ -520,15 +520,27 @@ class ImDataset(BaseDataset):
         if not hasattr(self, 'norm_mean'):
             self.rescale = self.rescale_val_to_im_without_norm
 
-        ori_X = dset.data if isinstance(dset.data, np.ndarray) else dset.data.numpy()
-        ori_true_labels = dset.targets if isinstance(dset.targets, np.ndarray) else np.array(dset.targets)
-        super().__init__(ori_X, ori_true_labels)
+        if isinstance(train_dataset.data, np.ndarray):
+            ori_X = train_dataset.data
+            test_ori_X = test_dataset.data
+        else:
+            ori_X = train_dataset.data.numpy()
+            test_ori_X = test_dataset.data.numpy()
+        if isinstance(train_dataset.targets, np.ndarray):
+            ori_true_labels = train_dataset.targets
+            test_true_labels = test_dataset.targets
+        else:
+            ori_true_labels = np.array(train_dataset.targets)
+            test_true_labels = np.array(test_dataset.targets)
+        test_dataset = (test_ori_X, test_true_labels)
+
+        super().__init__(ori_X, ori_true_labels, test_dataset)
         print('Z and K are not initialized in constructor')
 
         # test with denoise loss
         self.noise_transform = noise_transform
-        self.n_channel = dset.data.shape[1]
-        self.in_size = dset.data.shape[-1]
+        self.n_channel = train_dataset.data.shape[1]
+        self.in_size = train_dataset.data.shape[-1]
 
         self.current_mode = 'XY'
         self.get_func = self.get_XY_item
@@ -596,7 +608,8 @@ class ImDataset(BaseDataset):
         return x
 
     @staticmethod
-    def load_image_dataset(name, transform=None, test=False):
+    def load_dataset(name, transform=None):
+        test_dataset = None
         if name == 'mnist':
             if transform is None:
                 transform = transforms.Compose(
@@ -607,8 +620,10 @@ class ImDataset(BaseDataset):
                         transforms.Normalize((0.1307,), (0.3081,))
                     ]
                 )
-            dset = datasets.MNIST(root='./datasets', train=not test, download=True, transform=transform)
-            dset.data = dset.data.unsqueeze(1)
+            train_dataset = datasets.MNIST(root='./datasets', train=True, download=True, transform=transform)
+            test_dataset = datasets.MNIST(root='./datasets', train=False, download=True, transform=transform)
+            train_dataset.data = train_dataset.data.unsqueeze(1)
+            test_dataset.data = test_dataset.data.unsqueeze(1)
         elif name == 'cifar10':
             if transform is None:
                 transform = transforms.Compose([
@@ -636,12 +651,14 @@ class ImDataset(BaseDataset):
             #
             # dset = CIFAR10(not test, transform=transform)
 
-            dset = datasets.CIFAR10('./datasets', train=not test, download=True, transform=transform)
-            dset.data = dset.data.transpose(0, 3, 1, 2)
+            train_dataset = datasets.CIFAR10('./datasets', train=True, download=True, transform=transform)
+            test_dataset = datasets.CIFAR10(root='./datasets', train=False, download=True, transform=transform)
+            train_dataset.data = train_dataset.data.transpose(0, 3, 1, 2)
+            test_dataset.data = test_dataset.data.transpose(0, 3, 1, 2)
         else:
             assert False, 'unknown dataset'
 
-        return dset
+        return train_dataset, test_dataset
 
     def is_regression_dataset(self):
         return self.dataset_name in SIMPLE_REGRESSION_DATASETS
