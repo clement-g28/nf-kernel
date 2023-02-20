@@ -218,7 +218,7 @@ if __name__ == "__main__":
     validation = args.validation
     if validation > 0:
         # TEST with stratified sample
-        train_dataset, val_dataset = dataset.load_split_dataset(validation, stratified=True)
+        train_dataset, val_dataset = dataset.split_dataset(validation, stratified=True)
         train_dataset.ori_X = train_dataset.X
         train_dataset.ori_true_labels = train_dataset.true_labels
         val_dataset.ori_X = val_dataset.X

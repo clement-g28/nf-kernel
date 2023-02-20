@@ -336,5 +336,5 @@ def load_split_dataset(dataset, train_idx_path, val_idx_path, reselect_val_idx=N
         val_dataset.load_split(val_idx_path)
     else:
         print('No val idx found, searching for test dataset...')
-        train_dataset, val_dataset = dataset.load_split_dataset(0)
+        train_dataset, val_dataset = dataset.split_dataset(0)
     return train_dataset, val_dataset
