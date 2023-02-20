@@ -4,23 +4,21 @@ import math
 import torch
 from torch import nn, optim
 from torch.utils.tensorboard import SummaryWriter
-from torchvision import transforms, utils
+from torchvision import transforms
 
 from utils.models import load_seqflow_model, load_ffjord_model, load_moflow_model, load_graphnvp_model, \
-    load_cglow_model, GRAPH_MODELS, IMAGE_MODELS, SIMPLE_MODELS
+    load_cglow_model
 from utils.training import training_arguments, ffjord_arguments, seqflow_arguments, cglow_arguments, moflow_arguments, \
-    graphnvp_arguments, AddGaussianNoise, calc_loss
-from utils.dataset import ImDataset, SimpleDataset, GraphDataset, RegressionGraphDataset, ClassificationGraphDataset, \
-    SIMPLE_DATASETS, SIMPLE_REGRESSION_DATASETS, IMAGE_DATASETS, GRAPH_REGRESSION_DATASETS, \
-    GRAPH_CLASSIFICATION_DATASETS
-from utils.density import construct_covariance
-from utils.utils import write_dict_to_tensorboard, set_seed, create_folder, AverageMeter, initialize_gaussian_params, \
-    initialize_regression_gaussian_params, initialize_tmp_regression_gaussian_params
+    graphnvp_arguments, AddGaussianNoise
+from utils.utils import write_dict_to_tensorboard, set_seed, create_folder, AverageMeter, \
+    initialize_class_gaussian_params, initialize_regression_gaussian_params, initialize_tmp_regression_gaussian_params
+
+from utils.utils import load_dataset
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def train(args, model_single, add_path, gaussian_params, train_dataset, val_dataset=None):
+def train(args, model_single, add_path, train_dataset, val_dataset=None):
     model = nn.DataParallel(model_single)
     model = model.to(device)
 
@@ -33,8 +31,6 @@ def train(args, model_single, add_path, gaussian_params, train_dataset, val_data
 
     if args.use_tb:
         writer = SummaryWriter(save_dir)
-
-    n_bins = 2.0 ** args.n_bits
 
     beta = args.beta
     # z_shape = model_single.calc_last_z_shape(dataset.im_size)
@@ -53,7 +49,7 @@ def train(args, model_single, add_path, gaussian_params, train_dataset, val_data
                 itr = epoch * loader_size + i
                 input, label = data
 
-                input = dataset.format_data(input, args.n_bits, n_bins, device)
+                input = dataset.format_data(input, device)
                 label = label.to(device)
 
                 if itr == 0:
@@ -68,7 +64,7 @@ def train(args, model_single, add_path, gaussian_params, train_dataset, val_data
                 # logdet = logdet.mean()
 
                 # nll_loss, log_p, log_det = calc_loss(log_p, logdet, dataset.im_size, n_bins)
-                nll_loss, log_p, log_det = dataset.format_loss(log_p, logdet, n_bins)
+                nll_loss, log_p, log_det = dataset.format_loss(log_p, logdet)
                 loss = nll_loss - beta * distloss
 
                 loss = model_single.upstream_process(loss)
@@ -126,7 +122,7 @@ def train(args, model_single, add_path, gaussian_params, train_dataset, val_data
                     for data in val_loader:
                         input, label = data
 
-                        input = dataset.format_data(input, args.n_bits, n_bins, device)
+                        input = dataset.format_data(input, device)
                         label = label.to(device)
 
                         log_p, distloss, logdet, z = model(input, label)
@@ -134,7 +130,7 @@ def train(args, model_single, add_path, gaussian_params, train_dataset, val_data
                         logdet = logdet.mean()
 
                         # nll_loss, log_p, log_det = calc_loss(log_p, logdet, dataset.im_size, n_bins)
-                        nll_loss, log_p, log_det = dataset.format_loss(log_p, logdet, n_bins)
+                        nll_loss, log_p, log_det = dataset.format_loss(log_p, logdet)
                         loss = nll_loss - beta * distloss
 
                         valLossMeter.update(loss.item())
@@ -199,22 +195,8 @@ if __name__ == "__main__":
 
     transform = transforms.Compose(transform)
 
-    if args.dataset in IMAGE_DATASETS:
-        dataset = ImDataset(dataset_name=args.dataset, transform=transform)
-    elif args.dataset == 'fishtoxi':  # Special case where the data can be either graph or vectorial data
-        use_graph_type = args.model in GRAPH_MODELS
-        if use_graph_type:
-            dataset = RegressionGraphDataset(dataset_name=args.dataset, transform='permutation')
-        else:
-            dataset = SimpleDataset(dataset_name=args.dataset, transform=transform)
-    elif args.dataset in SIMPLE_DATASETS or args.dataset in SIMPLE_REGRESSION_DATASETS:
-        dataset = SimpleDataset(dataset_name=args.dataset, transform=transform)
-    elif args.dataset in GRAPH_REGRESSION_DATASETS:
-        dataset = RegressionGraphDataset(dataset_name=args.dataset, transform='permutation')
-    elif args.dataset in GRAPH_CLASSIFICATION_DATASETS:
-        dataset = ClassificationGraphDataset(dataset_name=args.dataset, transform='permutation')
-    else:
-        assert False, 'unknown dataset'
+    # DATASET #
+    dataset = load_dataset(args, args.dataset, args.model)
 
     redclass_str = ''
     if args.reduce_class_size:
@@ -236,7 +218,7 @@ if __name__ == "__main__":
     validation = args.validation
     if validation > 0:
         # TEST with stratified sample
-        train_dataset, val_dataset = dataset.split_dataset(validation, stratified=True)
+        train_dataset, val_dataset = dataset.load_split_dataset(validation, stratified=True)
         train_dataset.ori_X = train_dataset.X
         train_dataset.ori_true_labels = train_dataset.true_labels
         val_dataset.ori_X = val_dataset.X
@@ -296,8 +278,8 @@ if __name__ == "__main__":
         eigval_str = f'_manualeigval{eigval_str}'
 
     if not dataset.is_regression_dataset():
-        gaussian_params = initialize_gaussian_params(dataset, eigval_list, isotrope=args.isotrope_gaussian,
-                                                     dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
+        gaussian_params = initialize_class_gaussian_params(dataset, eigval_list, isotrope=args.isotrope_gaussian,
+                                                           dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
     else:
         if args.method == 0:
             gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list,
@@ -363,7 +345,7 @@ if __name__ == "__main__":
 
     restart = args.restart
     if restart:
-        from utils.custom_glow import CGlow, WrappedModel
+        from utils.custom_glow import WrappedModel
 
         flow_path = f'./checkpoint/{folder_path}/restart.pth'
         model_single = WrappedModel(model_single)
@@ -372,5 +354,4 @@ if __name__ == "__main__":
         folder_path += '/restart'
         create_folder(f'./checkpoint/{folder_path}')
 
-    train(args, model_single, folder_path, gaussian_params=gaussian_params, train_dataset=train_dataset,
-          val_dataset=val_dataset)
+    train(args, model_single, folder_path, train_dataset=train_dataset, val_dataset=val_dataset)

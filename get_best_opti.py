@@ -10,7 +10,7 @@ from utils.dataset import ImDataset, SimpleDataset, GraphDataset, RegressionGrap
     SIMPLE_DATASETS, SIMPLE_REGRESSION_DATASETS, IMAGE_DATASETS, GRAPH_REGRESSION_DATASETS, \
     GRAPH_CLASSIFICATION_DATASETS
 
-from utils.utils import set_seed, create_folder, initialize_gaussian_params, initialize_regression_gaussian_params, \
+from utils.utils import set_seed, create_folder, initialize_class_gaussian_params, initialize_regression_gaussian_params, \
     save_fig, initialize_tmp_regression_gaussian_params
 
 from sklearn.pipeline import make_pipeline
@@ -19,7 +19,6 @@ from sklearn.kernel_ridge import KernelRidge
 from sklearn.linear_model import Ridge
 
 from utils.testing import testing_arguments
-from utils.testing import learn_or_load_modelhyperparams
 from utils.training import ffjord_arguments, cglow_arguments, moflow_arguments, seqflow_arguments, graphnvp_arguments
 
 from utils.models import load_seqflow_model, load_ffjord_model, load_moflow_model
@@ -27,6 +26,10 @@ from utils.models import IMAGE_MODELS, SIMPLE_MODELS, GRAPH_MODELS
 
 from get_best_regression import evaluate_regression, visualize_dataset
 from get_best_classification import evaluate_classification
+
+from utils.testing import retrieve_params_from_name, learn_or_load_modelhyperparams, initialize_gaussian_params, \
+    prepare_model_loading_params, load_split_dataset, load_model_from_params
+from utils.utils import load_dataset
 
 if __name__ == '__main__':
     parser = testing_arguments()
@@ -38,24 +41,8 @@ if __name__ == '__main__':
     set_seed(0)
 
     dataset_name, model_type, folder_name = args.folder.split('/')[-3:]
-
     # DATASET #
-    if dataset_name in IMAGE_DATASETS:
-        dataset = ImDataset(dataset_name=dataset_name)
-    elif dataset_name == 'fishtoxi':  # Special case where the data can be either graph or vectorial data
-        use_graph_type = model_type in GRAPH_MODELS
-        if use_graph_type:
-            dataset = RegressionGraphDataset(dataset_name=dataset_name)
-        else:
-            dataset = SimpleDataset(dataset_name=dataset_name)
-    elif dataset_name in SIMPLE_DATASETS or dataset_name in SIMPLE_REGRESSION_DATASETS:
-        dataset = SimpleDataset(dataset_name=dataset_name)
-    elif dataset_name in GRAPH_REGRESSION_DATASETS:
-        dataset = RegressionGraphDataset(dataset_name=dataset_name)
-    elif dataset_name in GRAPH_CLASSIFICATION_DATASETS:
-        dataset = ClassificationGraphDataset(dataset_name=dataset_name)
-    else:
-        assert False, 'unknown dataset'
+    dataset = load_dataset(args, dataset_name, model_type)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -82,34 +69,8 @@ if __name__ == '__main__':
     # Load the splits of the dataset used in the training phase
     train_idx_path = f'./train_idx.npy'
     val_idx_path = f'./val_idx.npy'
-    if os.path.exists(train_idx_path):
-        print('Loading train idx...')
-        train_dataset = dataset.duplicate()
-        train_dataset.load_split(train_idx_path)
-    else:
-        print('No train idx found, using the full dataset as train dataset...')
-        train_dataset = dataset
-    if args.reselect_val_idx is not None:
-        train_labels = np.unique(train_dataset.true_labels)
-        train_idx = train_dataset.idx
-        val_dataset = dataset.duplicate()
-        val_dataset.idx = np.array(
-            [i for i in range(dataset.ori_X.shape[0]) if
-             i not in train_idx and dataset.ori_true_labels[i] in train_labels])
-        val_dataset.X = val_dataset.ori_X[val_dataset.idx]
-        val_dataset.true_labels = val_dataset.ori_true_labels[val_dataset.idx]
-        val_dataset.reduce_dataset('every_class', how_many=args.reselect_val_idx, reduce_from_ori=False)
-    elif os.path.exists(val_idx_path):
-        print('Loading val idx...')
-        val_dataset = dataset.duplicate()
-        val_dataset.load_split(val_idx_path)
-    else:
-        print('No val idx found, searching for test dataset...')
-        if dataset_name == 'mnist':
-            val_dataset = ImDataset(dataset_name=dataset_name, test=True)
-        else:
-            train_dataset, val_dataset = dataset.split_dataset(0)
-        # val_dataset = ImDataset(dataset_name=dataset_name, test=True)
+    train_dataset, val_dataset = load_split_dataset(dataset, train_idx_path, val_idx_path,
+                                                    reselect_val_idx=args.reselect_val_idx)
 
     # reduce train dataset size (fitting too long)
     # print('Train dataset reduced in order to accelerate. (stratified)')
@@ -130,8 +91,8 @@ if __name__ == '__main__':
         eigval_list = [mean_of_eigval for i in range(dim_per_label)]
 
         if not dataset.is_regression_dataset():
-            gaussian_params = initialize_gaussian_params(dataset, eigval_list, isotrope=True,
-                                                         dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
+            gaussian_params = initialize_class_gaussian_params(dataset, eigval_list, isotrope=True,
+                                                               dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
         else:
             gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list,
                                                                     isotrope=True,
@@ -142,20 +103,7 @@ if __name__ == '__main__':
         model_loading_params = {'model': model_type, 'n_dim': n_dim, 'n_flow': n_flow,
                                 'n_block': n_block, 'gaussian_params': gaussian_params, 'device': device,
                                 'loading_path': save_path, 'learn_mean': learn_mean}
-        if model_type == 'cglow':
-            args_cglow, _ = cglow_arguments().parse_known_args()
-            model_loading_params['n_channel'] = dataset.n_channel
-            model_loading_params['affine'] = args_cglow.affine
-            model_loading_params['conv_lu'] = not args_cglow.no_lu
-        if model_type == 'ffjord':
-            args_ffjord, _ = ffjord_arguments().parse_known_args()
-            # args_ffjord.n_block = n_block
-            model_loading_params['ffjord_args'] = args_ffjord
-        elif model_type == 'moflow':
-            args_moflow, _ = moflow_arguments().parse_known_args()
-            model_loading_params['moflow_args'] = args_moflow
-
-        t_model_params.append(model_loading_params)
+        t_model_params.append(prepare_model_loading_params(model_loading_params, dataset, model_type))
 
     save_dir = './save'
     create_folder(save_dir)

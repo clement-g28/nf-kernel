@@ -74,6 +74,59 @@ def save_fig(X, labels, save_path, limits=None, size=7, rangelabels=None, eps=Fa
     plt.close()
 
 
+def save_projection_fig(X, reconstructed_X, labels, label_max, save_path, limits=None, size=7, noisy_X=None):
+    # to_show = np.concatenate((X, reconstructed_X), axis=0)
+    # c_labels = np.zeros(to_show.shape[0])
+    # c_labels[:X.shape[0]] = labels
+    # c_labels[X.shape[0]:X.shape[0] + reconstructed_X.shape[0]] = label_max + 1
+    # # c_labels[-1 * interp_inX.shape[0]] = label_max + 2
+    #
+    # plt.scatter(to_show[:, 0], to_show[:, 1], s=7, c=c_labels, zorder=2)
+    # plt.xlabel("x")
+    # plt.ylabel("y")
+
+    plt.scatter(X[:, 0], X[:, 1], s=size, c=labels, zorder=3)
+    plt.xlabel("x")
+    plt.ylabel("y")
+
+    c_labels = np.zeros(reconstructed_X.shape[0])
+    c_labels[:reconstructed_X.shape[0]] = label_max + 1
+    plt.scatter(reconstructed_X[:, 0], reconstructed_X[:, 1], s=size, c='r', zorder=2)
+    plt.xlabel("x")
+    plt.ylabel("y")
+
+    if noisy_X is not None:
+        plt.scatter(noisy_X[:, 0], noisy_X[:, 1], s=size, c=labels, zorder=3)
+        plt.xlabel("x")
+        plt.ylabel("y")
+
+    # size = 25
+    # plt.scatter(noisy_data[:, 0], noisy_data[:, 1], s=size, c='darkorange', zorder=3)
+    # plt.scatter(interp_inX[1:, 0], interp_inX[1:, 1], s=size, c='red', zorder=3)
+    # plt.scatter(interp_inX[-1, 0], interp_inX[-1, 1], s=size, c='yellow', zorder=3)
+
+    # Links
+    to_show = np.zeros((2 * X.shape[0], X.shape[-1]))
+    print(to_show.shape)
+    for i in range(0, X.shape[0]):
+        to_show[2 * i, :] = X[i, :]
+        to_show[2 * i + 1, :] = reconstructed_X[i, :]
+
+    for i in range(0, X.shape[0]):
+        plt.plot(to_show[2 * i:2 * i + 2, 0], to_show[2 * i:2 * i + 2, 1], color='lime', zorder=1)
+
+    if limits:
+        x_xmin, x_xmax, x_ymin, x_ymax = limits
+        plt.xlim([x_xmin - 1, x_xmax + 1])
+        plt.ylim([x_ymin - 1, x_ymax + 1])
+
+    plt.savefig(fname=f'{save_path}.eps', format='eps')
+    plt.savefig(fname=f'{save_path}.png', format='png')
+    # Grid
+    # plt.scatter(z_grid_inX[:, 0], z_grid_inX[:, 1], c=color, s=5, alpha=0.3)
+    plt.close()
+
+
 class AverageMeter(object):
     """Computes and stores the average and current value"""
 
@@ -93,7 +146,7 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
 
-def initialize_gaussian_params(dataset, al_list, isotrope=False, dim_per_label=30, fixed_eigval=None):
+def initialize_class_gaussian_params(dataset, al_list, isotrope=False, dim_per_label=30, fixed_eigval=None):
     uni = np.unique(dataset.true_labels)
     n_dim = dataset.get_n_dim()
     gaussian_params = []
@@ -110,7 +163,7 @@ def initialize_gaussian_params(dataset, al_list, isotrope=False, dim_per_label=3
             eigenvecs = np.zeros((n_dim, n_dim))
             np.fill_diagonal(eigenvecs, 1)
             if fixed_eigval is None:
-                be = np.power(1/(math.pow(sum(al_list) / len(al_list), dim_per_label)), 1/(n_dim - dim_per_label))
+                be = np.power(1 / (math.pow(sum(al_list) / len(al_list), dim_per_label)), 1 / (n_dim - dim_per_label))
                 eigenvals = np.ones(n_dim) * be
                 eigenvals[dim_per_label * i:dim_per_label * (i + 1)] = al_list
             else:
@@ -206,3 +259,29 @@ def calculate_log_p_with_gaussian_params_regression(x, mean, inv_cov, det):
                                    inverse_covariance_matrix=inv_cov).unsqueeze(1)
 
     return log_ps
+
+
+def load_dataset(args, dataset_name, model_type):
+    from utils.models import GRAPH_MODELS
+    from utils.dataset import ImDataset, SimpleDataset, RegressionGraphDataset, ClassificationGraphDataset, \
+        SIMPLE_DATASETS, SIMPLE_REGRESSION_DATASETS, IMAGE_DATASETS, GRAPH_REGRESSION_DATASETS, \
+        GRAPH_CLASSIFICATION_DATASETS
+
+    # DATASET #
+    if dataset_name in IMAGE_DATASETS:
+        dataset = ImDataset(dataset_name=dataset_name, n_bits=args.n_bits)
+    elif dataset_name == 'fishtoxi':  # Special case where the data can be either graph or vectorial data
+        use_graph_type = model_type in GRAPH_MODELS
+        if use_graph_type:
+            dataset = RegressionGraphDataset(dataset_name=dataset_name)
+        else:
+            dataset = SimpleDataset(dataset_name=dataset_name)
+    elif dataset_name in SIMPLE_DATASETS or dataset_name in SIMPLE_REGRESSION_DATASETS:
+        dataset = SimpleDataset(dataset_name=dataset_name)
+    elif dataset_name in GRAPH_REGRESSION_DATASETS:
+        dataset = RegressionGraphDataset(dataset_name=dataset_name)
+    elif dataset_name in GRAPH_CLASSIFICATION_DATASETS:
+        dataset = ClassificationGraphDataset(dataset_name=dataset_name)
+    else:
+        assert False, 'unknown dataset'
+    return dataset

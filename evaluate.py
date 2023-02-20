@@ -1,42 +1,43 @@
-import numpy as np
-from PIL import Image, ImageDraw
 import math
 import os
-import re
 import time
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from PIL import Image, ImageDraw
+from sklearn.svm import SVC
 from sklearn.decomposition import PCA, KernelPCA
 from sklearn.kernel_ridge import KernelRidge
 from sklearn.linear_model import Ridge
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.svm import SVC
 from torchvision import utils
 
-from utils.custom_glow import CGlow, WrappedModel
-from utils.dataset import ImDataset, SimpleDataset, GraphDataset, RegressionGraphDataset, ClassificationGraphDataset, \
-    SIMPLE_DATASETS, SIMPLE_REGRESSION_DATASETS, IMAGE_DATASETS, GRAPH_REGRESSION_DATASETS, \
-    GRAPH_CLASSIFICATION_DATASETS
+from utils.custom_glow import WrappedModel
+from utils.dataset import GraphDataset, GRAPH_CLASSIFICATION_DATASETS
 from utils.density import construct_covariance
 from utils.graphs.graph_utils import format, organise_data
 from utils.graphs.graph_utils import save_nx_graph, save_nx_graph_attr
 from utils.graphs.kernels import compute_wl_kernel, compute_sp_kernel, compute_mslap_kernel, compute_hadcode_kernel, \
     compute_propagation_kernel
 from utils.graphs.mol_utils import valid_mol, construct_mol
-from utils.models import GRAPH_MODELS
-from utils.models import load_seqflow_model, load_ffjord_model, load_moflow_model
-from utils.testing import learn_or_load_modelhyperparams, generate_sample, project_inZ, testing_arguments, noise_data
-from utils.testing import project_between
+from utils.models import load_seqflow_model, load_ffjord_model, load_moflow_model, load_cglow_model
+from utils.testing import generate_sample, project_inZ, testing_arguments, noise_data, project_between, \
+    retrieve_params_from_name, learn_or_load_modelhyperparams, initialize_gaussian_params, \
+    load_split_dataset
 from utils.training import ffjord_arguments, cglow_arguments, moflow_arguments
-from utils.utils import set_seed, create_folder, save_every_pic, initialize_gaussian_params, \
-    initialize_regression_gaussian_params, save_fig, initialize_tmp_regression_gaussian_params
+from utils.utils import set_seed, create_folder, save_every_pic, save_fig, save_projection_fig, load_dataset
+
+from scipy.stats import kruskal
 
 
-def test_generation_on_eigvec(model_single, gaussian_params, z_shape, how_much_dim, device, sample_per_label=10,
+def classification_score(pred, true):
+    return np.count_nonzero((pred == true)) / true.shape[0]
+
+
+def test_generation_on_eigvec(model_single, val_dataset, gaussian_params, z_shape, how_much_dim, device,
+                              sample_per_label=10,
                               save_dir='./save'):
     create_folder(f'{save_dir}/test_generation')
 
@@ -71,7 +72,7 @@ def test_generation_on_eigvec(model_single, gaussian_params, z_shape, how_much_d
         )
         all_generation.append(images[:n_image_per_lab])
 
-    mean_images = generate_meanclasses(model_single, val_dataset, device)
+    mean_images = generate_meanclasses(model_single, val_dataset, device, save_dir)
     all_with_means = []
     for i, n_generation in enumerate(all_generation):
         all_with_means.append(n_generation)
@@ -294,6 +295,24 @@ def projection_evaluation(model, train_dataset, val_dataset, gaussian_params, z_
     return grid_im, distances_results
 
 
+def evaluate_p_value(predictions, by_pairs=False):
+    preds = [v for _, v in predictions.items()]
+    if len(preds) > 1:
+        if by_pairs:
+            i_method = len(preds) - 1
+            res = {}
+            for i, (k, v) in enumerate(predictions.items()):
+                if i != i_method:
+                    H, p = kruskal(preds[i_method], preds[i])
+                    res[k] = (H, p)
+            return res
+        else:
+            H, p = kruskal(*preds)
+            return H, p
+    else:
+        return None
+
+
 def evaluate_classification(model, train_dataset, val_dataset, save_dir, device, fithyperparam=True):
     if isinstance(train_dataset, GraphDataset):
         train_dataset.permute_graphs_in_dataset()
@@ -313,7 +332,7 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
         with torch.no_grad():
             for j, data in enumerate(loader):
                 inp, labels = data
-                inp = train_dataset.format_data(inp, None, None, device)
+                inp = train_dataset.format_data(inp, device)
                 labels = labels.to(device)
                 log_p, distloss, logdet, out = model(inp, labels)
                 Z.append(out.detach().cpu().numpy())
@@ -361,14 +380,14 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
     print(f"time to fit linear svc : {str(end - start)}")
 
     # krr_types = ['linear', 'poly', 'rbf', 'sigmoid', 'cosine']
-    # ksvc_types = ['rbf', 'poly', 'sigmoid']
-    ksvc_types = ['rbf', 'sigmoid']
+    ksvc_types = ['rbf', 'poly', 'sigmoid']
+    # ksvc_types = ['poly']
     ksvc_params = [
         {'SVC__kernel': ['rbf'], 'SVC__gamma': np.logspace(-5, 3, 10),
          'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))},
-        # {'SVC__kernel': ['poly'], 'SVC__gamma': np.logspace(-5, 3, 5),
-        #  'SVC__degree': np.linspace(1, 4, 4).astype(np.int),
-        #  'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))},
+        {'SVC__kernel': ['poly'], 'SVC__gamma': np.logspace(-5, 3, 5),
+         'SVC__degree': np.linspace(1, 4, 4).astype(np.int),
+         'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))},
         {'SVC__kernel': ['sigmoid'], 'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))}
     ]
 
@@ -443,15 +462,21 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
 
     if isinstance(train_dataset, GraphDataset):
         n_permutation = 10
+        our_preds = []
         our_scores = []
         our_scores_train = []
+        svc_preds = []
         svc_scores = []
+        ksvc_preds = []
         ksvc_scores = []
         for ksvc in ksvcs:
             ksvc_scores.append([])
+            ksvc_preds.append([])
+        ksvc_graph_preds = []
         ksvc_graph_scores = []
         for graph_ksvc in graph_ksvcs:
             ksvc_graph_scores.append([])
+            ksvc_graph_preds.append([])
 
         for n_perm in range(n_permutation):
             val_dataset.permute_graphs_in_dataset()
@@ -466,7 +491,7 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
                 with torch.no_grad():
                     for j, data in enumerate(val_loader):
                         inp, labels = data
-                        inp = val_dataset.format_data(inp, None, None, device)
+                        inp = val_dataset.format_data(inp, device)
                         labels = labels.to(device)
                         log_p, distloss, logdet, out = model(inp, labels)
                         val_inZ.append(out.detach().cpu().numpy())
@@ -477,7 +502,10 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
                 print(f"time to get Z_val from X_val : {str(end - start)}")
 
                 start = time.time()
-                zsvc_score = zlinsvc.score(val_inZ, elabels)
+                zsvc_pred = zlinsvc.predict(val_inZ)
+                zsvc_score = classification_score(zsvc_pred, elabels)
+                # zsvc_score = zlinsvc.score(val_inZ, elabels)
+                our_preds.append(zsvc_pred)
                 our_scores.append(zsvc_score)
                 end = time.time()
                 print(f"time to predict with zlinSVC : {str(end - start)}")
@@ -494,14 +522,19 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
             labels_val = val_dataset.true_labels
 
             start = time.time()
-            svc_score = linsvc.score(X_val, labels_val)
+            svc_pred = linsvc.predict(X_val)
+            svc_score = classification_score(svc_pred, labels_val)
+            svc_preds.append(svc_pred)
             svc_scores.append(svc_score)
             end = time.time()
             print(f"time to predict with xlinSVC : {str(end - start)}")
 
             start = time.time()
             for i, ksvc in enumerate(ksvcs):
-                ksvc_score = ksvc.score(X_val, labels_val)
+                ksvc_pred = ksvc.predict(X_val)
+                ksvc_score = classification_score(ksvc_pred, labels_val)
+                # ksvc_score = ksvc.score(X_val, labels_val)
+                ksvc_preds[i].append(ksvc_pred)
                 ksvc_scores[i].append(ksvc_score)
             end = time.time()
             print(f"time to predict with {len(ksvcs)} kernelSVC : {str(end - start)}")
@@ -511,7 +544,10 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
             for i, graph_ksvc in enumerate(graph_ksvcs):
                 K_val = compute_kernel(graph_kernels[i][2], (val_dataset, train_dataset), edge_to_node=edge_to_node,
                                        normalize=normalize, wl_height=wl_height, attributed_node=attributed_node)
-                graph_ksvc_score = graph_ksvc.score(K_val, labels_val)
+                graph_ksvc_pred = graph_ksvc.predict(K_val)
+                graph_ksvc_score = classification_score(graph_ksvc_pred, labels_val)
+                # graph_ksvc_score = graph_ksvc.score(K_val, labels_val)
+                ksvc_graph_preds[i].append(graph_ksvc_pred)
                 ksvc_graph_scores[i].append(graph_ksvc_score)
             end = time.time()
             print(f"time to predict with {len(graph_ksvcs)} graphkernelSVC : {str(end - start)}")
@@ -519,6 +555,28 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
         # PRINT RESULTS
         lines = []
         print('Predictions scores :')
+
+        # P-value calculation
+        predictions = {'linear': np.concatenate(svc_preds)}
+        for ktype, kpred in zip(ksvc_types, ksvc_preds):
+            predictions[ktype] = np.concatenate(kpred)
+        for ktype, kpred in zip(graph_kernels, ksvc_graph_preds):
+            predictions[ktype] = np.concatenate(kpred)
+        if model is not None:
+            predictions['zlinear'] = np.concatenate(our_preds)
+        res_pvalue = evaluate_p_value(predictions)
+        if res_pvalue is not None:
+            H, p = res_pvalue
+            score_str = 'Kruskal-Wallis H-test, H: ' + str(H) + ', p-value: ' + str(p)
+            print(score_str)
+            lines += [score_str, '\n']
+
+        # for i, pred1 in enumerate(preds):
+        #     for j, pred2 in enumerate(preds):
+        #         if i != j:
+        #             U, p2 = mannwhitneyu(pred1, pred2, alternative='two-sided')
+        #             print(f'({i},{j}):' + str(p2))
+
         svc_mean_score = np.mean(svc_scores)
         svc_std_score = np.std(svc_scores)
         score_str = f'SVC R2: {svc_scores} \n' \
@@ -577,7 +635,7 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
             with torch.no_grad():
                 for j, data in enumerate(val_loader):
                     inp, labels = data
-                    inp = val_dataset.format_data(inp, None, None, device)
+                    inp = val_dataset.format_data(inp, device)
                     labels = labels.to(device)
                     log_p, distloss, logdet, out = model(inp, labels)
                     val_inZ.append(out.detach().cpu().numpy())
@@ -587,16 +645,22 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
             end = time.time()
             print(f"time to get Z_val from X_val : {str(end - start)}")
 
-            zsvc_score = zlinsvc.score(val_inZ, elabels)
+            zsvc_pred = zlinsvc.predict(val_inZ)
+            zsvc_score = classification_score(zsvc_pred, elabels)
+            # zsvc_score = zlinsvc.score(val_inZ, elabels)
+
             print(f'Our approach : {zsvc_score}')
 
-            t_zsvc_score = zlinsvc.score(Z, tlabels)
+            t_zsvc_pred = zlinsvc.predict(Z)
+            t_zsvc_score = classification_score(t_zsvc_pred, tlabels)
+            # t_zsvc_score = zlinsvc.score(Z, tlabels)
             print(f'(On Train) Our approach : {t_zsvc_score}')
 
             # Misclassified data
             predictions = zlinsvc.predict(val_inZ)
             misclassif_i = np.where((predictions == elabels) == False)
             if misclassif_i[0].shape[0] > 0:
+                z_shape = model.calc_last_z_shape(val_dataset.in_size)
                 z_sample = torch.from_numpy(
                     val_inZ[misclassif_i].reshape(misclassif_i[0].shape[0], *z_shape)).float().to(
                     device)
@@ -643,21 +707,40 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
         X_val = val_dataset.get_flattened_X()
         labels_val = val_dataset.true_labels
 
+        ksvc_preds = []
         ksvc_scores = []
         for ksvc in ksvcs:
             ksvc_scores.append([])
 
-        svc_score = linsvc.score(X_val, labels_val)
+        svc_pred = linsvc.predict(X_val)
+        svc_score = classification_score(svc_pred, labels_val)
 
         for i, ksvc in enumerate(ksvcs):
-            ksvc_score = ksvc.score(X_val, labels_val)
+            ksvc_pred = ksvc.predict(X_val)
+            ksvc_score = classification_score(ksvc_pred, labels_val)
+            # ksvc_score = ksvc.score(X_val, labels_val)
             ksvc_scores[i].append(ksvc_score)
+            ksvc_preds.append(ksvc_pred)
 
         lines = []
         print('Predictions scores :')
-        score_str = f'SVC Linear: {svc_score}'
-        print(score_str)
-        lines += [score_str, '\n']
+
+        # P-value calculation
+        predictions = {'linear': svc_pred}
+        for ktype, kpred in zip(ksvc_types, ksvc_preds):
+            predictions[ktype] = kpred
+        if model is not None:
+            predictions['zlinear'] = zsvc_pred
+        res_pvalue = evaluate_p_value(predictions)
+        if res_pvalue is not None:
+            H, p = res_pvalue
+            score_str = 'Kruskal-Wallis H-test, H: ' + str(H) + ', p-value: ' + str(p)
+            print(score_str)
+            lines += [score_str, '\n']
+
+        # score_str = f'SVC Linear: {svc_score}'
+        # print(score_str)
+        # lines += [score_str, '\n']
         for j, krr_type in enumerate(ksvc_types):
             score_str = f'KernelRidge ({krr_type}):{np.mean(ksvc_scores[j])}'
             print(score_str)
@@ -674,15 +757,17 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
     with open(f"{save_dir}/eval_res.txt", 'w') as f:
         f.writelines(lines)
 
+    np.save(f"{save_dir}/predictions.npy", predictions)
+
     return zlinsvc
 
 
-def generate_meanclasses(model, dataset, device):
+def generate_meanclasses(model, val_dataset, device, save_dir):
     model.eval()
     create_folder(f'{save_dir}/test_generation')
 
     batch_size = 20
-    loader = dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+    loader = val_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
 
     Z = []
     tlabels = []
@@ -886,7 +971,7 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
         with torch.no_grad():
             for j, data in enumerate(loader):
                 inp, labels = data
-                inp = train_dataset.format_data(inp, None, None, device)
+                inp = train_dataset.format_data(inp, device)
                 labels = labels.to(device)
                 log_p, distloss, logdet, out = model(inp, labels)
                 Z.append(out.detach().cpu().numpy())
@@ -1046,7 +1131,7 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
                 with torch.no_grad():
                     for j, data in enumerate(val_loader):
                         inp, labels = data
-                        inp = val_dataset.format_data(inp, None, None, device)
+                        inp = val_dataset.format_data(inp, device)
                         labels = labels.to(device)
                         log_p, distloss, logdet, out = model(inp, labels)
                         val_inZ.append(out.detach().cpu().numpy())
@@ -1213,7 +1298,7 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
             with torch.no_grad():
                 for j, data in enumerate(val_loader):
                     inp, labels = data
-                    inp = val_dataset.format_data(inp, None, None, device)
+                    inp = val_dataset.format_data(inp, device)
                     labels = labels.to(device)
                     log_p, distloss, logdet, out = model(inp, labels)
                     val_inZ.append(out.detach().cpu().numpy())
@@ -1311,7 +1396,7 @@ def create_figures_XZ(model, train_dataset, save_path, device, std_noise=0.1, on
     with torch.no_grad():
         for j, data in enumerate(loader):
             inp, labels = data
-            inp = train_dataset.format_data(inp, None, None, device)
+            inp = train_dataset.format_data(inp, device)
             if isinstance(inp, list):
                 for i in range(len(inp)):
                     inp[i] = (inp[i] + torch.from_numpy(np.random.randn(*inp[i].shape)).float().to(device) * std_noise)
@@ -1636,7 +1721,8 @@ def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_b
                 for j, close_graph in enumerate(close_graphs_i):
                     title = 'y:' + str(round(all_ys[j], 2))
                     if val_dataset.is_attributed_node_dataset():
-                        save_nx_graph_attr(close_graph, save_path=f'{path}/{str(j).zfill(4)}_{str(i).zfill(4)}', title=title)
+                        save_nx_graph_attr(close_graph, save_path=f'{path}/{str(j).zfill(4)}_{str(i).zfill(4)}',
+                                           title=title)
                     else:
                         save_nx_graph(close_graph, inv_map, save_path=f'{path}/{str(j).zfill(4)}_{str(i).zfill(4)}',
                                       title=title,
@@ -1684,7 +1770,7 @@ def evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=20, n
             for i in range(len(pt0)):
                 inp.append(torch.from_numpy(
                     np.concatenate([np.expand_dims(pt0[i], axis=0), np.expand_dims(pt1[i], axis=0)], axis=0)))
-            inp = val_dataset.format_data(inp, None, None, device)
+            inp = val_dataset.format_data(inp, device)
             labels = torch.from_numpy(
                 np.concatenate([np.expand_dims(y0, axis=0), np.expand_dims(y1, axis=0)], axis=0)).to(
                 device)
@@ -1709,7 +1795,7 @@ def evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=20, n
     # with torch.no_grad():
     #     for j, data in enumerate(loader):
     #         inp, labels = data
-    #         inp = val_dataset.format_data(inp, None, None, device)
+    #         inp = val_dataset.format_data(inp, device)
     #         labels = labels.to(device)
     #         log_p, distloss, logdet, out = model(inp, labels)
     #
@@ -1837,6 +1923,157 @@ def evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=20, n
         #     save_mol_png(mol, os.path.join(mol_dir, '{}.png'.format(ind)))
 
 
+def create_figure_train_projections(model, train_dataset, std_noise, save_path, device):
+    size_pt_fig = 5
+
+    batch_size = 20
+    loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+
+    X_noise = []
+    Z_noise = []
+    Z = []
+    tlabels = []
+    model.eval()
+    with torch.no_grad():
+        for j, data in enumerate(loader):
+            inp, labels = data
+            inp = train_dataset.format_data(inp, device)
+            inp2 = inp.clone()
+            if isinstance(inp, list):
+                for i in range(len(inp)):
+                    inp[i] = (inp[i] + torch.from_numpy(np.random.randn(*inp[i].shape)).float().to(device) * std_noise)
+            else:
+                inp = inp + torch.from_numpy(np.random.randn(*inp.shape)).float().to(device) * std_noise
+            labels = labels.to(device)
+            # inp = (data[0] + np.random.randn(*data[0].shape) * std_noise).float().to(device)
+            # labels = data[1].to(device)
+            _, _, _, out = model(inp, labels)
+            X_noise.append(inp.detach().cpu().numpy())
+            Z_noise.append(out.detach().cpu().numpy())
+
+            _, _, _, out = model(inp2, labels)
+            Z.append(out.detach().cpu().numpy())
+
+            tlabels.append(labels.detach().cpu().numpy())
+    tlabels = np.concatenate(tlabels, axis=0)
+    X_noise = np.concatenate(X_noise, axis=0).reshape(len(train_dataset), -1)
+    save_fig(X_noise, tlabels, size=size_pt_fig, save_path=f'{save_path}/X_space')
+
+    Z_noise = np.concatenate(Z_noise, axis=0).reshape(len(train_dataset), -1)
+    save_fig(Z_noise, tlabels, size=size_pt_fig, save_path=f'{save_path}/Z_space')
+
+    Z = np.concatenate(Z, axis=0).reshape(len(train_dataset), -1)
+
+    if not train_dataset.is_regression_dataset():
+        label_zpcas = [None] * np.unique(tlabels).shape[0]
+        # for each class learn PCA
+        for j, label in enumerate(np.unique(tlabels)):
+            Z_lab = Z_noise[np.where(tlabels == label)]
+
+            # Learn the ZPCA projection
+            label_zpcas[j] = (PCA(n_components=1), label)
+            label_zpcas[j][0].fit(Z_lab)
+        zpcas = label_zpcas
+    else:
+        # Learn the ZPCA projection
+        zpca = PCA(n_components=1)
+        zpca.fit(Z_noise)
+        zpcas = [(zpca, 0)]
+
+    np_z_noisy_all = []
+    np_Z_all = []
+    zpca_reconstruct_all = []
+    X_lab_all = []
+    X_ori_lab_all = []
+    zpca_preimage_all = []
+    np_proj_all = []
+    gp_preimage_all = []
+    labels_lab_all = []
+    # By label
+    for j, (zpca, label) in enumerate(zpcas):
+        if not train_dataset.is_regression_dataset():
+            idx = np.where(tlabels == label)
+            X_lab = X_noise[idx]
+            Z_lab = Z_noise[idx]
+            X_ori_lab = train_dataset.X[idx]
+            Z_ori_lab = Z[idx]
+            labels_lab = tlabels[idx]
+        else:
+            X_lab = X_noise
+            Z_lab = Z_noise
+            X_ori_lab = train_dataset.X
+            Z_ori_lab = Z
+            labels_lab = tlabels
+
+        labels_lab_all.append(labels_lab)
+
+        np_z_noisy = Z_lab
+        np_Z = Z_ori_lab
+
+        # with ZPCA
+        zpca_projection = zpca.transform(np_z_noisy)
+        zpca_reconstruct = zpca.inverse_transform(zpca_projection)
+
+        np_z_noisy_all.append(np_z_noisy)
+        np_Z_all.append(np_Z)
+        zpca_reconstruct_all.append(zpca_reconstruct)
+
+        zpca_reconstruct = torch.from_numpy(zpca_reconstruct).type(torch.float).to(device)
+        with torch.no_grad():
+            zpca_preimage = model.reverse(zpca_reconstruct)
+
+        zpca_preimage = zpca_preimage.detach().cpu().numpy()
+
+        X_lab_all.append(X_lab)
+        X_ori_lab_all.append(X_ori_lab)
+        zpca_preimage_all.append(zpca_preimage)
+
+        gmean = model.means[label].detach().cpu().numpy()
+        gp = model.gp[label][1:-1]
+        np_proj = project_inZ(Z_lab, params=(gmean, gp), how_much=1)
+        proj = torch.from_numpy(np_proj).type(torch.float).to(device)
+
+        np_proj_all.append(np_proj)
+
+        with torch.no_grad():
+            gp_preimage = model.reverse(proj)
+
+        gp_preimage = gp_preimage.detach().cpu().numpy()
+
+        gp_preimage_all.append(gp_preimage)
+
+    label_max = np.max(train_dataset.true_labels)
+
+    np_z_noisy_all = np.concatenate(np_z_noisy_all, axis=0)
+    np_Z_all = np.concatenate(np_Z_all, axis=0)
+    zpca_reconstruct_all = np.concatenate(zpca_reconstruct_all, axis=0)
+    X_lab_all = np.concatenate(X_lab_all, axis=0)
+    X_ori_lab_all = np.concatenate(X_ori_lab_all, axis=0)
+    zpca_preimage_all = np.concatenate(zpca_preimage_all, axis=0)
+    np_proj_all = np.concatenate(np_proj_all, axis=0)
+    gp_preimage_all = np.concatenate(gp_preimage_all, axis=0)
+    labels_lab_all = np.concatenate(labels_lab_all, axis=0)
+    save_projection_fig(np_z_noisy_all, zpca_reconstruct_all, labels_lab_all, label_max=label_max, size=size_pt_fig,
+                        save_path=f'{save_path}/noisytrain_projection_zpca_inZ')
+    save_projection_fig(np_Z_all, zpca_reconstruct_all, labels_lab_all, label_max=label_max, size=size_pt_fig,
+                        save_path=f'{save_path}/noisytrain_distance_zpca_inZ')
+
+    save_projection_fig(X_lab_all, zpca_preimage_all, labels_lab_all, label_max=label_max, size=size_pt_fig,
+                        save_path=f'{save_path}/noisytrain_projection_zpca')
+    save_projection_fig(X_ori_lab_all, zpca_preimage_all, labels_lab_all, label_max=label_max, size=size_pt_fig,
+                        save_path=f'{save_path}/noisytrain_distance_zpca')
+
+    save_projection_fig(np_z_noisy_all, np_proj_all, labels_lab_all, label_max=label_max, size=size_pt_fig,
+                        save_path=f'{save_path}/noisytrain_projection_gp_inZ')
+    save_projection_fig(np_Z_all, np_proj_all, labels_lab_all, label_max=label_max, size=size_pt_fig,
+                        save_path=f'{save_path}/noisytrain_distance_gp_inZ')
+
+    save_projection_fig(X_lab_all, gp_preimage_all, labels_lab_all, label_max=label_max, size=size_pt_fig,
+                        save_path=f'{save_path}/noisytrain_projection_gp')
+    save_projection_fig(X_ori_lab_all, gp_preimage_all, labels_lab_all, label_max=label_max, size=size_pt_fig,
+                        save_path=f'{save_path}/noisytrain_distance_gp')
+
+
 if __name__ == "__main__":
     choices = ['classification', 'projection', 'generation', 'regression']
     best_model_choices = ['classification', 'projection', 'regression']
@@ -1852,23 +2089,9 @@ if __name__ == "__main__":
     set_seed(0)
 
     dataset_name, model_type, folder_name = args.folder.split('/')[-3:]
+
     # DATASET #
-    if dataset_name in IMAGE_DATASETS:
-        dataset = ImDataset(dataset_name=dataset_name)
-    elif dataset_name == 'fishtoxi':  # Special case where the data can be either graph or vectorial data
-        use_graph_type = model_type in GRAPH_MODELS
-        if use_graph_type:
-            dataset = RegressionGraphDataset(dataset_name=dataset_name)
-        else:
-            dataset = SimpleDataset(dataset_name=dataset_name)
-    elif dataset_name in SIMPLE_DATASETS or dataset_name in SIMPLE_REGRESSION_DATASETS:
-        dataset = SimpleDataset(dataset_name=dataset_name)
-    elif dataset_name in GRAPH_REGRESSION_DATASETS:
-        dataset = RegressionGraphDataset(dataset_name=dataset_name)
-    elif dataset_name in GRAPH_CLASSIFICATION_DATASETS:
-        dataset = ClassificationGraphDataset(dataset_name=dataset_name)
-    else:
-        assert False, 'unknown dataset'
+    dataset = load_dataset(args, dataset_name, model_type)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -1877,94 +2100,21 @@ if __name__ == "__main__":
     folder_name = args.folder.split('/')[-1]
 
     # Retrieve parameters from name
-    splits = folder_name.split('_')
-    label = None
-    uniform_eigval = False
-    mean_of_eigval = None
-    gaussian_eigval = None
-    dim_per_label = None
-    fixed_eigval = None
-    n_block = 2  # base value
-    n_flow = 32  # base value
-    reg_use_var = False
+    n_block, n_flow, mean_of_eigval, dim_per_label, label, fixed_eigval, uniform_eigval, gaussian_eigval, reg_use_var \
+        = retrieve_params_from_name(folder_name)
 
-    for split in splits:
-        b = re.search("^b\d{1,2}$", split)
-        f = re.search("^f\d{1,3}", split)
-        if b is not None:
-            n_block = int(b.string.replace('b', ''))
-        elif f is not None:
-            n_flow = int(f.string.replace('f', ''))
-        elif 'label' in split:
-            label_split = split
-            label = int(label_split.replace("label", ""))
-            print(f'Flow trained with reduces dataset to one label: {label}')
-            dataset.reduce_dataset('one_class', label=label)
-        elif 'manualeigval' in split:
-            manualeigval_split = split
-            fixed_eigval = list(map(float, manualeigval_split.replace("manualeigval", "").split('-')))
-            print(f'Flow trained with fixed eigenvalues: {fixed_eigval}')
-        elif 'eigvaluniform' in split:
-            uniform_eigval = True
-            uniform_split = split
-            mean_of_eigval = uniform_split.replace("eigvaluniform", "")
-            if 'e' not in mean_of_eigval:
-                mean_of_eigval = float(mean_of_eigval.replace("-", "."))
-            else:
-                mean_of_eigval = float(mean_of_eigval)
-        elif 'eigvalgaussian' in split:
-            gaussian_split = split
-            in_split = gaussian_split.split("std")
-            mean_of_eigval = in_split[0].replace("eigvalgaussian", "")
-            mean_of_eigval = float(mean_of_eigval.replace("-", "."))
-            std_value = float(str(in_split[-1]).replace('-', '.'))
-            gaussian_eigval = [0.0, std_value]
-            print(f'Flow trained with gaussian eigenvalues params: {mean_of_eigval},{gaussian_eigval}')
-        elif 'dimperlab' in split:
-            dpl_split = split
-            dim_per_label = int(dpl_split.replace("dimperlab", ""))
-            print(f'Flow trained with dimperlab: {dim_per_label}')
-        elif 'usevar' in split:
-            reg_use_var = True
-            print(f'Flow trained using variance.')
+    if label is not None:
+        dataset.reduce_dataset('one_class', label=label)
 
     # Load the splits of the dataset used in the training phase
     train_idx_path = f'{args.folder}/train_idx.npy'
     val_idx_path = f'{args.folder}/val_idx.npy'
-    if os.path.exists(train_idx_path):
-        print('Loading train idx...')
-        train_dataset = dataset.duplicate()
-        train_dataset.load_split(train_idx_path)
-    else:
-        print('No train idx found, using the full dataset as train dataset...')
-        train_dataset = dataset
-    if args.reselect_val_idx is not None:
-        train_labels = np.unique(train_dataset.true_labels)
-        train_idx = train_dataset.idx
-        val_dataset = dataset.duplicate()
-        val_dataset.idx = np.array(
-            [i for i in range(dataset.ori_X.shape[0]) if
-             i not in train_idx and dataset.ori_true_labels[i] in train_labels])
-        val_dataset.X = val_dataset.ori_X[val_dataset.idx]
-        val_dataset.true_labels = val_dataset.ori_true_labels[val_dataset.idx]
-        val_dataset.reduce_dataset('every_class', how_many=args.reselect_val_idx, reduce_from_ori=False)
-    elif os.path.exists(val_idx_path):
-        print('Loading val idx...')
-        val_dataset = dataset.duplicate()
-        val_dataset.load_split(val_idx_path)
-    else:
-        print('No val idx found, searching for test dataset...')
-        if dataset_name == 'mnist':
-            val_dataset = ImDataset(dataset_name=dataset_name, test=True)
-        else:
-            train_dataset, val_dataset = dataset.split_dataset(0)
-            # _, val_dataset = val_dataset.split_dataset(0.01, stratified=True)
-            # _, train_dataset = train_dataset.split_dataset(0.1, stratified=True)
-        # val_dataset = ImDataset(dataset_name=dataset_name, test=True)
+    train_dataset, val_dataset = load_split_dataset(dataset, train_idx_path, val_idx_path,
+                                                    reselect_val_idx=args.reselect_val_idx)
 
     # reduce train dataset size (fitting too long)
     # print('Train dataset reduced in order to accelerate. (stratified)')
-    # train_dataset.reduce_regression_dataset(0.1, stratified=True)
+    # train_dataset.reduce_dataset_ratio(0.1, stratified=True)
 
     n_dim = dataset.get_n_dim()
 
@@ -1976,59 +2126,22 @@ if __name__ == "__main__":
             dim_per_label = n_dim
 
     # initialize gaussian params
-    if fixed_eigval is None:
-        if uniform_eigval:
-            eigval_list = [mean_of_eigval for i in range(dim_per_label)]
-        elif gaussian_eigval is not None:
-            import scipy.stats as st
-
-            dist = st.norm(loc=gaussian_eigval[0], scale=gaussian_eigval[1])
-            border = 1.6
-            step = border * 2 / dim_per_label
-            x = np.linspace(-border, border, dim_per_label) if (dim_per_label % 2) != 0 else np.concatenate(
-                (np.linspace(-border, gaussian_eigval[0], int(dim_per_label / 2))[:-1], [gaussian_eigval[0]],
-                 np.linspace(step, border, int(dim_per_label / 2))))
-            eigval_list = dist.pdf(x)
-            mean_eigval = mean_of_eigval
-            a = mean_eigval * dim_per_label / eigval_list.sum()
-            eigval_list = a * eigval_list
-            eigval_list[np.where(eigval_list < 1)] = 1
-        else:
-            assert False, 'Unknown distribution !'
-    else:
-        eigval_list = None
-
-    if not dataset.is_regression_dataset():
-        gaussian_params = initialize_gaussian_params(dataset, eigval_list, isotrope='isotrope' in folder_name,
-                                                     dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
-    else:
-        if args.method == 0:
-            gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list,
-                                                                    isotrope='isotrope' in folder_name,
-                                                                    dim_per_label=dim_per_label,
-                                                                    fixed_eigval=fixed_eigval)
-        elif args.method == 1:
-            gaussian_params = initialize_tmp_regression_gaussian_params(dataset, eigval_list)
-        elif args.method == 2:
-            gaussian_params = initialize_tmp_regression_gaussian_params(dataset, eigval_list, ones=True)
-        else:
-            assert False, 'no method selected'
+    gaussian_params = initialize_gaussian_params(args, dataset, fixed_eigval, uniform_eigval, gaussian_eigval,
+                                                 mean_of_eigval, dim_per_label, 'isotrope' in folder_name)
 
     if model_type == 'cglow':
         args_cglow, _ = cglow_arguments().parse_known_args()
+        args_cglow.n_flow = n_flow
         n_channel = dataset.n_channel
-        affine = args_cglow.affine
-        no_lu = args_cglow.no_lu
-        # Load model
-        model_single = CGlow(n_channel, n_flow, n_block, affine=affine, conv_lu=not no_lu,
-                             gaussian_params=gaussian_params, device=device, learn_mean='lmean' in folder_name)
+        model_single = load_cglow_model(args_cglow, n_channel, gaussian_params=gaussian_params,
+                                        learn_mean='lmean' in folder_name, device=device)
     elif model_type == 'seqflow':
         model_single = load_seqflow_model(n_dim, n_flow, gaussian_params=gaussian_params,
                                           learn_mean='lmean' in folder_name, reg_use_var=reg_use_var, dataset=dataset)
 
     elif model_type == 'ffjord':
         args_ffjord, _ = ffjord_arguments().parse_known_args()
-        # args_ffjord.n_block = n_block
+        args_ffjord.n_block = n_block
         model_single = load_ffjord_model(args_ffjord, n_dim, gaussian_params=gaussian_params,
                                          learn_mean='lmean' in folder_name, reg_use_var=reg_use_var, dataset=dataset)
     elif model_type == 'moflow':
@@ -2041,6 +2154,29 @@ if __name__ == "__main__":
         assert False, 'unknown model type!'
     model_single = WrappedModel(model_single)
     model_single.load_state_dict(torch.load(flow_path, map_location=device))
+    # Convert old FFJORD model params
+    # params = torch.load(flow_path, map_location=device)
+    # model_parms = params['state_dict']
+    # n_params = {}
+    # for k,v in model_parms.items():
+    #     st = 'module.model.' + k
+    #     n_params[st] = v
+    # args_l = params['args']
+    # n_params['module.means'] = params['means'] # n_params['module.means'] = torch.zeros(1,2).to(device)
+    # model_single.load_state_dict(n_params)
+    # torch.save(model_single.state_dict(), flow_path)
+
+    # Convert old Glow model params
+    # params = torch.load(flow_path, map_location=device)
+    # model_params = ['module.blocks', 'module.n_channel', 'module.n_block']
+    # n_params = {}
+    # for k, v in params.items():
+    #     if '.'.join(k.split('.')[:2]) in model_params:
+    #         st = 'module.model.' + '.'.join(k.split('.')[1:])
+    #         n_params[st] = v
+    #     else:
+    #         n_params[k] = v
+    # model_single.load_state_dict(n_params)
     model = model_single.module
     model = model.to(device)
     model.eval()
@@ -2054,27 +2190,28 @@ if __name__ == "__main__":
     if eval_type == 'classification':
         dataset_name_eval = ['mnist', 'double_moon', 'iris', 'bcancer'] + GRAPH_CLASSIFICATION_DATASETS
         assert dataset_name in dataset_name_eval, f'Classification can only be evaluated on {dataset_name_eval}'
-        predmodel = evaluate_classification(model, train_dataset, val_dataset, save_dir, device)
-        _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
-                                 only_Z=isinstance(dataset, GraphDataset))
-        evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, print_as_graph=True,
-                          eval_type=eval_type)
-        evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=10,
-                           print_as_mol=True, print_as_graph=True, eval_type=eval_type, predmodel=predmodel)
+        predmodel = evaluate_classification(None, train_dataset, val_dataset, save_dir, device)
+        # _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
+        #                          only_Z=isinstance(dataset, GraphDataset))
+        # evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, print_as_graph=True,
+        #                   eval_type=eval_type)
+        # evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=10,
+        #                    print_as_mol=True, print_as_graph=True, eval_type=eval_type, predmodel=predmodel)
     elif eval_type == 'generation':
         dataset_name_eval = ['mnist']
         assert dataset_name in dataset_name_eval, f'Generation can only be evaluated on {dataset_name_eval}'
         # GENERATION
         how_much = [1, 10, 30, 50, 78]
         img_size = dataset.in_size
-        z_shape = model_single.calc_last_z_shape(img_size)
+        z_shape = model.calc_last_z_shape(img_size)
         for n in how_much:
-            test_generation_on_eigvec(model, gaussian_params=gaussian_params, z_shape=z_shape, how_much_dim=n,
+            test_generation_on_eigvec(model, val_dataset, gaussian_params=gaussian_params, z_shape=z_shape,
+                                      how_much_dim=n,
                                       device=device, sample_per_label=10, save_dir=save_dir)
-        generate_meanclasses(model, train_dataset, device)
+        generate_meanclasses(model, train_dataset, device, save_dir)
     elif eval_type == 'projection':
         img_size = dataset.in_size
-        z_shape = model_single.calc_last_z_shape(img_size)
+        z_shape = model.calc_last_z_shape(img_size)
         # PROJECTIONS
         if dataset_name == 'mnist':
             noise_types = ['gaussian', 'speckle', 'poisson', 's&p']
@@ -2084,11 +2221,39 @@ if __name__ == "__main__":
                                            proj_type='zpca_l', noise_type=noise_type, eval_gaussian_std=.2)
         elif dataset_name in ['single_moon', 'double_moon']:
             noise_type = 'gaussian'
+            std_noise = .1 / 5
+            create_figure_train_projections(model, train_dataset, std_noise=std_noise, save_path=save_dir,
+                                            device=device)
             n_principal_dim = np.count_nonzero(gaussian_params[0][-2] > 1)
-            evaluate_distances(model, train_dataset, val_dataset, gaussian_params=gaussian_params,
-                               z_shape=z_shape, how_much=n_principal_dim, kpca_types=['linear', 'rbf', 'poly'],
-                               device=device, save_dir=save_dir, proj_type='zpca_l', noise_type=noise_type,
-                               eval_gaussian_std=.1)
+            # evaluate distance n times to calculate the p-value
+            n_times = 5
+            kpca_types = ['linear', 'rbf', 'poly', 'sigmoid']
+            proj_type = 'gp'
+            distance_results = {ktype + '-PCA': [] for ktype in kpca_types}
+            distance_results['Our-' + proj_type] = []
+            for n in range(n_times):
+                res = evaluate_distances(model, train_dataset, val_dataset, gaussian_params=gaussian_params,
+                                         z_shape=z_shape, how_much=n_principal_dim,
+                                         kpca_types=kpca_types,
+                                         device=device, save_dir=save_dir, proj_type=proj_type, noise_type=noise_type,
+                                         eval_gaussian_std=std_noise)
+                for ktype in kpca_types:
+                    distance_results[ktype + '-PCA'].append(res[ktype + '-PCA'])
+                distance_results['Our-' + proj_type].append(res['Our-' + proj_type])
+            # p-value
+            print(distance_results)
+            res_pvalue = evaluate_p_value(distance_results)
+            if res_pvalue is not None:
+                H, p = res_pvalue
+                score_str = 'Kruskal-Wallis H-test, H: ' + str(H) + ', p-value: ' + str(p)
+                print(score_str)
+
+                # by pairs
+                res_pvalue = evaluate_p_value(distance_results, by_pairs=True)
+                for k, v in res_pvalue.items():
+                    H, p = v
+                    score_str = 'Kruskal-Wallis H-test with ' + str(k) + ', H: ' + str(H) + ', p-value: ' + str(p)
+                    print(score_str)
         else:
             dataset_name_eval = ['mnist', 'single_moon', 'double_moon']
             assert dataset_name in dataset_name_eval, f'Projection can only be evaluated on {dataset_name_eval}'

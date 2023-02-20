@@ -9,14 +9,9 @@ from torchvision import transforms, utils
 
 from utils.custom_glow import CGlow
 from utils.models import load_seqflow_model, load_ffjord_model, load_moflow_model
-from utils.models import IMAGE_MODELS, SIMPLE_MODELS, GRAPH_MODELS
 from utils.training import training_arguments, seqflow_arguments, ffjord_arguments, cglow_arguments, moflow_arguments, \
-    graphnvp_arguments, AddGaussianNoise, calc_loss
-from utils.dataset import ImDataset, SimpleDataset, GraphDataset, RegressionGraphDataset, ClassificationGraphDataset, \
-    SIMPLE_DATASETS, SIMPLE_REGRESSION_DATASETS, IMAGE_DATASETS, GRAPH_REGRESSION_DATASETS, \
-    GRAPH_CLASSIFICATION_DATASETS
-from utils.density import construct_covariance
-from utils.utils import write_dict_to_tensorboard, set_seed, create_folder, AverageMeter, initialize_gaussian_params, \
+    graphnvp_arguments, AddGaussianNoise
+from utils.utils import write_dict_to_tensorboard, set_seed, create_folder, AverageMeter, initialize_class_gaussian_params, \
     initialize_regression_gaussian_params, initialize_tmp_regression_gaussian_params
 
 from utils.testing import project_between
@@ -35,6 +30,7 @@ import numpy as np
 
 from ray.tune import Stopper
 
+from utils.utils import load_dataset
 
 def nan_stopper(trial_id: str, result: Dict):
     metric_result = result.get('accuracy')
@@ -82,8 +78,8 @@ def init_model(var, noise, dataset):
     eigval_list = [var for i in range(dim_per_label)]
 
     if not dataset.is_regression_dataset():
-        gaussian_params = initialize_gaussian_params(dataset, eigval_list, isotrope=args.isotrope_gaussian,
-                                                     dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
+        gaussian_params = initialize_class_gaussian_params(dataset, eigval_list, isotrope=args.isotrope_gaussian,
+                                                           dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
     else:
         gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list,
                                                                 isotrope=args.isotrope_gaussian,
@@ -137,8 +133,6 @@ def train_opti(config):
     learnable_params = list(model.parameters())
     optimizer = optim.Adam(learnable_params, lr=config["lr"])
 
-    n_bins = 2.0 ** args.n_bits
-
     beta = config["beta"]
 
     # TEST with weighted sampler
@@ -158,12 +152,12 @@ def train_opti(config):
             itr = epoch * loader_size + i
             input, label = data
 
-            input = train_dataset.format_data(input, args.n_bits, n_bins, device)
+            input = train_dataset.format_data(input, device)
             label = label.to(device)
 
             log_p, distloss, logdet, o = model(input, label)
 
-            nll_loss, log_p, log_det = train_dataset.format_loss(log_p, logdet, n_bins)
+            nll_loss, log_p, log_det = train_dataset.format_loss(log_p, logdet)
             loss = nll_loss - beta * distloss
 
             loss = model.upstream_process(loss)
@@ -200,14 +194,14 @@ def train_opti(config):
             for data in val_loader:
                 input, label = data
 
-                input = val_dataset.format_data(input, args.n_bits, n_bins, device)
+                input = val_dataset.format_data(input, device)
                 label = label.to(device)
 
                 log_p, distloss, logdet, z = model(input, label)
 
                 logdet = logdet.mean()
 
-                nll_loss, log_p, log_det = val_dataset.format_loss(log_p, logdet, n_bins)
+                nll_loss, log_p, log_det = val_dataset.format_loss(log_p, logdet)
                 loss = nll_loss - beta * distloss
                 val_loss += loss.cpu().numpy()
                 val_steps += 1
@@ -264,22 +258,8 @@ if __name__ == "__main__":
 
     transform = transforms.Compose(transform)
 
-    if args.dataset in IMAGE_DATASETS:
-        dataset = ImDataset(dataset_name=args.dataset, transform=transform)
-    elif args.dataset == 'fishtoxi':  # Special case where the data can be either graph or vectorial data
-        use_graph_type = args.model in GRAPH_MODELS
-        if use_graph_type:
-            dataset = RegressionGraphDataset(dataset_name=args.dataset, transform='permutation')
-        else:
-            dataset = SimpleDataset(dataset_name=args.dataset, transform=transform)
-    elif args.dataset in SIMPLE_DATASETS or args.dataset in SIMPLE_REGRESSION_DATASETS:
-        dataset = SimpleDataset(dataset_name=args.dataset, transform=transform)
-    elif args.dataset in GRAPH_REGRESSION_DATASETS:
-        dataset = RegressionGraphDataset(dataset_name=args.dataset, transform='permutation')
-    elif args.dataset in GRAPH_CLASSIFICATION_DATASETS:
-        dataset = ClassificationGraphDataset(dataset_name=args.dataset, transform='permutation')
-    else:
-        assert False, 'unknown dataset'
+    # DATASET #
+    dataset = load_dataset(args, args.dataset, args.model)
 
     if args.reduce_class_size:
         dataset.reduce_dataset('every_class', how_many=args.reduce_class_size)

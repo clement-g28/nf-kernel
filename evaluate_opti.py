@@ -1,35 +1,20 @@
 import numpy as np
-from PIL import Image, ImageDraw
-import time
 import math
 import os
-import re
 import torch
-from torchvision import utils
 
-from utils.utils import set_seed, create_folder, save_every_pic, initialize_gaussian_params, \
-    initialize_regression_gaussian_params, save_fig, initialize_tmp_regression_gaussian_params
+from utils.utils import set_seed, create_folder, initialize_class_gaussian_params, \
+    initialize_regression_gaussian_params, load_dataset
 
-from utils.custom_glow import CGlow, WrappedModel
-from utils.models import load_seqflow_model, load_ffjord_model, load_moflow_model
-from utils.models import IMAGE_MODELS, SIMPLE_MODELS, GRAPH_MODELS
-from utils.dataset import ImDataset, SimpleDataset, GraphDataset, RegressionGraphDataset, ClassificationGraphDataset, \
-    SIMPLE_DATASETS, SIMPLE_REGRESSION_DATASETS, IMAGE_DATASETS, GRAPH_REGRESSION_DATASETS, \
-    GRAPH_CLASSIFICATION_DATASETS
-from utils.density import construct_covariance
-from utils.testing import learn_or_load_modelhyperparams, generate_sample, project_inZ, testing_arguments, noise_data
-from utils.testing import project_between
+from utils.models import load_seqflow_model, load_ffjord_model, load_moflow_model, load_cglow_model
+from utils.dataset import GraphDataset, GRAPH_CLASSIFICATION_DATASETS
+from utils.testing import learn_or_load_modelhyperparams, load_split_dataset, testing_arguments
 from utils.training import ffjord_arguments, cglow_arguments, moflow_arguments
-from sklearn.metrics.pairwise import rbf_kernel
-from utils.graphs.kernels import compute_wl_kernel, compute_sp_kernel, compute_mslap_kernel, compute_hadcode_kernel
 
+from sklearn.svm import SVC
 from sklearn.decomposition import PCA, KernelPCA
 from sklearn.kernel_ridge import KernelRidge
 from sklearn.linear_model import Ridge
-
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler
-from sklearn.svm import SVC
 
 from evaluate import evaluate_regression, create_figures_XZ, evaluate_preimage, \
     evaluate_preimage2, evaluate_distances, evaluate_classification, generate_meanclasses, \
@@ -51,22 +36,7 @@ if __name__ == "__main__":
 
     dataset_name, model_type, folder_name = args.folder.split('/')[-3:]
     # DATASET #
-    if dataset_name in IMAGE_DATASETS:
-        dataset = ImDataset(dataset_name=dataset_name)
-    elif dataset_name == 'fishtoxi':  # Special case where the data can be either graph or vectorial data
-        use_graph_type = model_type in GRAPH_MODELS
-        if use_graph_type:
-            dataset = RegressionGraphDataset(dataset_name=dataset_name)
-        else:
-            dataset = SimpleDataset(dataset_name=dataset_name)
-    elif dataset_name in SIMPLE_DATASETS or dataset_name in SIMPLE_REGRESSION_DATASETS:
-        dataset = SimpleDataset(dataset_name=dataset_name)
-    elif dataset_name in GRAPH_REGRESSION_DATASETS:
-        dataset = RegressionGraphDataset(dataset_name=dataset_name)
-    elif dataset_name in GRAPH_CLASSIFICATION_DATASETS:
-        dataset = ClassificationGraphDataset(dataset_name=dataset_name)
-    else:
-        assert False, 'unknown dataset'
+    dataset = load_dataset(args, dataset_name, model_type)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -89,38 +59,12 @@ if __name__ == "__main__":
     # Load the splits of the dataset used in the training phase
     train_idx_path = f'{args.folder}/train_idx.npy'
     val_idx_path = f'{args.folder}/val_idx.npy'
-    if os.path.exists(train_idx_path):
-        print('Loading train idx...')
-        train_dataset = dataset.duplicate()
-        train_dataset.load_split(train_idx_path)
-    else:
-        print('No train idx found, using the full dataset as train dataset...')
-        train_dataset = dataset
-    if args.reselect_val_idx is not None:
-        train_labels = np.unique(train_dataset.true_labels)
-        train_idx = train_dataset.idx
-        val_dataset = dataset.duplicate()
-        val_dataset.idx = np.array(
-            [i for i in range(dataset.ori_X.shape[0]) if
-             i not in train_idx and dataset.ori_true_labels[i] in train_labels])
-        val_dataset.X = val_dataset.ori_X[val_dataset.idx]
-        val_dataset.true_labels = val_dataset.ori_true_labels[val_dataset.idx]
-        val_dataset.reduce_dataset('every_class', how_many=args.reselect_val_idx, reduce_from_ori=False)
-    elif os.path.exists(val_idx_path):
-        print('Loading val idx...')
-        val_dataset = dataset.duplicate()
-        val_dataset.load_split(val_idx_path)
-    else:
-        print('No val idx found, searching for test dataset...')
-        if dataset_name == 'mnist':
-            val_dataset = ImDataset(dataset_name=dataset_name, test=True)
-        else:
-            train_dataset, val_dataset = dataset.split_dataset(0)
-        # val_dataset = ImDataset(dataset_name=dataset_name, test=True)
+    train_dataset, val_dataset = load_split_dataset(dataset, train_idx_path, val_idx_path,
+                                                    reselect_val_idx=args.reselect_val_idx)
 
     # reduce train dataset size (fitting too long)
-    print('Train dataset reduced in order to accelerate. (stratified)')
-    train_dataset.reduce_regression_dataset(0.1, stratified=True)
+    # print('Train dataset reduced in order to accelerate. (stratified)')
+    # train_dataset.reduce_dataset_ratio(0.1, stratified=True)
     # val_dataset.reduce_regression_dataset(0.1, stratified=True)
 
     n_dim = dataset.get_n_dim()
@@ -135,8 +79,8 @@ if __name__ == "__main__":
     eigval_list = [mean_of_eigval for i in range(dim_per_label)]
 
     if not dataset.is_regression_dataset():
-        gaussian_params = initialize_gaussian_params(dataset, eigval_list, isotrope=False,
-                                                     dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
+        gaussian_params = initialize_class_gaussian_params(dataset, eigval_list, isotrope=False,
+                                                           dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
     else:
         gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list,
                                                                 isotrope=True,
@@ -146,12 +90,10 @@ if __name__ == "__main__":
     learn_mean = True
     if model_type == 'cglow':
         args_cglow, _ = cglow_arguments().parse_known_args()
+        args_cglow.n_flow = n_flow
         n_channel = dataset.n_channel
-        affine = args_cglow.affine
-        no_lu = args_cglow.no_lu
-        # Load model
-        model_single = CGlow(n_channel, n_flow, n_block, affine=affine, conv_lu=not no_lu,
-                             gaussian_params=gaussian_params, device=device, learn_mean='lmean' in folder_name)
+        model_single = load_cglow_model(args_cglow, n_channel, gaussian_params=gaussian_params,
+                                        learn_mean=learn_mean, device=device)
     elif model_type == 'seqflow':
         model_single = load_seqflow_model(n_dim, n_flow, gaussian_params=gaussian_params,
                                           learn_mean=learn_mean, reg_use_var=reg_use_var, dataset=dataset)
@@ -163,7 +105,6 @@ if __name__ == "__main__":
                                          learn_mean=learn_mean, reg_use_var=reg_use_var, dataset=dataset)
     elif model_type == 'moflow':
         args_moflow, _ = moflow_arguments().parse_known_args()
-        args_moflow.noise_scale = 0
         model_single = load_moflow_model(args_moflow,
                                          gaussian_params=gaussian_params,
                                          learn_mean=learn_mean, reg_use_var=reg_use_var,
@@ -204,7 +145,7 @@ if __name__ == "__main__":
         for n in how_much:
             test_generation_on_eigvec(model, gaussian_params=gaussian_params, z_shape=z_shape, how_much_dim=n,
                                       device=device, sample_per_label=10, save_dir=save_dir)
-        generate_meanclasses(model, train_dataset, device)
+        generate_meanclasses(model, train_dataset, device, save_dir)
     elif eval_type == 'projection':
         img_size = dataset.in_size
         z_shape = model_single.calc_last_z_shape(img_size)

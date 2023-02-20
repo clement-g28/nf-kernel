@@ -186,7 +186,7 @@ def training_arguments():
     parser.add_argument("--model", type=str, default='cglow', choices=SIMPLE_MODELS + IMAGE_MODELS + GRAPH_MODELS,
                         help="Model to use")
 
-    parser.add_argument("--n_bits", default=5, type=int, help="number of bits")
+    parser.add_argument("--n_bits", default=5, type=int, help="number of bits used only with image dataset")
     parser.add_argument("--lr", default=1e-4, type=float, help="learning rate")
 
     parser.add_argument("--use_tb", action="store_true", help="use tensorboard to save losses")

@@ -3,27 +3,19 @@ import math
 import torch
 import glob
 import os
-import re
 
-from utils.custom_glow import CGlow, WrappedModel
-from utils.models import IMAGE_MODELS, SIMPLE_MODELS, GRAPH_MODELS
-from utils.dataset import ImDataset, SimpleDataset, GraphDataset, RegressionGraphDataset, ClassificationGraphDataset, \
-    SIMPLE_DATASETS, SIMPLE_REGRESSION_DATASETS, IMAGE_DATASETS, GRAPH_REGRESSION_DATASETS, \
-    GRAPH_CLASSIFICATION_DATASETS
+from utils.custom_glow import WrappedModel
+from utils.dataset import GraphDataset
 
-from utils.utils import set_seed, create_folder, initialize_gaussian_params, initialize_regression_gaussian_params, \
-    save_fig, initialize_tmp_regression_gaussian_params
+from utils.utils import set_seed, create_folder, save_fig, load_dataset
 
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 
-from utils.testing import testing_arguments
-from utils.testing import save_modelhyperparams
-from utils.training import ffjord_arguments, cglow_arguments, moflow_arguments, seqflow_arguments, graphnvp_arguments
-
-from utils.models import load_seqflow_model, load_ffjord_model, load_moflow_model
-from utils.testing import learn_or_load_modelhyperparams
+from utils.testing import testing_arguments, save_modelhyperparams, retrieve_params_from_name, \
+    learn_or_load_modelhyperparams, initialize_gaussian_params, prepare_model_loading_params, load_split_dataset, \
+    load_model_from_params
 
 
 def evaluate_classification(t_model_params, train_dataset, eval_dataset, full_dataset, save_dir, device,
@@ -41,36 +33,12 @@ def evaluate_classification(t_model_params, train_dataset, eval_dataset, full_da
         train_dataset.permute_graphs_in_dataset()
         eval_dataset.permute_graphs_in_dataset()
 
-    # TEST
     start_from = None
     # start_from = 289
     for i, model_loading_params in enumerate(t_model_params):
         if start_from is not None and i < start_from:
             continue
-        if model_loading_params['model'] == 'cglow':
-            # Load model
-            model_single = CGlow(model_loading_params['n_channel'], model_loading_params['n_flow'],
-                                 model_loading_params['n_block'], affine=model_loading_params['affine'],
-                                 conv_lu=model_loading_params['conv_lu'],
-                                 gaussian_params=model_loading_params['gaussian_params'],
-                                 device=model_loading_params['device'], learn_mean=model_loading_params['learn_mean'])
-        elif model_loading_params['model'] == 'seqflow':
-            model_single = load_seqflow_model(model_loading_params['n_dim'], model_loading_params['n_flow'],
-                                              gaussian_params=model_loading_params['gaussian_params'],
-                                              learn_mean=model_loading_params['learn_mean'], dataset=full_dataset)
-
-        elif model_loading_params['model'] == 'ffjord':
-            model_single = load_ffjord_model(model_loading_params['ffjord_args'], model_loading_params['n_dim'],
-                                             gaussian_params=model_loading_params['gaussian_params'],
-                                             learn_mean=model_loading_params['learn_mean'], dataset=full_dataset)
-        elif model_loading_params['model'] == 'moflow':
-            args_moflow, _ = moflow_arguments().parse_known_args()
-            model_single = load_moflow_model(model_loading_params['moflow_args'],
-                                             gaussian_params=model_loading_params['gaussian_params'],
-                                             learn_mean=model_loading_params['learn_mean'],
-                                             dataset=full_dataset)
-        else:
-            assert False, 'unknown model type!'
+        model_single = load_model_from_params(model_loading_params, full_dataset)
         try:
             if not cus_load_func:
                 model_single = WrappedModel(model_single)
@@ -91,7 +59,7 @@ def evaluate_classification(t_model_params, train_dataset, eval_dataset, full_da
         with torch.no_grad():
             for j, data in enumerate(loader):
                 inp, labels = data
-                inp = train_dataset.format_data(inp, None, None, device)
+                inp = train_dataset.format_data(inp, device)
                 labels = labels.to(device)
                 log_p, distloss, logdet, out = model(inp, labels)
                 Z.append(out.detach().cpu().numpy())
@@ -125,7 +93,7 @@ def evaluate_classification(t_model_params, train_dataset, eval_dataset, full_da
                     for j, data in enumerate(val_loader):
                         inp, labels = data
 
-                        inp = eval_dataset.format_data(inp, None, None, device)
+                        inp = eval_dataset.format_data(inp, device)
                         labels = labels.to(device)
                         log_p, distloss, logdet, out = model(inp, labels)
                         val_inZ.append(out.detach().cpu().numpy())
@@ -168,7 +136,7 @@ def evaluate_classification(t_model_params, train_dataset, eval_dataset, full_da
                 for j, data in enumerate(val_loader):
                     inp, labels = data
 
-                    inp = eval_dataset.format_data(inp, None, None, device)
+                    inp = eval_dataset.format_data(inp, device)
                     labels = labels.to(device)
                     log_p, distloss, logdet, out = model(inp, labels)
                     val_inZ.append(out.detach().cpu().numpy())
@@ -205,30 +173,7 @@ def evaluate_classification(t_model_params, train_dataset, eval_dataset, full_da
         model.del_model_from_gpu()
 
     model_loading_params = t_model_params[best_i]
-    if model_loading_params['model'] == 'cglow':
-        # Load model
-        model_single = CGlow(model_loading_params['n_channel'], model_loading_params['n_flow'],
-                             model_loading_params['n_block'], affine=model_loading_params['affine'],
-                             conv_lu=model_loading_params['conv_lu'],
-                             gaussian_params=model_loading_params['gaussian_params'],
-                             device=model_loading_params['device'], learn_mean=model_loading_params['learn_mean'])
-    elif model_loading_params['model'] == 'seqflow':
-        model_single = load_seqflow_model(model_loading_params['n_dim'], model_loading_params['n_flow'],
-                                          gaussian_params=model_loading_params['gaussian_params'],
-                                          learn_mean=model_loading_params['learn_mean'], dataset=full_dataset)
-
-    elif model_loading_params['model'] == 'ffjord':
-        model_single = load_ffjord_model(model_loading_params['ffjord_args'], model_loading_params['n_dim'],
-                                         gaussian_params=model_loading_params['gaussian_params'],
-                                         learn_mean=model_loading_params['learn_mean'], dataset=full_dataset)
-    elif model_loading_params['model'] == 'moflow':
-        args_moflow, _ = moflow_arguments().parse_known_args()
-        model_single = load_moflow_model(model_loading_params['moflow_args'],
-                                         gaussian_params=model_loading_params['gaussian_params'],
-                                         learn_mean=model_loading_params['learn_mean'],
-                                         dataset=full_dataset)
-    else:
-        assert False, 'unknown model type!'
+    model_single = load_model_from_params(model_loading_params, full_dataset)
 
     if not cus_load_func:
         model = WrappedModel(model_single)
@@ -245,31 +190,7 @@ def evaluate_classification(t_model_params, train_dataset, eval_dataset, full_da
 
     if with_train:
         model_loading_params = t_model_params[best_i_train]
-        if model_loading_params['model'] == 'cglow':
-            # Load model
-            model_single = CGlow(model_loading_params['n_channel'], model_loading_params['n_flow'],
-                                 model_loading_params['n_block'], affine=model_loading_params['affine'],
-                                 conv_lu=model_loading_params['conv_lu'],
-                                 gaussian_params=model_loading_params['gaussian_params'],
-                                 device=model_loading_params['device'], learn_mean=model_loading_params['learn_mean'])
-        elif model_loading_params['model'] == 'seqflow':
-            model_single = load_seqflow_model(model_loading_params['n_dim'], model_loading_params['n_flow'],
-                                              gaussian_params=model_loading_params['gaussian_params'],
-                                              learn_mean=model_loading_params['learn_mean'], dataset=full_dataset)
-
-        elif model_loading_params['model'] == 'ffjord':
-            model_single = load_ffjord_model(model_loading_params['ffjord_args'], model_loading_params['n_dim'],
-                                             gaussian_params=model_loading_params['gaussian_params'],
-                                             learn_mean=model_loading_params['learn_mean'], dataset=full_dataset)
-        elif model_loading_params['model'] == 'moflow':
-            args_moflow, _ = moflow_arguments().parse_known_args()
-            model_single = load_moflow_model(model_loading_params['moflow_args'],
-                                             gaussian_params=model_loading_params['gaussian_params'],
-                                             learn_mean=model_loading_params['learn_mean'],
-                                             dataset=full_dataset)
-        else:
-            model_type = model_loading_params['model']
-            assert False, f'unknown model type! ({model_type})'
+        model_single = load_model_from_params(model_loading_params, full_dataset)
 
         if not cus_load_func:
             model = WrappedModel(model_single)
@@ -291,70 +212,16 @@ if __name__ == '__main__':
 
     dataset_name, model_type, folder_name = args.folder.split('/')[-3:]
     # DATASET #
-    if dataset_name in IMAGE_DATASETS:
-        dataset = ImDataset(dataset_name=dataset_name)
-    elif dataset_name == 'fishtoxi':  # Special case where the data can be either graph or vectorial data
-        use_graph_type = model_type in GRAPH_MODELS
-        if use_graph_type:
-            dataset = RegressionGraphDataset(dataset_name=dataset_name)
-        else:
-            dataset = SimpleDataset(dataset_name=dataset_name)
-    elif dataset_name in SIMPLE_DATASETS or dataset_name in SIMPLE_REGRESSION_DATASETS:
-        dataset = SimpleDataset(dataset_name=dataset_name)
-    elif dataset_name in GRAPH_REGRESSION_DATASETS:
-        dataset = RegressionGraphDataset(dataset_name=dataset_name)
-    elif dataset_name in GRAPH_CLASSIFICATION_DATASETS:
-        dataset = ClassificationGraphDataset(dataset_name=dataset_name)
-    else:
-        assert False, 'unknown dataset'
+    dataset = load_dataset(args, dataset_name, model_type)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Retrieve parameters from name
-    splits = folder_name.split('_')
-    label = None
-    uniform_eigval = False
-    mean_of_eigval = None
-    gaussian_eigval = None
-    dim_per_label = None
-    fixed_eigval = None
-    n_block = 2  # base value
-    n_flow = 32  # base value
+    n_block, n_flow, mean_of_eigval, dim_per_label, label, fixed_eigval, uniform_eigval, gaussian_eigval, _ = \
+        retrieve_params_from_name(folder_name)
 
-    for split in splits:
-        b = re.search("^b\d{1,2}$", split)
-        f = re.search("^f\d{1,3}", split)
-        if b is not None:
-            n_block = int(b.string.replace('b', ''))
-        elif f is not None:
-            n_flow = int(f.string.replace('f', ''))
-        elif 'label' in split:
-            label_split = split
-            label = int(label_split.replace("label", ""))
-            print(f'Flow trained with reduces dataset to one label: {label}')
-            dataset.reduce_dataset('one_class', label=label)
-        elif 'manualeigval' in split:
-            manualeigval_split = split
-            fixed_eigval = list(map(float, manualeigval_split.replace("manualeigval", "").split('-')))
-            print(f'Flow trained with fixed eigenvalues: {fixed_eigval}')
-        elif 'eigvaluniform' in split:
-            uniform_eigval = True
-            uniform_split = split
-            mean_of_eigval = uniform_split.replace("eigvaluniform", "")
-            mean_of_eigval = float(mean_of_eigval.replace("-", "."))
-            print(f'Flow trained with uniform eigenvalues: {mean_of_eigval}')
-        elif 'eigvalgaussian' in split:
-            gaussian_split = split
-            in_split = gaussian_split.split("std")
-            mean_of_eigval = in_split[0].replace("eigvalgaussian", "")
-            mean_of_eigval = float(mean_of_eigval.replace("-", "."))
-            std_value = float(str(in_split[-1]).replace('-', '.'))
-            gaussian_eigval = [0.0, std_value]
-            print(f'Flow trained with gaussian eigenvalues params: {mean_of_eigval},{gaussian_eigval}')
-        elif 'dimperlab' in split:
-            dpl_split = split
-            dim_per_label = int(dpl_split.replace("dimperlab", ""))
-            print(f'Flow trained with dimperlab: {dim_per_label}')
+    if label is not None:
+        dataset.reduce_dataset('one_class', label=label)
 
     os.chdir(args.folder)
     saves = []
@@ -367,33 +234,8 @@ if __name__ == '__main__':
     # Load the splits of the dataset used in the training phase
     train_idx_path = f'./train_idx.npy'
     val_idx_path = f'./val_idx.npy'
-    if os.path.exists(train_idx_path):
-        print('Loading train idx...')
-        train_dataset = dataset.duplicate()
-        train_dataset.load_split(train_idx_path)
-    else:
-        print('No train idx found, using the full dataset as train dataset...')
-        train_dataset = dataset
-    if args.reselect_val_idx is not None:
-        train_labels = np.unique(train_dataset.true_labels)
-        train_idx = train_dataset.idx
-        val_dataset = dataset.duplicate()
-        val_dataset.idx = np.array(
-            [i for i in range(dataset.ori_X.shape[0]) if
-             i not in train_idx and dataset.ori_true_labels[i] in train_labels])
-        val_dataset.X = val_dataset.ori_X[val_dataset.idx]
-        val_dataset.true_labels = val_dataset.ori_true_labels[val_dataset.idx]
-        val_dataset.reduce_dataset('every_class', how_many=args.reselect_val_idx, reduce_from_ori=False)
-    elif os.path.exists(val_idx_path):
-        print('Loading val idx...')
-        val_dataset = dataset.duplicate()
-        val_dataset.load_split(val_idx_path)
-    else:
-        print('No val idx found, searching for test dataset...')
-        if dataset_name == 'mnist':
-            val_dataset = ImDataset(dataset_name=dataset_name, test=True)
-        else:
-            train_dataset, val_dataset = dataset.split_dataset(0)
+    train_dataset, val_dataset = load_split_dataset(dataset, train_idx_path, val_idx_path,
+                                                    reselect_val_idx=args.reselect_val_idx)
 
     n_dim = dataset.get_n_dim()
 
@@ -406,63 +248,14 @@ if __name__ == '__main__':
 
     t_model_params = []
     for save_path in saves:
-        # initialize gaussian params
-        if fixed_eigval is None:
-            if uniform_eigval:
-                eigval_list = [mean_of_eigval for i in range(dim_per_label)]
-            elif gaussian_eigval is not None:
-                import scipy.stats as st
-
-                dist = st.norm(loc=gaussian_eigval[0], scale=gaussian_eigval[1])
-                border = 1.6
-                step = border * 2 / dim_per_label
-                x = np.linspace(-border, border, dim_per_label) if (dim_per_label % 2) != 0 else np.concatenate(
-                    (np.linspace(-border, gaussian_eigval[0], int(dim_per_label / 2))[:-1], [gaussian_eigval[0]],
-                     np.linspace(step, border, int(dim_per_label / 2))))
-                eigval_list = dist.pdf(x)
-                mean_eigval = mean_of_eigval
-                a = mean_eigval * dim_per_label / eigval_list.sum()
-                eigval_list = a * eigval_list
-                eigval_list[np.where(eigval_list < 1)] = 1
-            else:
-                assert False, 'Unknown distribution !'
-        else:
-            eigval_list = None
-
-        if not dataset.is_regression_dataset():
-            gaussian_params = initialize_gaussian_params(dataset, eigval_list, isotrope='isotrope' in folder_name,
-                                                         dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
-        else:
-            if args.method == 0:
-                gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list,
-                                                                        isotrope='isotrope' in folder_name,
-                                                                        dim_per_label=dim_per_label,
-                                                                        fixed_eigval=fixed_eigval)
-            elif args.method == 1:
-                gaussian_params = initialize_tmp_regression_gaussian_params(dataset, eigval_list)
-            elif args.method == 2:
-                gaussian_params = initialize_tmp_regression_gaussian_params(dataset, eigval_list, ones=True)
-            else:
-                assert False, 'no method selected'
+        gaussian_params = initialize_gaussian_params(args, dataset, fixed_eigval, uniform_eigval, gaussian_eigval,
+                                                     mean_of_eigval, dim_per_label, 'isotrope' in folder_name)
 
         learn_mean = 'lmean' in folder_name
         model_loading_params = {'model': model_type, 'n_dim': n_dim, 'n_flow': n_flow,
                                 'n_block': n_block, 'gaussian_params': gaussian_params, 'device': device,
                                 'loading_path': save_path, 'learn_mean': learn_mean}
-        if model_type == 'cglow':
-            args_cglow, _ = cglow_arguments().parse_known_args()
-            model_loading_params['n_channel'] = dataset.n_channel
-            model_loading_params['affine'] = args_cglow.affine
-            model_loading_params['conv_lu'] = not args_cglow.no_lu
-        if model_type == 'ffjord':
-            args_ffjord, _ = ffjord_arguments().parse_known_args()
-            # args_ffjord.n_block = n_block
-            model_loading_params['ffjord_args'] = args_ffjord
-        elif model_type == 'moflow':
-            args_moflow, _ = moflow_arguments().parse_known_args()
-            model_loading_params['moflow_args'] = args_moflow
-
-        t_model_params.append(model_loading_params)
+        t_model_params.append(prepare_model_loading_params(model_loading_params, dataset, model_type))
 
     save_dir = './save'
     create_folder(save_dir)

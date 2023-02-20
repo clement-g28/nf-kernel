@@ -180,7 +180,7 @@ class BaseDataset(Dataset):
 
         return train_dataset, val_dataset
 
-    def reduce_regression_dataset(self, ratio, stratified=True):
+    def reduce_dataset_ratio(self, ratio, stratified=True):
         if stratified:
             class_sample_count = np.histogram(self.true_labels)[0]
             idxs = np.argsort(self.true_labels)
@@ -285,6 +285,7 @@ class SimpleDataset(BaseDataset):
             name_c = f'{name}_fulldata'
             exist_dataset = os.path.exists(f'{path}/{name_c}_data.npy')
         if exist_dataset:
+            # X = np.load(f'{path}/{name_c}_data.npy') /5
             X = np.load(f'{path}/{name_c}_data.npy')
             labels = np.load(f'{path}/{name_c}_labels.npy')
             if name == 'single_moon':
@@ -490,11 +491,10 @@ class SimpleDataset(BaseDataset):
 
         return X, labels, test_dataset
 
-    @staticmethod
-    def format_data(input, n_bits, n_bins, device):
+    def format_data(self, input, device):
         return input.float().to(device)
 
-    def format_loss(self, log_p, logdet, n_bins):
+    def format_loss(self, log_p, logdet):
         loss = logdet + log_p
         return -loss.mean(), log_p.mean(), logdet.mean()
 
@@ -507,7 +507,7 @@ class SimpleDataset(BaseDataset):
 
 
 class ImDataset(BaseDataset):
-    def __init__(self, dataset_name, transform=None, noise_transform=None):
+    def __init__(self, dataset_name, transform=None, noise_transform=None, n_bits=5):
         self.dataset_name = dataset_name
         train_dataset, test_dataset = ImDataset.load_dataset(dataset_name, transform)
         self.transform = train_dataset.transform
@@ -547,6 +547,9 @@ class ImDataset(BaseDataset):
 
         self.get_PIL_image = self.get_PIL_image_L if self.n_channel == 1 else self.get_PIL_image_RGB
 
+        self.n_bits = n_bits
+        self.n_bins = 2.0 ** n_bits
+
     def __getitem__(self, idx):
         return self.get_func(idx)
 
@@ -575,22 +578,21 @@ class ImDataset(BaseDataset):
         else:
             return img, target
 
-    @staticmethod
-    def format_data(input, n_bits, n_bins, device):
+    def format_data(self, input, device):
         input = input * 255
 
-        if n_bits < 8:
-            input = torch.floor(input / 2 ** (8 - n_bits))
+        if self.n_bits < 8:
+            input = torch.floor(input / 2 ** (8 - self.n_bits))
 
-        input = input / n_bins - 0.5
-        input = input + torch.rand_like(input) / n_bins
+        input = input / self.n_bins - 0.5
+        input = input + torch.rand_like(input) / self.n_bins
         input = input.to(device)
         return input
 
-    def format_loss(self, log_p, logdet, n_bins):
+    def format_loss(self, log_p, logdet):
         n_pixel = self.in_size * self.in_size * 3
 
-        loss = -math.log(n_bins) * n_pixel
+        loss = -math.log(self.n_bins) * n_pixel
         loss = loss + logdet + log_p
 
         return (
@@ -799,7 +801,7 @@ class GraphDataset(BaseDataset):
         return train_dataset, val_dataset
 
     # overwrite
-    def reduce_regression_dataset(self, ratio, stratified=True):
+    def reduce_dataset_ratio(self, ratio, stratified=True):
         if stratified:
             class_sample_count = np.histogram(self.true_labels)[0]
             idxs = np.argsort(self.true_labels)
@@ -1111,13 +1113,12 @@ class GraphDataset(BaseDataset):
     #     return mean_dist_neig
     #     # return label_mindist
 
-    @staticmethod
-    def format_data(input, n_bits, n_bins, device):
+    def format_data(self, input, device):
         for i in range(len(input)):
             input[i] = input[i].float().to(device)
         return input
 
-    def format_loss(self, log_p, logdet, n_bins):
+    def format_loss(self, log_p, logdet):
         loss = logdet + log_p
         return -loss.mean(), log_p.mean(), logdet.mean()
 
