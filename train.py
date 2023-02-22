@@ -198,7 +198,7 @@ if __name__ == "__main__":
     transform = transforms.Compose(transform)
 
     # DATASET #
-    dataset = load_dataset(args, args.dataset, args.model)
+    dataset = load_dataset(args, args.dataset, args.model, transform=transform)
 
     redclass_str = ''
     if args.reduce_class_size:
