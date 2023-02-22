@@ -34,7 +34,7 @@ def evaluate_classification(t_model_params, train_dataset, eval_dataset, full_da
         eval_dataset.permute_graphs_in_dataset()
 
     start_from = None
-    # start_from = 289
+    # start_from = 114
     for i, model_loading_params in enumerate(t_model_params):
         if start_from is not None and i < start_from:
             continue
@@ -54,6 +54,7 @@ def evaluate_classification(t_model_params, train_dataset, eval_dataset, full_da
 
         loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
 
+        print('Computing Z...')
         Z = []
         tlabels = []
         with torch.no_grad():
@@ -67,6 +68,7 @@ def evaluate_classification(t_model_params, train_dataset, eval_dataset, full_da
         Z = np.concatenate(Z, axis=0).reshape(len(train_dataset), -1)
         tlabels = np.concatenate(tlabels, axis=0)
 
+        print('Fit SVC on Z...')
         # Learn SVC
         param_gridlin = [{'SVC__kernel': ['linear'], 'SVC__C': np.array([1])}]
         # param_gridlin = [{'SVC__kernel': ['linear'], 'SVC__C': np.concatenate((np.logspace(-5, 2, 11), np.array([1])))}]
@@ -78,6 +80,7 @@ def evaluate_classification(t_model_params, train_dataset, eval_dataset, full_da
         # svc = make_pipeline(StandardScaler(), SVC(kernel='linear'))
         # svc.fit(Z, tlabels)
 
+        print('Evaluate...')
         if isinstance(train_dataset, GraphDataset):  # Permutations for Graphs
             n_permutation = 10
             scores = []
@@ -217,8 +220,8 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Retrieve parameters from name
-    n_block, n_flow, mean_of_eigval, dim_per_label, label, fixed_eigval, uniform_eigval, gaussian_eigval, _ = \
-        retrieve_params_from_name(folder_name)
+    n_block, n_flow, mean_of_eigval, dim_per_label, label, fixed_eigval, uniform_eigval, gaussian_eigval, \
+    reg_use_var, split_graph_dim = retrieve_params_from_name(folder_name)
 
     if label is not None:
         dataset.reduce_dataset('one_class', label=label)
@@ -237,6 +240,10 @@ if __name__ == '__main__':
     train_dataset, val_dataset = load_split_dataset(dataset, train_idx_path, val_idx_path,
                                                     reselect_val_idx=args.reselect_val_idx)
 
+    # reduce train dataset size (fitting too long)
+    print('Train dataset reduced in order to accelerate. (stratified)')
+    train_dataset.reduce_dataset_ratio(0.1, stratified=True)
+
     n_dim = dataset.get_n_dim()
 
     if not dim_per_label:
@@ -249,7 +256,8 @@ if __name__ == '__main__':
     t_model_params = []
     for save_path in saves:
         gaussian_params = initialize_gaussian_params(args, dataset, fixed_eigval, uniform_eigval, gaussian_eigval,
-                                                     mean_of_eigval, dim_per_label, 'isotrope' in folder_name)
+                                                     mean_of_eigval, dim_per_label, 'isotrope' in folder_name,
+                                                     split_graph_dim=split_graph_dim)
 
         learn_mean = 'lmean' in folder_name
         model_loading_params = {'model': model_type, 'n_dim': n_dim, 'n_flow': n_flow,
@@ -261,4 +269,4 @@ if __name__ == '__main__':
     create_folder(save_dir)
 
     evaluate_classification(t_model_params, train_dataset, val_dataset, full_dataset=dataset, save_dir=save_dir,
-                            device=device, with_train=True, batch_size=10)
+                            device=device, with_train=True, batch_size=200)

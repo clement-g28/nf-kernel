@@ -326,8 +326,8 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Retrieve parameters from name
-    n_block, n_flow, mean_of_eigval, dim_per_label, label, fixed_eigval, uniform_eigval, gaussian_eigval, reg_use_var \
-        = retrieve_params_from_name(folder_name)
+    n_block, n_flow, mean_of_eigval, dim_per_label, label, fixed_eigval, uniform_eigval, gaussian_eigval, \
+    reg_use_var, split_graph_dim = retrieve_params_from_name(folder_name)
 
     if label is not None:
         dataset.reduce_dataset('one_class', label=label)
@@ -363,7 +363,8 @@ if __name__ == '__main__':
     t_model_params = []
     for save_path in saves:
         gaussian_params = initialize_gaussian_params(args, dataset, fixed_eigval, uniform_eigval, gaussian_eigval,
-                                                     mean_of_eigval, dim_per_label, 'isotrope' in folder_name)
+                                                     mean_of_eigval, dim_per_label, 'isotrope' in folder_name,
+                                                     split_graph_dim=split_graph_dim)
 
         learn_mean = 'lmean' in folder_name
         model_loading_params = {'model': model_type, 'n_dim': n_dim, 'n_flow': n_flow,

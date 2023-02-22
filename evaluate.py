@@ -92,11 +92,13 @@ def test_generation_on_eigvec(model_single, val_dataset, gaussian_params, z_shap
     methods = ([str(i) for i in range(0, n_image_per_lab)] + ['mean']) * len(gaussian_params)
     labels = [[g[-1]] * (n_image_per_lab + 1) for g in gaussian_params]
     labels = [item for sublist in labels for item in sublist]
-    save_every_pic(f'{save_dir}/test_generation/every_pics/{how_much_dim}', all_with_means, methods, labels)
+    save_every_pic(f'{save_dir}/test_generation/every_pics/{how_much_dim}', all_with_means, methods, labels,
+                   rgb=val_dataset.n_channel > 1)
 
 
 def evaluate_projection_1model(model, train_dataset, val_dataset, gaussian_params, z_shape, how_much, device,
-                               save_dir='./save', proj_type='gp', noise_type='gaussian', eval_gaussian_std=.2):
+                               save_dir='./save', proj_type='gp', noise_type='gaussian', eval_gaussian_std=.2,
+                               batch_size=20):
     train_dataset.ori_X = train_dataset.X
     val_dataset.ori_X = val_dataset.X
     train_dataset.ori_true_labels = train_dataset.true_labels
@@ -108,7 +110,7 @@ def evaluate_projection_1model(model, train_dataset, val_dataset, gaussian_param
     grid_im, distances_results = projection_evaluation(model, train_dataset, val_dataset, gaussian_params,
                                                        z_shape, how_much, kpca_types, device, save_dir=save_dir,
                                                        proj_type=proj_type, noise_type=noise_type,
-                                                       eval_gaussian_std=eval_gaussian_std)
+                                                       eval_gaussian_std=eval_gaussian_std, batch_size=batch_size)
 
     grid_im = np.concatenate(grid_im, axis=0)
     grid_im = val_dataset.rescale(grid_im)
@@ -118,7 +120,7 @@ def evaluate_projection_1model(model, train_dataset, val_dataset, gaussian_param
     labels = [[g[-1]] * len(used_method) for g in gaussian_params]
     labels = [item for sublist in labels for item in sublist]
     save_every_pic(f'{save_dir}/projections/{noise_type}/every_pics/{proj_type}', grid_im, methods, labels,
-                   add_str=proj_type)
+                   add_str=proj_type, rgb=val_dataset.n_channel > 1)
 
     nrow = math.floor(grid_im.shape[0] / np.unique(val_dataset.true_labels).shape[0])
     utils.save_image(
@@ -131,15 +133,9 @@ def evaluate_projection_1model(model, train_dataset, val_dataset, gaussian_param
 
 
 def projection_evaluation(model, train_dataset, val_dataset, gaussian_params, z_shape, how_much, kpca_types, device,
-                          save_dir='./save', proj_type='gp', noise_type='gaussian', eval_gaussian_std=.2):
+                          save_dir='./save', proj_type='gp', noise_type='gaussian', eval_gaussian_std=.2,
+                          batch_size=20):
     create_folder(f'{save_dir}/projections')
-
-    train_dataset.ori_X = train_dataset.X
-    val_dataset.ori_X = val_dataset.X
-    train_dataset.ori_true_labels = train_dataset.true_labels
-    val_dataset.ori_true_labels = val_dataset.true_labels
-    train_dataset.idx = np.array([i for i in range(train_dataset.X.shape[0])])
-    val_dataset.idx = np.array([i for i in range(val_dataset.X.shape[0])])
 
     train_noised = noise_data(train_dataset.X / 255, noise_type=noise_type, gaussian_mean=0,
                               gaussian_std=eval_gaussian_std)
@@ -147,7 +143,6 @@ def projection_evaluation(model, train_dataset, val_dataset, gaussian_params, z_
     train_dataset_noised.X = (train_noised * 255).astype(np.uint8)
     train_normalized_noised = (train_noised - train_dataset.norm_mean) / train_dataset.norm_std
 
-    batch_size = 20
     loader = train_dataset_noised.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
 
     if proj_type in ['zpca', 'zpca_l']:
@@ -155,8 +150,9 @@ def projection_evaluation(model, train_dataset, val_dataset, gaussian_params, z_
         tlabels = []
         with torch.no_grad():
             for j, data in enumerate(loader):
-                inp = data[0].float().to(device)
-                labels = data[1].to(torch.int64).to(device)
+                inp, labels = data
+                inp = train_dataset.format_data(inp, device)
+                labels = labels.to(device)
                 log_p, distloss, logdet, out = model(inp, labels)
                 Z.append(out.detach().cpu().numpy())
                 tlabels.append(labels.detach().cpu().numpy())
@@ -175,8 +171,9 @@ def projection_evaluation(model, train_dataset, val_dataset, gaussian_params, z_
     elabels = []
     with torch.no_grad():
         for j, data in enumerate(val_loader):
-            inp = data[0].float().to(device)
-            labels = data[1].to(torch.int64).to(device)
+            inp, labels = data
+            inp = train_dataset.format_data(inp, device)
+            labels = labels.to(device)
             log_p, distloss, logdet, out = model(inp, labels)
             val_inZ.append(out.detach().cpu().numpy())
             elabels.append(labels.detach().cpu().numpy())
@@ -293,6 +290,170 @@ def projection_evaluation(model, train_dataset, val_dataset, gaussian_params, z_
         grid_im.append(np.expand_dims(all_im[ind][vis_index], axis=0))
 
     return grid_im, distances_results
+
+
+def compression_evaluation(model, train_dataset, val_dataset, gaussian_params, z_shape, how_much, device,
+                           save_dir='./save', proj_type='gp', noise_type='gaussian', eval_gaussian_std=.2,
+                           batch_size=400):
+    assert isinstance(how_much, list), 'how-much should be a list of number of dimension to project on'
+    create_folder(f'{save_dir}/projections')
+
+    train_noised = noise_data(train_dataset.X / 255, noise_type=noise_type, gaussian_mean=0,
+                              gaussian_std=eval_gaussian_std)
+    train_dataset_noised = train_dataset.duplicate()
+    train_dataset_noised.X = (train_noised * 255).astype(np.uint8)
+    train_normalized_noised = (train_noised - train_dataset.norm_mean) / train_dataset.norm_std
+
+    loader = train_dataset_noised.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+
+    if proj_type in ['zpca', 'zpca_l']:
+        print(f'Z train generation...')
+        Z = []
+        tlabels = []
+        with torch.no_grad():
+            for j, data in enumerate(loader):
+                inp, labels = data
+                inp = train_dataset.format_data(inp, device)
+                labels = labels.to(device)
+                log_p, distloss, logdet, out = model(inp, labels)
+                Z.append(out.detach().cpu().numpy())
+                tlabels.append(labels.detach().cpu().numpy())
+        Z = np.concatenate(Z, axis=0).reshape(len(train_dataset), -1)
+        tlabels = np.concatenate(tlabels, axis=0)
+
+    val_data = []
+    elabels = []
+    for i, gaussian_param in enumerate(gaussian_params):
+        label = gaussian_param[-1]
+        idx = np.where(val_dataset.true_labels == label)[0]
+        rand_i = np.random.choice(idx)
+        val_data.append(np.expand_dims(val_dataset.X[rand_i], axis=0))
+        elabels.append(label)
+    val_data = np.concatenate(val_data, axis=0)
+    elabels = np.array(elabels)
+
+    val_noised = noise_data(val_data / 255, noise_type=noise_type, gaussian_mean=0, gaussian_std=eval_gaussian_std)
+    val_normalized_noised = ((val_noised - val_dataset.norm_mean) / val_dataset.norm_std).astype(np.float32)
+    val_normalized = ((val_data / 255 - val_dataset.norm_mean) / val_dataset.norm_std).astype(np.float32)
+    val_noised = (val_noised * 255).astype(np.uint8)
+    # val_noised = noise_data(val_dataset.X / 255, noise_type=noise_type, gaussian_mean=0,
+    #                         gaussian_std=eval_gaussian_std)
+    # val_dataset_noised = val_dataset.duplicate()
+    # val_dataset_noised.X = (val_noised * 255).astype(np.uint8)
+    # val_normalized_noised = (val_noised - val_dataset.norm_mean) / val_dataset.norm_std
+
+    # val_loader = val_dataset_noised.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+
+    print(f'Z val generation...')
+    # val_inZ = []
+    # elabels = []
+    with torch.no_grad():
+        inp = torch.from_numpy(val_normalized_noised)
+        inp = train_dataset.format_data(inp, device)
+        labels = torch.from_numpy(elabels).to(device)
+        log_p, distloss, logdet, out = model(inp, labels)
+        val_inZ = out.detach().cpu().numpy().reshape(val_normalized_noised.shape[0], -1)
+    #     for j, data in enumerate(val_loader):
+    #         inp, labels = data
+    #         inp = train_dataset.format_data(inp, device)
+    #         labels = labels.to(device)
+    #         log_p, distloss, logdet, out = model(inp, labels)
+    #         val_inZ.append(out.detach().cpu().numpy())
+    #         elabels.append(labels.detach().cpu().numpy())
+    # val_inZ = np.concatenate(val_inZ, axis=0).reshape(len(val_dataset), -1)
+    # elabels = np.concatenate(elabels, axis=0)
+
+    # val_normalized = (val_dataset.X / 255 - val_dataset.norm_mean) / val_dataset.norm_std
+
+    grid_im = [[] for _ in range(len(gaussian_params))]
+    vis_index = 0
+    # add in grid ori and noisy
+    for i, gaussian_param in enumerate(gaussian_params):
+        label = gaussian_param[-1]
+        # grid_im[i].append(np.expand_dims(val_normalized[np.where(elabels == label)][vis_index], axis=0))
+        grid_im[i].append(
+            np.expand_dims(val_normalized_noised[np.where(elabels == label)][vis_index], axis=0))
+
+    for n in range(len(how_much)):
+        n_dim_projection = how_much[n]
+        print(f'Projections on {n_dim_projection} processing...')
+        # ZPCA
+        if proj_type == 'zpca':
+            # ZPCA
+            zpca = PCA(n_components=n_dim_projection)
+            zpca.fit(Z)
+            pca_projection = zpca.transform(val_inZ)
+            proj = zpca.inverse_transform(pca_projection)
+            ordered_elabels = elabels
+        else:
+            projs = []
+            ordered_val = []
+            ordered_elabels = []
+            for i, gaussian_param in enumerate(gaussian_params):
+                gmean = model.means[i].detach().cpu().numpy()
+                gp = gaussian_param[1:-1]
+                label = gaussian_param[-1]
+
+                indexes = np.where(elabels == label)[0]
+                val_Z_lab = val_inZ[indexes]
+                val_normalized_lab = val_normalized[indexes]
+
+                ordered_elabels.append(np.array([label for _ in range(indexes.shape[0])]))
+
+                if proj_type == 'zpca_l':
+                    # Z-PCA
+                    Z_lab = Z[np.where(tlabels == label)]
+                    pca = PCA(n_components=n_dim_projection)
+                    pca.fit(Z_lab)
+                    pca_projection = pca.transform(val_Z_lab)
+                    proj = pca.inverse_transform(pca_projection)
+                else:
+                    proj = project_inZ(val_Z_lab, params=(gmean, gp), how_much=n_dim_projection)
+                projs.append(proj)
+                ordered_val.append(val_normalized_lab)
+            ordered_elabels = np.concatenate(ordered_elabels, axis=0)
+            proj = np.concatenate(projs, axis=0)
+
+        nb_batch = math.ceil(proj.shape[0] / batch_size)
+        all_im = []
+        proj = torch.from_numpy(proj)
+        for j in range(nb_batch):
+            size = proj[j * batch_size:(j + 1) * batch_size].shape[0]
+            z_b = proj[j * batch_size:(j + 1) * batch_size].reshape(size, *z_shape).float().to(device)
+
+            images = model.reverse(z_b)
+            all_im.append(images.detach().cpu().numpy())
+        all_im = np.concatenate(all_im, axis=0)
+
+        for i, gaussian_param in enumerate(gaussian_params):
+            label = gaussian_param[-1]
+            ind = np.where(ordered_elabels == label)[0]
+            grid_im[i].append(np.expand_dims(all_im[ind][vis_index], axis=0))
+
+    grid_im = [item for sublist in grid_im for item in sublist]
+    grid_im = np.concatenate(grid_im, axis=0)
+    grid_im = val_dataset.rescale(grid_im)
+
+    # used_method = ['ori', 'noisy']
+    used_method = ['noisy']
+    for n in range(len(how_much)):
+        used_method += [proj_type + str(how_much[n])]
+    methods = used_method * len(gaussian_params)
+    labels = [[g[-1]] * len(used_method) for g in gaussian_params]
+    labels = [item for sublist in labels for item in sublist]
+    save_every_pic(f'{save_dir}/compressions/{noise_type}/every_pics/{proj_type}', grid_im, methods, labels,
+                   add_str=proj_type, rgb=val_dataset.n_channel > 1)
+
+    nrow = math.floor(grid_im.shape[0] / np.unique(val_dataset.true_labels).shape[0])
+    utils.save_image(
+        torch.from_numpy(grid_im),
+        f"{save_dir}/compressions/{noise_type}/compression_eval_{proj_type}.png",
+        normalize=True,
+        nrow=nrow,
+        range=(0, 255),
+    )
+
+    return grid_im
 
 
 def evaluate_p_value(predictions, by_pairs=False):
@@ -2090,8 +2251,16 @@ if __name__ == "__main__":
 
     dataset_name, model_type, folder_name = args.folder.split('/')[-3:]
 
+    if dataset_name == 'cifar10':
+        from torchvision import transforms
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))])
+    else:
+        transform = None
+
     # DATASET #
-    dataset = load_dataset(args, dataset_name, model_type)
+    dataset = load_dataset(args, dataset_name, model_type, transform=transform)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -2100,8 +2269,8 @@ if __name__ == "__main__":
     folder_name = args.folder.split('/')[-1]
 
     # Retrieve parameters from name
-    n_block, n_flow, mean_of_eigval, dim_per_label, label, fixed_eigval, uniform_eigval, gaussian_eigval, reg_use_var \
-        = retrieve_params_from_name(folder_name)
+    n_block, n_flow, mean_of_eigval, dim_per_label, label, fixed_eigval, uniform_eigval, gaussian_eigval, \
+    reg_use_var, split_graph_dim = retrieve_params_from_name(folder_name)
 
     if label is not None:
         dataset.reduce_dataset('one_class', label=label)
@@ -2113,8 +2282,8 @@ if __name__ == "__main__":
                                                     reselect_val_idx=args.reselect_val_idx)
 
     # reduce train dataset size (fitting too long)
-    # print('Train dataset reduced in order to accelerate. (stratified)')
-    # train_dataset.reduce_dataset_ratio(0.1, stratified=True)
+    print('Train dataset reduced in order to accelerate. (stratified)')
+    train_dataset.reduce_dataset_ratio(0.1, stratified=True)
 
     n_dim = dataset.get_n_dim()
 
@@ -2127,7 +2296,8 @@ if __name__ == "__main__":
 
     # initialize gaussian params
     gaussian_params = initialize_gaussian_params(args, dataset, fixed_eigval, uniform_eigval, gaussian_eigval,
-                                                 mean_of_eigval, dim_per_label, 'isotrope' in folder_name)
+                                                 mean_of_eigval, dim_per_label, 'isotrope' in folder_name,
+                                                 split_graph_dim)
 
     if model_type == 'cglow':
         args_cglow, _ = cglow_arguments().parse_known_args()
@@ -2213,12 +2383,17 @@ if __name__ == "__main__":
         img_size = dataset.in_size
         z_shape = model.calc_last_z_shape(img_size)
         # PROJECTIONS
-        if dataset_name == 'mnist':
+        if dataset_name in ['mnist', 'cifar10']:
             noise_types = ['gaussian', 'speckle', 'poisson', 's&p']
+            how_much = list(np.linspace(1, dim_per_label, 6, dtype=np.int))
             for noise_type in noise_types:
+                # compression_evaluation(model, train_dataset, val_dataset, gaussian_params=gaussian_params,
+                #                        z_shape=z_shape, how_much=how_much, device=device, save_dir=save_dir,
+                #                        proj_type='zpca_l', noise_type=noise_type, eval_gaussian_std=.1, batch_size=16)
                 evaluate_projection_1model(model, train_dataset, val_dataset, gaussian_params=gaussian_params,
                                            z_shape=z_shape, how_much=dim_per_label, device=device, save_dir=save_dir,
-                                           proj_type='zpca_l', noise_type=noise_type, eval_gaussian_std=.2)
+                                           proj_type='zpca_l', noise_type=noise_type, eval_gaussian_std=.1,
+                                           batch_size=16)
         elif dataset_name in ['single_moon', 'double_moon']:
             noise_type = 'gaussian'
             std_noise = .1 / 5

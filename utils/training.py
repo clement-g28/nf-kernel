@@ -191,6 +191,7 @@ def training_arguments():
 
     parser.add_argument("--use_tb", action="store_true", help="use tensorboard to save losses")
     parser.add_argument("--save_each_epoch", default=20, type=int, help='save every n epoch')
+    parser.add_argument("--sample_every", default=100, type=int, help='sample and generate every n iterations')
 
     parser.add_argument("--fix_mean", action="store_true", help="don\'t learn means")
     parser.add_argument("--with_noise", type=float, default=None, help="add noise to input as learning")
@@ -223,6 +224,10 @@ def training_arguments():
 
     parser.add_argument("--restart", action="store_true",
                         help='restart from the restart.pth model')
+
+    # split class dimensions between features of x and adj while using graph dataset
+    parser.add_argument("--split_graph_dim", action="store_true",
+                        help='split class dimensions between features of x and adj while using graph dataset')
 
     return parser
 

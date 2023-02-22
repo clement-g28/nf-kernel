@@ -184,6 +184,7 @@ def retrieve_params_from_name(folder_name):
     n_block = 2  # base value
     n_flow = 32  # base value
     reg_use_var = False
+    split_graph_dim = False
 
     for split in splits:
         b = re.search("^b\d{1,2}$", split)
@@ -224,12 +225,15 @@ def retrieve_params_from_name(folder_name):
         elif 'usevar' in split:
             reg_use_var = True
             print(f'Flow trained using variance.')
+        elif 'splitgraphdim' in split:
+            split_graph_dim = True
+            print(f'Flow trained using variance.')
 
-    return n_block, n_flow, mean_of_eigval, dim_per_label, label, fixed_eigval, uniform_eigval, gaussian_eigval, reg_use_var
+    return n_block, n_flow, mean_of_eigval, dim_per_label, label, fixed_eigval, uniform_eigval, gaussian_eigval, reg_use_var, split_graph_dim
 
 
 def initialize_gaussian_params(args, dataset, fixed_eigval, uniform_eigval, gaussian_eigval, mean_of_eigval,
-                               dim_per_label, isotrope):
+                               dim_per_label, isotrope, split_graph_dim):
     # initialize gaussian params
     if fixed_eigval is None:
         if uniform_eigval:
@@ -255,7 +259,8 @@ def initialize_gaussian_params(args, dataset, fixed_eigval, uniform_eigval, gaus
 
     if not dataset.is_regression_dataset():
         gaussian_params = initialize_class_gaussian_params(dataset, eigval_list, isotrope=isotrope,
-                                                           dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
+                                                           dim_per_label=dim_per_label, fixed_eigval=fixed_eigval,
+                                                           split_graph_dim=split_graph_dim)
     else:
         if args.method == 0:
             gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list,

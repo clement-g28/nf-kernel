@@ -6,6 +6,7 @@ import numpy as np
 from PIL import Image
 
 from utils.density import multivariate_gaussian
+from utils.dataset import GraphDataset
 
 import matplotlib
 
@@ -41,13 +42,16 @@ def create_folder(path):
     return False
 
 
-def save_every_pic(path, numpy_pics, methods, labels, add_str=None, clamp_min=0, clamp_max=255):
+def save_every_pic(path, numpy_pics, methods, labels, add_str=None, clamp_min=0, clamp_max=255, rgb=False):
     create_folder(path)
     add_str = '' if add_str is None else f'_{add_str}'
     numpy_pics = np.clip(numpy_pics, clamp_min, clamp_max)
     for i, pic in enumerate(numpy_pics):
         im = pic.squeeze().astype(np.uint8)
-        im = Image.fromarray(im, mode='L')
+        if rgb:
+            im = Image.fromarray(im, mode='RGB')
+        else:
+            im = Image.fromarray(im, mode='L')
         name = f"{methods[i]}_{str(labels[i])}{add_str}.png"
         im.save(f'{path}/{name}')
 
@@ -146,9 +150,18 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
 
-def initialize_class_gaussian_params(dataset, al_list, isotrope=False, dim_per_label=30, fixed_eigval=None):
+def initialize_class_gaussian_params(dataset, al_list, isotrope=False, dim_per_label=30, fixed_eigval=None,
+                                     split_graph_dim=False):
     uni = np.unique(dataset.true_labels)
-    n_dim = dataset.get_n_dim()
+    if isinstance(dataset, GraphDataset) and split_graph_dim:
+        n_x, n_adj = dataset.calculate_dims()
+        dim_per_label_x = math.floor(n_x / len(uni))
+        dim_per_label_adj = math.floor(n_adj / len(uni))
+        n_dim = n_x + n_adj
+        al_list = al_list[:dim_per_label_x+dim_per_label_adj]
+        dim_per_label = dim_per_label_x + dim_per_label_adj
+    else:
+        n_dim = dataset.get_n_dim()
     gaussian_params = []
     if isotrope:
         for i, label in enumerate(uni):
@@ -165,7 +178,12 @@ def initialize_class_gaussian_params(dataset, al_list, isotrope=False, dim_per_l
             if fixed_eigval is None:
                 be = np.power(1 / (math.pow(sum(al_list) / len(al_list), dim_per_label)), 1 / (n_dim - dim_per_label))
                 eigenvals = np.ones(n_dim) * be
-                eigenvals[dim_per_label * i:dim_per_label * (i + 1)] = al_list
+                if isinstance(dataset, GraphDataset) and split_graph_dim:
+                    eigenvals[dim_per_label_x * i:dim_per_label_x * (i + 1)] = al_list[:dim_per_label_x]
+                    eigenvals[n_x + dim_per_label_adj * i:n_x + dim_per_label_adj * (i + 1)] \
+                        = al_list[dim_per_label_x:dim_per_label_x + dim_per_label_adj]
+                else:
+                    eigenvals[dim_per_label * i:dim_per_label * (i + 1)] = al_list
             else:
                 eigenvals = np.ones(n_dim)
                 eigenvals[:] = fixed_eigval
@@ -261,7 +279,7 @@ def calculate_log_p_with_gaussian_params_regression(x, mean, inv_cov, det):
     return log_ps
 
 
-def load_dataset(args, dataset_name, model_type):
+def load_dataset(args, dataset_name, model_type, transform=None):
     from utils.models import GRAPH_MODELS
     from utils.dataset import ImDataset, SimpleDataset, RegressionGraphDataset, ClassificationGraphDataset, \
         SIMPLE_DATASETS, SIMPLE_REGRESSION_DATASETS, IMAGE_DATASETS, GRAPH_REGRESSION_DATASETS, \
@@ -269,7 +287,7 @@ def load_dataset(args, dataset_name, model_type):
 
     # DATASET #
     if dataset_name in IMAGE_DATASETS:
-        dataset = ImDataset(dataset_name=dataset_name, n_bits=args.n_bits)
+        dataset = ImDataset(dataset_name=dataset_name, n_bits=args.n_bits, transform=transform)
     elif dataset_name == 'fishtoxi':  # Special case where the data can be either graph or vectorial data
         use_graph_type = model_type in GRAPH_MODELS
         if use_graph_type:

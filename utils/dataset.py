@@ -629,7 +629,7 @@ class ImDataset(BaseDataset):
         elif name == 'cifar10':
             if transform is None:
                 transform = transforms.Compose([
-                    transforms.RandomCrop(32, padding=4),
+                    # transforms.RandomCrop(32, padding=4),
                     transforms.RandomHorizontalFlip(),
                     transforms.ToTensor(),
                     transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))])
@@ -862,7 +862,7 @@ class GraphDataset(BaseDataset):
         adj = adj.reshape(adj.shape[0], -1)
         return np.concatenate((x, adj), axis=1)
 
-    def get_n_dim(self):
+    def calculate_dims(self):
         x, adj = self.X[0]
         n_x = x.shape[0]
         for sh in x.shape[1:]:
@@ -870,6 +870,10 @@ class GraphDataset(BaseDataset):
         n_adj = adj.shape[0]
         for sh in adj.shape[1:]:
             n_adj *= sh
+        return n_x, n_adj
+
+    def get_n_dim(self):
+        n_x, n_adj = self.calculate_dims()
         return n_x + n_adj
 
     def get_nx_graphs(self, edge_to_node=False, data=None, attributed_node=False):

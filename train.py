@@ -14,6 +14,7 @@ from utils.utils import write_dict_to_tensorboard, set_seed, create_folder, Aver
     initialize_class_gaussian_params, initialize_regression_gaussian_params, initialize_tmp_regression_gaussian_params
 
 from utils.utils import load_dataset
+from utils.dataset import GraphDataset
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -103,6 +104,7 @@ def train(args, model_single, add_path, train_dataset, val_dataset=None):
                             means_dict[f'mean{i}'] = m.item()
                         write_dict_to_tensorboard(writer, means_dict, base_name=f"MEANS", iteration=itr)
 
+                if itr % args.sample_every == 0:
                     with torch.no_grad():
                         model.eval()
                         model_single.sample_evaluation(itr, train_dataset, val_dataset, save_dir,
@@ -279,7 +281,8 @@ if __name__ == "__main__":
 
     if not dataset.is_regression_dataset():
         gaussian_params = initialize_class_gaussian_params(dataset, eigval_list, isotrope=args.isotrope_gaussian,
-                                                           dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
+                                                           dim_per_label=dim_per_label, fixed_eigval=fixed_eigval,
+                                                           split_graph_dim=args.split_graph_dim)
     else:
         if args.method == 0:
             gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list,
@@ -296,6 +299,10 @@ if __name__ == "__main__":
     reg_use_var_str = f''
     if args.reg_use_var:
         reg_use_var_str = f'_usevar'
+
+    split_graph_dim_str = f''
+    if args.split_graph_dim and isinstance(dataset, GraphDataset) and not dataset.is_regression_dataset():
+        split_graph_dim_str = f'_splitgraphdim'
 
     folder_path = f'{args.dataset}/{args.model}/'
     if args.model == 'cglow':
@@ -331,7 +338,7 @@ if __name__ == "__main__":
     lmean_str = f'_lmean{args.beta}' if not args.fix_mean else ''
     isotrope_str = '_isotrope' if args.isotrope_gaussian else ''
     folder_path += f'_nfkernel{lmean_str}{isotrope_str}{eigval_str}{noise_str}' \
-                   f'{redclass_str}{redlabel_str}_dimperlab{dim_per_label}{reg_use_var_str}'
+                   f'{redclass_str}{redlabel_str}_dimperlab{dim_per_label}{reg_use_var_str}{split_graph_dim_str}'
 
     folder_path += '_test'
 
