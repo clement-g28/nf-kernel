@@ -279,11 +279,19 @@ def calculate_log_p_with_gaussian_params_regression(x, mean, inv_cov, det):
     return log_ps
 
 
-def load_dataset(args, dataset_name, model_type, transform=None):
+def load_dataset(args, dataset_name, model_type, to_evaluate=False, transform=None):
     from utils.models import GRAPH_MODELS
     from utils.dataset import ImDataset, SimpleDataset, RegressionGraphDataset, ClassificationGraphDataset, \
         SIMPLE_DATASETS, SIMPLE_REGRESSION_DATASETS, IMAGE_DATASETS, GRAPH_REGRESSION_DATASETS, \
         GRAPH_CLASSIFICATION_DATASETS
+
+    if transform is None:
+        if to_evaluate:
+            if dataset_name == 'cifar10':
+                from torchvision import transforms
+                transform = transforms.Compose([
+                    transforms.ToTensor(),
+                    transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))])
 
     # DATASET #
     if dataset_name in IMAGE_DATASETS:

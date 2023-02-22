@@ -321,7 +321,7 @@ if __name__ == '__main__':
 
     dataset_name, model_type, folder_name = args.folder.split('/')[-3:]
     # DATASET #
-    dataset = load_dataset(args, dataset_name, model_type)
+    dataset = load_dataset(args, dataset_name, model_type, to_evaluate=True)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

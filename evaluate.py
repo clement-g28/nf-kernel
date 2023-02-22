@@ -2251,16 +2251,8 @@ if __name__ == "__main__":
 
     dataset_name, model_type, folder_name = args.folder.split('/')[-3:]
 
-    if dataset_name == 'cifar10':
-        from torchvision import transforms
-        transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))])
-    else:
-        transform = None
-
     # DATASET #
-    dataset = load_dataset(args, dataset_name, model_type, transform=transform)
+    dataset = load_dataset(args, dataset_name, model_type, to_evaluate=True)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

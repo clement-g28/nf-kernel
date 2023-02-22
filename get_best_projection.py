@@ -59,7 +59,7 @@ def evaluate_distances(t_model_params, train_dataset, val_dataset, full_dataset,
         model = model.to(device)
         model.eval()
 
-        z_shape = model_single.calc_last_z_shape(train_dataset.in_size)
+        z_shape = model.calc_last_z_shape(train_dataset.in_size)
 
         loader = train_dataset_noised.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
 
@@ -160,7 +160,7 @@ if __name__ == '__main__':
 
     dataset_name, model_type, folder_name = args.folder.split('/')[-3:]
     # DATASET #
-    dataset = load_dataset(args, dataset_name, model_type)
+    dataset = load_dataset(args, dataset_name, model_type, to_evaluate=True)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
