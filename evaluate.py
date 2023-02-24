@@ -2235,19 +2235,10 @@ def create_figure_train_projections(model, train_dataset, std_noise, save_path, 
                         save_path=f'{save_path}/noisytrain_distance_gp')
 
 
-if __name__ == "__main__":
-    choices = ['classification', 'projection', 'generation', 'regression']
-    best_model_choices = ['classification', 'projection', 'regression']
-    for choice in best_model_choices.copy():
-        best_model_choices.append(choice + '_train')
-    parser = testing_arguments()
-    parser.add_argument('--eval_type', type=str, default='classification', choices=choices, help='evaluation type')
-    parser.add_argument('--model_to_use', type=str, default='classification', choices=best_model_choices,
-                        help='what best model to use for the evaluation')
-    parser.add_argument("--method", default=0, type=int, help='select between [0,1,2]')
-    args = parser.parse_args()
+def main(args):
     print(args)
-    set_seed(0)
+    if args.seed is not None:
+        set_seed(args.seed)
 
     dataset_name, model_type, folder_name = args.folder.split('/')[-3:]
 
@@ -2275,7 +2266,7 @@ if __name__ == "__main__":
 
     # reduce train dataset size (fitting too long)
     print('Train dataset reduced in order to accelerate. (stratified)')
-    train_dataset.reduce_dataset_ratio(0.1, stratified=True)
+    train_dataset.reduce_dataset_ratio(0.05, stratified=True)
 
     n_dim = dataset.get_n_dim()
 
@@ -2350,9 +2341,9 @@ if __name__ == "__main__":
 
     eval_type = args.eval_type
     if eval_type == 'classification':
-        dataset_name_eval = ['mnist', 'double_moon', 'iris', 'bcancer'] + GRAPH_CLASSIFICATION_DATASETS
+        dataset_name_eval = ['mnist', 'cifar10', 'double_moon', 'iris', 'bcancer'] + GRAPH_CLASSIFICATION_DATASETS
         assert dataset_name in dataset_name_eval, f'Classification can only be evaluated on {dataset_name_eval}'
-        predmodel = evaluate_classification(None, train_dataset, val_dataset, save_dir, device)
+        predmodel = evaluate_classification(model, train_dataset, val_dataset, save_dir, device)
         # _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
         #                          only_Z=isinstance(dataset, GraphDataset))
         # evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, print_as_graph=True,
@@ -2377,15 +2368,16 @@ if __name__ == "__main__":
         # PROJECTIONS
         if dataset_name in ['mnist', 'cifar10']:
             noise_types = ['gaussian', 'speckle', 'poisson', 's&p']
-            how_much = list(np.linspace(1, dim_per_label, 6, dtype=np.int))
+            how_much = list(np.linspace(1, dim_per_label, 6, dtype=np.int)) + list(
+                np.linspace(dim_per_label, n_dim, 6, dtype=np.int))
             for noise_type in noise_types:
-                # compression_evaluation(model, train_dataset, val_dataset, gaussian_params=gaussian_params,
-                #                        z_shape=z_shape, how_much=how_much, device=device, save_dir=save_dir,
-                #                        proj_type='zpca_l', noise_type=noise_type, eval_gaussian_std=.1, batch_size=16)
-                evaluate_projection_1model(model, train_dataset, val_dataset, gaussian_params=gaussian_params,
-                                           z_shape=z_shape, how_much=dim_per_label, device=device, save_dir=save_dir,
-                                           proj_type='zpca_l', noise_type=noise_type, eval_gaussian_std=.1,
-                                           batch_size=16)
+                compression_evaluation(model, train_dataset, val_dataset, gaussian_params=gaussian_params,
+                                       z_shape=z_shape, how_much=how_much, device=device, save_dir=save_dir,
+                                       proj_type='zpca_l', noise_type=noise_type, eval_gaussian_std=.1, batch_size=100)
+                # evaluate_projection_1model(model, train_dataset, val_dataset, gaussian_params=gaussian_params,
+                #                            z_shape=z_shape, how_much=dim_per_label, device=device, save_dir=save_dir,
+                #                            proj_type='gp', noise_type=noise_type, eval_gaussian_std=.1,
+                #                            batch_size=200)
         elif dataset_name in ['single_moon', 'double_moon']:
             noise_type = 'gaussian'
             std_noise = .1 / 5
@@ -2434,3 +2426,18 @@ if __name__ == "__main__":
                            print_as_mol=True, print_as_graph=True)
         evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z,
                                 print_as_mol=True, print_as_graph=True)
+
+
+if __name__ == "__main__":
+    choices = ['classification', 'projection', 'generation', 'regression']
+    best_model_choices = ['classification', 'projection', 'regression']
+    for choice in best_model_choices.copy():
+        best_model_choices.append(choice + '_train')
+    parser = testing_arguments()
+    parser.add_argument('--eval_type', type=str, default='classification', choices=choices, help='evaluation type')
+    parser.add_argument('--model_to_use', type=str, default='classification', choices=best_model_choices,
+                        help='what best model to use for the evaluation')
+    parser.add_argument("--method", default=0, type=int, help='select between [0,1,2]')
+    args = parser.parse_args()
+    args.seed = 0
+    main(args)

@@ -50,7 +50,7 @@ def train(args, model_single, add_path, train_dataset, val_dataset=None):
                 itr = epoch * loader_size + i
                 input, label = data
 
-                input = dataset.format_data(input, device)
+                input = train_dataset.format_data(input, device)
                 label = label.to(device)
 
                 if itr == 0:
@@ -65,7 +65,7 @@ def train(args, model_single, add_path, train_dataset, val_dataset=None):
                 # logdet = logdet.mean()
 
                 # nll_loss, log_p, log_det = calc_loss(log_p, logdet, dataset.im_size, n_bins)
-                nll_loss, log_p, log_det = dataset.format_loss(log_p, logdet)
+                nll_loss, log_p, log_det = train_dataset.format_loss(log_p, logdet)
                 loss = nll_loss - beta * distloss
 
                 loss = model_single.upstream_process(loss)
@@ -124,7 +124,7 @@ def train(args, model_single, add_path, train_dataset, val_dataset=None):
                     for data in val_loader:
                         input, label = data
 
-                        input = dataset.format_data(input, device)
+                        input = val_dataset.format_data(input, device)
                         label = label.to(device)
 
                         log_p, distloss, logdet, z = model(input, label)
@@ -132,7 +132,7 @@ def train(args, model_single, add_path, train_dataset, val_dataset=None):
                         logdet = logdet.mean()
 
                         # nll_loss, log_p, log_det = calc_loss(log_p, logdet, dataset.im_size, n_bins)
-                        nll_loss, log_p, log_det = dataset.format_loss(log_p, logdet)
+                        nll_loss, log_p, log_det = val_dataset.format_loss(log_p, logdet)
                         loss = nll_loss - beta * distloss
 
                         valLossMeter.update(loss.item())
@@ -167,11 +167,9 @@ def train(args, model_single, add_path, train_dataset, val_dataset=None):
                 torch.save(model.state_dict(), f"{save_dir}/model_{str(itr + 1).zfill(6)}.pt")
 
 
-if __name__ == "__main__":
-    args, _ = training_arguments().parse_known_args()
-    print(args)
-
-    # set_seed(0)
+def main(args):
+    if args.seed is not None:
+        set_seed(args.seed)
 
     if args.dataset == 'mnist':
         transform = [
@@ -321,7 +319,7 @@ if __name__ == "__main__":
         # args_ffjord.n_block = args.n_block
         model_single = load_ffjord_model(args_ffjord, dataset.in_size, gaussian_params=gaussian_params,
                                          learn_mean=not args.fix_mean, reg_use_var=args.reg_use_var, dataset=dataset)
-        folder_path += f'b{args.n_block}'
+        folder_path += f'b{args_ffjord.n_block}'
     elif args.model == 'moflow':
         args_moflow, _ = moflow_arguments().parse_known_args()
         model_single = load_moflow_model(args_moflow, gaussian_params=gaussian_params,
@@ -340,7 +338,8 @@ if __name__ == "__main__":
     folder_path += f'_nfkernel{lmean_str}{isotrope_str}{eigval_str}{noise_str}' \
                    f'{redclass_str}{redlabel_str}_dimperlab{dim_per_label}{reg_use_var_str}{split_graph_dim_str}'
 
-    folder_path += '_test'
+    if args.add_in_name_folder is not None:
+        folder_path += f'_{args.add_in_name_folder}'
 
     create_folder(f'./checkpoint/{folder_path}')
 
@@ -362,3 +361,11 @@ if __name__ == "__main__":
         create_folder(f'./checkpoint/{folder_path}')
 
     train(args, model_single, folder_path, train_dataset=train_dataset, val_dataset=val_dataset)
+    return f'./checkpoint/{folder_path}'
+
+
+if __name__ == "__main__":
+    args, _ = training_arguments().parse_known_args()
+    print(args)
+
+    main(args)

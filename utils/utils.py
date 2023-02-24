@@ -158,7 +158,7 @@ def initialize_class_gaussian_params(dataset, al_list, isotrope=False, dim_per_l
         dim_per_label_x = math.floor(n_x / len(uni))
         dim_per_label_adj = math.floor(n_adj / len(uni))
         n_dim = n_x + n_adj
-        al_list = al_list[:dim_per_label_x+dim_per_label_adj]
+        al_list = al_list[:dim_per_label_x + dim_per_label_adj]
         dim_per_label = dim_per_label_x + dim_per_label_adj
     else:
         n_dim = dataset.get_n_dim()
@@ -292,6 +292,10 @@ def load_dataset(args, dataset_name, model_type, to_evaluate=False, transform=No
                 transform = transforms.Compose([
                     transforms.ToTensor(),
                     transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))])
+        else:
+            if dataset_name in GRAPH_REGRESSION_DATASETS or dataset_name in GRAPH_CLASSIFICATION_DATASETS or (
+                    dataset_name == 'fishtoxi' and model_type in GRAPH_MODELS):
+                transform = 'permutation'
 
     # DATASET #
     if dataset_name in IMAGE_DATASETS:
@@ -299,15 +303,15 @@ def load_dataset(args, dataset_name, model_type, to_evaluate=False, transform=No
     elif dataset_name == 'fishtoxi':  # Special case where the data can be either graph or vectorial data
         use_graph_type = model_type in GRAPH_MODELS
         if use_graph_type:
-            dataset = RegressionGraphDataset(dataset_name=dataset_name)
+            dataset = RegressionGraphDataset(dataset_name=dataset_name, transform=transform)
         else:
-            dataset = SimpleDataset(dataset_name=dataset_name)
+            dataset = SimpleDataset(dataset_name=dataset_name, transform=transform)
     elif dataset_name in SIMPLE_DATASETS or dataset_name in SIMPLE_REGRESSION_DATASETS:
-        dataset = SimpleDataset(dataset_name=dataset_name)
+        dataset = SimpleDataset(dataset_name=dataset_name, transform=transform)
     elif dataset_name in GRAPH_REGRESSION_DATASETS:
-        dataset = RegressionGraphDataset(dataset_name=dataset_name)
+        dataset = RegressionGraphDataset(dataset_name=dataset_name, transform=transform)
     elif dataset_name in GRAPH_CLASSIFICATION_DATASETS:
-        dataset = ClassificationGraphDataset(dataset_name=dataset_name)
+        dataset = ClassificationGraphDataset(dataset_name=dataset_name, transform=transform)
     else:
         assert False, 'unknown dataset'
     return dataset

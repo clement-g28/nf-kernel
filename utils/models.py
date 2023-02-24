@@ -346,7 +346,8 @@ class SeqFlow(NF):
                           batch_size=200):
         idx = np.random.randint(0, val_dataset.X.shape[0], batch_size)
         p_samples, y = val_dataset[idx]
-        p_samples = p_samples.numpy()
+        if not isinstance(p_samples, np.ndarray):
+            p_samples = p_samples.numpy()
 
         sample_fn, density_fn = self.get_transforms(self.model)
 
@@ -449,7 +450,8 @@ class FFJORD(NF):
                           batch_size=200):
         idx = np.random.randint(0, val_dataset.X.shape[0], batch_size)
         p_samples, y = val_dataset[idx]
-        p_samples = p_samples.numpy()
+        if not isinstance(p_samples, np.ndarray):
+            p_samples = p_samples.numpy()
 
         sample_fn, density_fn = self.get_transforms(self.model)
 

@@ -177,6 +177,7 @@ def seqflow_arguments():
 
 def training_arguments():
     parser = argparse.ArgumentParser(description="CGlow trainer")
+    parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--dataset", type=str, default='mnist',
                         choices=SIMPLE_DATASETS + SIMPLE_REGRESSION_DATASETS + IMAGE_DATASETS +
                                 GRAPH_REGRESSION_DATASETS + GRAPH_CLASSIFICATION_DATASETS,
@@ -228,6 +229,8 @@ def training_arguments():
     # split class dimensions between features of x and adj while using graph dataset
     parser.add_argument("--split_graph_dim", action="store_true",
                         help='split class dimensions between features of x and adj while using graph dataset')
+
+    parser.add_argument("--add_in_name_folder", type=str, default=None, help='add in folder name the str')
 
     return parser
 

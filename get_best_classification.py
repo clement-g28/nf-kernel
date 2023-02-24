@@ -207,11 +207,9 @@ def evaluate_classification(t_model_params, train_dataset, eval_dataset, full_da
     return best_i
 
 
-if __name__ == '__main__':
-    parser = testing_arguments()
-    args = parser.parse_args()
-
-    set_seed(0)
+def main(args):
+    if args.seed is not None:
+        set_seed(args.seed)
 
     dataset_name, model_type, folder_name = args.folder.split('/')[-3:]
     # DATASET #
@@ -241,8 +239,9 @@ if __name__ == '__main__':
                                                     reselect_val_idx=args.reselect_val_idx)
 
     # reduce train dataset size (fitting too long)
-    print('Train dataset reduced in order to accelerate. (stratified)')
-    train_dataset.reduce_dataset_ratio(0.1, stratified=True)
+    # print('Train dataset reduced in order to accelerate. (stratified)')
+    # train_dataset.reduce_dataset_ratio(0.01, stratified=True)
+    # val_dataset.reduce_dataset_ratio(0.1, stratified=True)
 
     n_dim = dataset.get_n_dim()
 
@@ -270,3 +269,11 @@ if __name__ == '__main__':
 
     evaluate_classification(t_model_params, train_dataset, val_dataset, full_dataset=dataset, save_dir=save_dir,
                             device=device, with_train=True, batch_size=200)
+
+
+if __name__ == '__main__':
+    parser = testing_arguments()
+    args = parser.parse_args()
+    args.seed = 0
+
+    main(args)
