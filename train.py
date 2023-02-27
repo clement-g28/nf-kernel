@@ -92,7 +92,7 @@ def train(args, model_single, add_path, train_dataset, val_dataset=None):
                     f"Loss: {loss.item():.5f}; logP: {log_p.item():.5f}; logdet: {log_det.item():.5f}; lr: {warmup_lr:.7f}; distloss: {distloss.item():.7f}"
                 )
 
-                if itr % 100 == 0:
+                if itr % args.write_train_loss_every == 0:
                     if args.use_tb:
                         loss_dict = {"tot_loss": loss.item(),
                                      "logP": log_p.item(),
@@ -368,7 +368,10 @@ def main(args):
     train_start = time.time()
     train(args, model_single, folder_path, train_dataset=train_dataset, val_dataset=val_dataset)
     train_end = time.time()
-    return f'./checkpoint/{folder_path}', train_end - train_start
+    del dataset
+    gpu_info = torch.cuda.mem_get_info(device=device)
+    model_single.del_model_from_gpu()
+    return f'./checkpoint/{folder_path}', train_end - train_start, gpu_info
 
 
 if __name__ == "__main__":
