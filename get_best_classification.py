@@ -70,8 +70,8 @@ def evaluate_classification(t_model_params, train_dataset, eval_dataset, full_da
 
         print('Fit SVC on Z...')
         # Learn SVC
-        param_gridlin = [{'SVC__kernel': ['linear'], 'SVC__C': np.array([1])}]
-        # param_gridlin = [{'SVC__kernel': ['linear'], 'SVC__C': np.concatenate((np.logspace(-5, 2, 11), np.array([1])))}]
+        # param_gridlin = [{'SVC__kernel': ['linear'], 'SVC__C': np.array([1])}]
+        param_gridlin = [{'SVC__kernel': ['linear'], 'SVC__C': np.concatenate((np.logspace(-5, 2, 10), np.array([1])))}]
         model_type = ('SVC', SVC())
         scaler = False
         svc = learn_or_load_modelhyperparams(Z, tlabels, 'zlinear', param_gridlin, save_dir,
@@ -201,7 +201,7 @@ def evaluate_classification(t_model_params, train_dataset, eval_dataset, full_da
         else:
             model = cus_load_func(model_single, model_loading_params['loading_path'])
         torch.save(
-            model.state_dict(), f"{save_dir}/best_classifiation_train_model.pth"
+            model.state_dict(), f"{save_dir}/best_classification_train_model.pth"
         )
 
     return best_i

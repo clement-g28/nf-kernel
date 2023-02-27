@@ -1,3 +1,5 @@
+import time
+
 from tqdm import tqdm
 import numpy as np
 import math
@@ -39,7 +41,7 @@ def train(args, model_single, add_path, train_dataset, val_dataset=None):
     # TEST with weighted sampler
     train_loader = train_dataset.get_loader(args.batch_size, shuffle=True, drop_last=True, sampler=True)
     if val_dataset is not None:
-        val_loader = val_dataset.get_loader(args.batch_size, shuffle=True, drop_last=True)
+        val_loader = val_dataset.get_loader(args.batch_size, shuffle=True, drop_last=False)
     loader_size = len(train_loader)
 
     with tqdm(range(args.n_epoch)) as pbar:
@@ -195,6 +197,9 @@ def main(args):
 
     transform = transforms.Compose(transform)
 
+    # TEST RANDGENDATASET
+    # from utils.dataset import SimpleDataset
+    # dataset = SimpleDataset(dataset_name=args.dataset, transform=transform)
     # DATASET #
     dataset = load_dataset(args, args.dataset, args.model, transform=transform)
 
@@ -360,8 +365,10 @@ def main(args):
         folder_path += '/restart'
         create_folder(f'./checkpoint/{folder_path}')
 
+    train_start = time.time()
     train(args, model_single, folder_path, train_dataset=train_dataset, val_dataset=val_dataset)
-    return f'./checkpoint/{folder_path}'
+    train_end = time.time()
+    return f'./checkpoint/{folder_path}', train_end - train_start
 
 
 if __name__ == "__main__":

@@ -281,6 +281,15 @@ class SimpleDataset(BaseDataset):
         test_dataset = None
         fulldata = True
         name_c = name
+
+        if 'randgen' in name:
+            n_train_data = int(name.split('-')[1])
+            n_features = int(name.split('-')[2])
+            n_data = int(n_train_data / 0.9)
+            X = np.random.random((n_data, n_features))
+            labels = (np.random.random(n_data)*2).astype(np.int)
+            return X, labels, test_dataset
+
         if fulldata and name in ['aquatoxi', 'fishtoxi']:
             name_c = f'{name}_fulldata'
             exist_dataset = os.path.exists(f'{path}/{name_c}_data.npy')

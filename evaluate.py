@@ -509,11 +509,11 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
         if fithyperparam:
             param_gridlin = [
                 {'SVC__kernel': ['linear'], 'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))}]
+            # param_gridlin = [{'SVC__kernel': ['linear'], 'SVC__C': np.array([1])}]
             model_type = ('SVC', SVC())
             scaler = False
             zlinsvc = learn_or_load_modelhyperparams(Z, tlabels, kernel_name, param_gridlin, save_dir,
-                                                     model_type=model_type, scaler=scaler, save=False,
-                                                     force_train=True)
+                                                     model_type=model_type, scaler=scaler, save=False)
         else:
             zlinsvc = make_pipeline(StandardScaler(), SVC(kernel='linear', C=1.0))
             zlinsvc.fit(Z, tlabels)
@@ -718,19 +718,19 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
         print('Predictions scores :')
 
         # P-value calculation
-        predictions = {'linear': np.concatenate(svc_preds)}
-        for ktype, kpred in zip(ksvc_types, ksvc_preds):
-            predictions[ktype] = np.concatenate(kpred)
-        for ktype, kpred in zip(graph_kernels, ksvc_graph_preds):
-            predictions[ktype] = np.concatenate(kpred)
-        if model is not None:
-            predictions['zlinear'] = np.concatenate(our_preds)
-        res_pvalue = evaluate_p_value(predictions)
-        if res_pvalue is not None:
-            H, p = res_pvalue
-            score_str = 'Kruskal-Wallis H-test, H: ' + str(H) + ', p-value: ' + str(p)
-            print(score_str)
-            lines += [score_str, '\n']
+        # predictions = {'linear': np.concatenate(svc_preds)}
+        # for ktype, kpred in zip(ksvc_types, ksvc_preds):
+        #     predictions[ktype] = np.concatenate(kpred)
+        # for ktype, kpred in zip(graph_kernels, ksvc_graph_preds):
+        #     predictions[ktype] = np.concatenate(kpred)
+        # if model is not None:
+        #     predictions['zlinear'] = np.concatenate(our_preds)
+        # res_pvalue = evaluate_p_value(predictions)
+        # if res_pvalue is not None:
+        #     H, p = res_pvalue
+        #     score_str = 'Kruskal-Wallis H-test, H: ' + str(H) + ', p-value: ' + str(p)
+        #     print(score_str)
+        #     lines += [score_str, '\n']
 
         # for i, pred1 in enumerate(preds):
         #     for j, pred2 in enumerate(preds):
@@ -2266,7 +2266,7 @@ def main(args):
 
     # reduce train dataset size (fitting too long)
     print('Train dataset reduced in order to accelerate. (stratified)')
-    train_dataset.reduce_dataset_ratio(0.05, stratified=True)
+    # train_dataset.reduce_dataset_ratio(0.05, stratified=True)
 
     n_dim = dataset.get_n_dim()
 

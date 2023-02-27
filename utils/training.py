@@ -178,10 +178,11 @@ def seqflow_arguments():
 def training_arguments():
     parser = argparse.ArgumentParser(description="CGlow trainer")
     parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--dataset", type=str, default='mnist',
-                        choices=SIMPLE_DATASETS + SIMPLE_REGRESSION_DATASETS + IMAGE_DATASETS +
-                                GRAPH_REGRESSION_DATASETS + GRAPH_CLASSIFICATION_DATASETS,
-                        help="Dataset to use")
+    parser.add_argument("--dataset", type=str, default='mnist', help="Dataset to use")  # rangen eval dataset ok
+    # parser.add_argument("--dataset", type=str, default='mnist',
+    #                     choices=SIMPLE_DATASETS + SIMPLE_REGRESSION_DATASETS + IMAGE_DATASETS +
+    #                             GRAPH_REGRESSION_DATASETS + GRAPH_CLASSIFICATION_DATASETS,
+    #                     help="Dataset to use")
     parser.add_argument("--batch_size", default=16, type=int, help="batch size")
     parser.add_argument("--n_epoch", default=1000, type=int, help="number of epoch")
     parser.add_argument("--model", type=str, default='cglow', choices=SIMPLE_MODELS + IMAGE_MODELS + GRAPH_MODELS,

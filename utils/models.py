@@ -371,8 +371,10 @@ class SeqFlow(NF):
         lab_min = np.min(val_dataset.true_labels)
         lab_max = np.max(val_dataset.true_labels)
         ax1.scatter(x[:, 0], x[:, 1], c=y, vmin=lab_min, vmax=lab_max)
-        # add_col = [int(np.max(val_dataset.true_labels)) + i + 1 for i in range(np_means.shape[0])]
-        add_col = [lab_min, lab_max]
+        if val_dataset.is_regression_dataset():
+            add_col = [lab_min, lab_max]
+        else:
+            add_col = [int(np.max(val_dataset.true_labels)) + i + 1 for i in range(np_means.shape[0])]
         y = np.concatenate((y, np.array(add_col)), axis=0)
         ax2.scatter(z[:, 0], z[:, 1], c=y, vmin=lab_min, vmax=lab_max)
 
@@ -472,10 +474,15 @@ class FFJORD(NF):
         z = z.detach().cpu().numpy()
         np_means = self.means.detach().cpu().numpy()
         z = np.concatenate((z, np_means), axis=0)
-        ax1.scatter(x[:, 0], x[:, 1], c=y)
-        add_col = [int(np.max(val_dataset.true_labels)) + i + 1 for i in range(np_means.shape[0])]
+        lab_min = np.min(val_dataset.true_labels)
+        lab_max = np.max(val_dataset.true_labels)
+        ax1.scatter(x[:, 0], x[:, 1], c=y, vmin=lab_min, vmax=lab_max)
+        if val_dataset.is_regression_dataset():
+            add_col = [lab_min, lab_max]
+        else:
+            add_col = [int(np.max(val_dataset.true_labels)) + i + 1 for i in range(np_means.shape[0])]
         y = np.concatenate((y, np.array(add_col)), axis=0)
-        ax2.scatter(z[:, 0], z[:, 1], c=y)
+        ax2.scatter(z[:, 0], z[:, 1], c=y, vmin=lab_min, vmax=lab_max)
 
         fig_filename = os.path.join(save_dir, 'figs', 'z_{:04d}.jpg'.format(itr))
         create_folder(os.path.dirname(fig_filename))
