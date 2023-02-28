@@ -198,8 +198,8 @@ def main(args):
     transform = transforms.Compose(transform)
 
     # TEST RANDGENDATASET
-    # from utils.dataset import SimpleDataset
-    # dataset = SimpleDataset(dataset_name=args.dataset, transform=transform)
+    # from utils.dataset import SimpleDataset, ImDataset
+    # dataset = ImDataset(dataset_name=args.dataset, transform=transform)
     # DATASET #
     dataset = load_dataset(args, args.dataset, args.model, transform=transform)
 

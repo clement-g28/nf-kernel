@@ -2265,7 +2265,7 @@ def main(args):
                                                     reselect_val_idx=args.reselect_val_idx)
 
     # reduce train dataset size (fitting too long)
-    print('Train dataset reduced in order to accelerate. (stratified)')
+    # print('Train dataset reduced in order to accelerate. (stratified)')
     # train_dataset.reduce_dataset_ratio(0.05, stratified=True)
 
     n_dim = dataset.get_n_dim()

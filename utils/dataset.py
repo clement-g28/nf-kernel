@@ -16,12 +16,13 @@ from sklearn import svm
 import scipy
 import pickle
 
-from sklearn.datasets import load_iris, load_diabetes, load_breast_cancer, make_moons, make_swiss_roll
+from sklearn.datasets import load_iris, load_diabetes, load_breast_cancer, make_moons, make_swiss_roll, \
+    fetch_olivetti_faces
 from utils import visualize_flow
 from torch_geometric.datasets.tu_dataset import TUDataset
 
 SIMPLE_DATASETS = ['single_moon', 'double_moon', 'iris', 'bcancer']
-IMAGE_DATASETS = ['mnist', 'cifar10']
+IMAGE_DATASETS = ['mnist', 'cifar10', 'olivetti_faces']
 SIMPLE_REGRESSION_DATASETS = ['swissroll', 'diabetes', 'waterquality', 'aquatoxi', 'fishtoxi', 'trafficflow']
 GRAPH_REGRESSION_DATASETS = ['qm7', 'qm9', 'freesolv', 'esol', 'lipo', 'fishtoxi']
 GRAPH_CLASSIFICATION_DATASETS = ['toxcast', 'AIDS', 'Letter-med', 'MUTAG', 'COIL-DEL']
@@ -287,7 +288,7 @@ class SimpleDataset(BaseDataset):
             n_features = int(name.split('-')[2])
             n_data = int(n_train_data / 0.9)
             X = np.random.random((n_data, n_features))
-            labels = (np.random.random(n_data)*2).astype(np.int)
+            labels = (np.random.random(n_data) * 2).astype(np.int)
             return X, labels, test_dataset
 
         if fulldata and name in ['aquatoxi', 'fishtoxi']:
@@ -529,19 +530,29 @@ class ImDataset(BaseDataset):
         if not hasattr(self, 'norm_mean'):
             self.rescale = self.rescale_val_to_im_without_norm
 
-        if isinstance(train_dataset.data, np.ndarray):
-            ori_X = train_dataset.data
-            test_ori_X = test_dataset.data
+        if test_dataset is not None:
+            if isinstance(train_dataset.data, np.ndarray):
+                ori_X = train_dataset.data
+                test_ori_X = test_dataset.data
+            else:
+                ori_X = train_dataset.data.numpy()
+                test_ori_X = test_dataset.data.numpy()
+            if isinstance(train_dataset.targets, np.ndarray):
+                ori_true_labels = train_dataset.targets
+                test_true_labels = test_dataset.targets
+            else:
+                ori_true_labels = np.array(train_dataset.targets)
+                test_true_labels = np.array(test_dataset.targets)
+            test_dataset = (test_ori_X, test_true_labels)
         else:
-            ori_X = train_dataset.data.numpy()
-            test_ori_X = test_dataset.data.numpy()
-        if isinstance(train_dataset.targets, np.ndarray):
-            ori_true_labels = train_dataset.targets
-            test_true_labels = test_dataset.targets
-        else:
-            ori_true_labels = np.array(train_dataset.targets)
-            test_true_labels = np.array(test_dataset.targets)
-        test_dataset = (test_ori_X, test_true_labels)
+            if isinstance(train_dataset.data, np.ndarray):
+                ori_X = train_dataset.data
+            else:
+                ori_X = train_dataset.data.numpy()
+            if isinstance(train_dataset.targets, np.ndarray):
+                ori_true_labels = train_dataset.targets
+            else:
+                ori_true_labels = np.array(train_dataset.targets)
 
         super().__init__(ori_X, ori_true_labels, test_dataset)
         print('Z and K are not initialized in constructor')
@@ -621,6 +632,27 @@ class ImDataset(BaseDataset):
     @staticmethod
     def load_dataset(name, transform=None):
         test_dataset = None
+
+        class WrappedDataset:
+            def __init__(self, X, labels, transform):
+                self.data = X
+                self.targets = labels
+                self.transform = transform
+
+        if 'randgen' in name:
+            transform = transforms.Compose(
+                [transforms.ToTensor()]
+            )
+            n_train_data = int(name.split('-')[1])
+            n_features = int(name.split('-')[2])
+            n_data = int(n_train_data / 0.9)
+            n_features_dim = math.floor(math.sqrt(n_features) / 4) * 4  # each dim should be div by 4 (2blocks)
+            print(f'Random dataset features_dim ={n_features_dim}x{n_features_dim}')
+            X = np.random.random((n_data, 1, n_features_dim, n_features_dim))
+            labels = (np.random.random(n_data) * 2).astype(np.int)
+            train_dataset = WrappedDataset(X, labels, transform)
+            return train_dataset, test_dataset
+
         if name == 'mnist':
             if transform is None:
                 transform = transforms.Compose(
@@ -666,6 +698,13 @@ class ImDataset(BaseDataset):
             test_dataset = datasets.CIFAR10(root='./datasets', train=False, download=True, transform=transform)
             train_dataset.data = train_dataset.data.transpose(0, 3, 1, 2)
             test_dataset.data = test_dataset.data.transpose(0, 3, 1, 2)
+        elif name == 'olivetti_faces':
+            transform = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize((0.1307,), (0.3081,))])
+            X, labels = fetch_olivetti_faces(return_X_y=True)
+            X = X.reshape(X.shape[0], 1, np.sqrt(X.shape[-1]).astype(int), np.sqrt(X.shape[-1]).astype(int))
+            train_dataset = WrappedDataset(X, labels, transform)
         else:
             assert False, 'unknown dataset'
 
