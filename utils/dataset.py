@@ -705,9 +705,10 @@ class ImDataset(BaseDataset):
             train_dataset.data = train_dataset.data.transpose(0, 3, 1, 2)
             test_dataset.data = test_dataset.data.transpose(0, 3, 1, 2)
         elif name == 'olivetti_faces':
-            transform = transforms.Compose([
-                transforms.ToTensor(),
-                transforms.Normalize((0.1307,), (0.3081,))])
+            if transform is None:
+                transform = transforms.Compose([
+                    transforms.ToTensor(),
+                    transforms.Normalize((0.1307,), (0.3081,))])
             X, labels = fetch_olivetti_faces(return_X_y=True)
             X = X.reshape(X.shape[0], 1, np.sqrt(X.shape[-1]).astype(int), np.sqrt(X.shape[-1]).astype(int))
             train_dataset = WrappedDataset(X, labels, transform)
