@@ -87,8 +87,11 @@ class NF(nn.Module):
                 # determinant = np.linalg.det(self.covariance_matrix)
                 # inverse_matrix = np.linalg.inv(self.covariance_matrix)
                 means.append(torch.from_numpy(mean).unsqueeze(0))
-                self.gaussian_params.append((torch.from_numpy(inverse_matrix).to(device),
-                                             determinant))
+                # self.gaussian_params.append((torch.from_numpy(inverse_matrix).to(device),
+                #                              determinant))
+                # self.identity = torch.eye(inverse_matrix.shape[0]).to(device)
+                # self.gaussian_params.append(((torch.from_numpy(np.diag(inverse_matrix)).to(device), self.identity), determinant))
+                self.gaussian_params.append((torch.from_numpy(np.diag(inverse_matrix)), determinant))
                 # self.gaussian_params.append((torch.from_numpy(inverse_matrix),
                 #                              determinant))
             #     indexes = np.argsort(-eigenval, kind='mergesort')
@@ -169,7 +172,7 @@ class NF(nn.Module):
         log_ps = []
         for i, gaussian_param in enumerate(self.gaussian_params):
             log_ps.append(multivariate_gaussian(z, mean=self.means[i], determinant=gaussian_param[1],
-                                                inverse_covariance_matrix=gaussian_param[0]).unsqueeze(1))
+                                                inverse_cov_mat_diag=gaussian_param[0]).unsqueeze(1))
         log_p = torch.max(torch.cat(log_ps, dim=1), dim=1).values
 
         return log_p
@@ -207,7 +210,7 @@ class NF(nn.Module):
             inv_cov = self.gaussian_params[0][0]
 
         log_p = multivariate_gaussian(z, mean=s_means, determinant=det,
-                                      inverse_covariance_matrix=inv_cov).unsqueeze(1)
+                                      inverse_cov_mat_diag=inv_cov).unsqueeze(1)
 
         return log_p
 

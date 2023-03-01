@@ -113,6 +113,9 @@ def train(args, model_single, add_path, train_dataset, val_dataset=None):
                                                        writer=writer)
                         model.train()
 
+                del loss
+                torch.cuda.empty_cache()
+
             # Evaluation
             if val_dataset is not None:
                 model.eval()

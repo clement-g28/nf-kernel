@@ -18,7 +18,7 @@ from sklearn.linear_model import Ridge
 
 from evaluate import evaluate_regression, create_figures_XZ, evaluate_preimage, \
     evaluate_preimage2, evaluate_distances, evaluate_classification, generate_meanclasses, \
-    test_generation_on_eigvec, evaluate_projection_1model, evaluate_interpolations
+    test_generation_on_eigvec, evaluate_projection_1model, evaluate_graph_interpolations
 
 if __name__ == "__main__":
     choices = ['classification', 'projection', 'generation', 'regression']
@@ -174,5 +174,5 @@ if __name__ == "__main__":
         evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, print_as_graph=True)
         evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=10,
                            print_as_mol=True, print_as_graph=True, predmodel=predmodel)
-        evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z,
-                                print_as_mol=True, print_as_graph=True)
+        evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z,
+                                      print_as_mol=True, print_as_graph=True)

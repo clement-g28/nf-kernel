@@ -566,7 +566,8 @@ class ImDataset(BaseDataset):
         self.get_func = self.get_XY_item
 
         self.get_PIL_image = self.get_PIL_image_L if self.n_channel == 1 else self.get_PIL_image_RGB
-
+        if self.dataset_name == 'olivetti_faces':
+            self.get_PIL_image = self.get_PIL_image_1b
         self.n_bits = n_bits
         self.n_bins = 2.0 ** n_bits
 
@@ -581,6 +582,11 @@ class ImDataset(BaseDataset):
     def get_PIL_image_L(self, idx):
         im = self.X[idx]
         im = Image.fromarray(im.squeeze(), mode='L')
+        return im
+
+    def get_PIL_image_1b(self, idx):
+        im = self.X[idx]
+        im = Image.fromarray(im.squeeze())
         return im
 
     def get_XY_item(self, idx):

@@ -1,5 +1,6 @@
 import math
 import os
+import random
 import time
 
 import matplotlib.pyplot as plt
@@ -15,7 +16,7 @@ from sklearn.preprocessing import StandardScaler
 from torchvision import utils
 
 from utils.custom_glow import WrappedModel
-from utils.dataset import GraphDataset, GRAPH_CLASSIFICATION_DATASETS
+from utils.dataset import GraphDataset, ImDataset, GRAPH_CLASSIFICATION_DATASETS
 from utils.density import construct_covariance
 from utils.graphs.graph_utils import format, organise_data
 from utils.graphs.graph_utils import save_nx_graph, save_nx_graph_attr
@@ -72,11 +73,11 @@ def test_generation_on_eigvec(model_single, val_dataset, gaussian_params, z_shap
         )
         all_generation.append(images[:n_image_per_lab])
 
-    mean_images = generate_meanclasses(model_single, val_dataset, device, save_dir)
-    all_with_means = []
-    for i, n_generation in enumerate(all_generation):
-        all_with_means.append(n_generation)
-        all_with_means.append(np.expand_dims(mean_images[i], axis=0))
+    # mean_images = generate_meanclasses(model_single, val_dataset, device, save_dir)
+    # all_with_means = []
+    # for i, n_generation in enumerate(all_generation):
+    #     all_with_means.append(n_generation)
+    #     all_with_means.append(np.expand_dims(mean_images[i], axis=0))
     all_generation = np.concatenate(all_generation, axis=0)
 
     utils.save_image(
@@ -87,13 +88,13 @@ def test_generation_on_eigvec(model_single, val_dataset, gaussian_params, z_shap
         range=(0, 255),
     )
 
-    all_with_means = np.concatenate(all_with_means, axis=0)
-
-    methods = ([str(i) for i in range(0, n_image_per_lab)] + ['mean']) * len(gaussian_params)
-    labels = [[g[-1]] * (n_image_per_lab + 1) for g in gaussian_params]
-    labels = [item for sublist in labels for item in sublist]
-    save_every_pic(f'{save_dir}/test_generation/every_pics/{how_much_dim}', all_with_means, methods, labels,
-                   rgb=val_dataset.n_channel > 1)
+    # all_with_means = np.concatenate(all_with_means, axis=0)
+    #
+    # methods = ([str(i) for i in range(0, n_image_per_lab)] + ['mean']) * len(gaussian_params)
+    # labels = [[g[-1]] * (n_image_per_lab + 1) for g in gaussian_params]
+    # labels = [item for sublist in labels for item in sublist]
+    # save_every_pic(f'{save_dir}/test_generation/every_pics/{how_much_dim}', all_with_means, methods, labels,
+    #                rgb=val_dataset.n_channel > 1)
 
 
 def evaluate_projection_1model(model, train_dataset, val_dataset, gaussian_params, z_shape, how_much, device,
@@ -546,9 +547,12 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
     ksvc_params = [
         {'SVC__kernel': ['rbf'], 'SVC__gamma': np.logspace(-5, 3, 10),
          'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))},
-        {'SVC__kernel': ['poly'], 'SVC__gamma': np.logspace(-5, 3, 5),
-         'SVC__degree': np.linspace(1, 4, 4).astype(np.int),
-         'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))},
+        # {'SVC__kernel': ['poly'], 'SVC__gamma': np.logspace(-5, 3, 5),
+        #  'SVC__degree': np.linspace(1, 4, 4).astype(np.int),
+        #  'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))},
+        {'SVC__kernel': ['poly'], 'SVC__gamma': np.logspace(-5, 1, 5),
+         'SVC__degree': np.linspace(1, 2, 2).astype(np.int),
+         'SVC__C': np.concatenate((np.logspace(-5, 1, 10), np.array([1])))},
         {'SVC__kernel': ['sigmoid'], 'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))}
     ]
 
@@ -1895,8 +1899,81 @@ def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_b
                 format(images, nrow=nrow, save_path=f'{save_dir}/generated_samples_graphs', res_name=res_name)
 
 
-def evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=20, n_interpolation=20, Z=None,
-                            print_as_mol=True, print_as_graph=True):
+def evaluate_image_interpolations(model, val_dataset, device, save_dir, n_sample=20, n_interpolation=20, label=None):
+    def get_PIL_image_RGB(dataset, idx):
+        im = dataset.X[idx].transpose(1, 2, 0)
+        im = Image.fromarray(im.squeeze(), mode='RGB')
+        return im
+
+    def get_PIL_image_L(dataset, idx):
+        im = dataset.X[idx]
+        im = Image.fromarray(im.squeeze(), mode='L')
+        return im
+
+    get_PIL_image = get_PIL_image_L if val_dataset.n_channel == 1 else get_PIL_image_RGB
+
+    def get_data(dataset, idx):
+        target = int(dataset.true_labels[idx])
+
+        img = get_PIL_image(dataset, idx)
+        if dataset.transform is not None:
+            img = dataset.transform(img)
+
+        return img, target
+
+    # batch_size = 2
+    # loader = val_dataset.get_loader(batch_size, shuffle=True, drop_last=True, pin_memory=False)
+
+    if label is not None:
+        dset_labels = np.array([label])
+    else:
+        dset_labels = np.unique(val_dataset.true_labels)
+    done = []
+    all_res = []
+    with torch.no_grad():
+        for j in range(n_sample):
+            idxs = np.where(val_dataset.true_labels == dset_labels[j % dset_labels.shape[0]])[0]
+            i_pt0 = random.choice(idxs)
+            while i_pt0 in done:
+                i_pt0 = random.choice(idxs)
+            done.append(i_pt0)
+            # i_pt0 = np.random.randint(0, len(val_dataset))
+            i_pt1 = i_pt0
+            while val_dataset.true_labels[i_pt1] != val_dataset.true_labels[i_pt0] or i_pt0 == i_pt1 or i_pt1 in done:
+                i_pt1 = np.random.randint(0, len(val_dataset))
+            pt0, y0 = get_data(val_dataset, i_pt0)
+            pt1, y1 = get_data(val_dataset, i_pt1)
+            inp = torch.from_numpy(np.concatenate([np.expand_dims(pt0, axis=0), np.expand_dims(pt1, axis=0)]))
+            inp = val_dataset.format_data(inp, device)
+            labels = torch.from_numpy(
+                np.concatenate([np.expand_dims(y0, axis=0), np.expand_dims(y1, axis=0)], axis=0)).to(
+                device)
+
+            log_p, distloss, logdet, out = model(inp, labels)
+
+            d = out[1] - out[0]
+            z_list = [(out[0] + i * 1.0 / (n_interpolation + 1) * d).unsqueeze(0) for i in range(n_interpolation + 2)]
+
+            z_array = torch.cat(z_list, dim=0)
+
+            res = model.reverse(z_array)
+            all_res.append(res.detach().cpu().numpy())
+
+    all_res = np.concatenate(all_res, axis=0)
+
+    if isinstance(val_dataset, ImDataset):
+        images = val_dataset.rescale(all_res)
+        utils.save_image(
+            torch.from_numpy(images),
+            f"{save_dir}/test_generation/interpolations.png",
+            normalize=True,
+            nrow=n_interpolation + 2,
+            range=(0, 255),
+        )
+
+
+def evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=20, n_interpolation=20, Z=None,
+                                  print_as_mol=True, print_as_graph=True):
     # si Z est donné, PCA sur 2 dimensions
     if Z is not None:
         pca = PCA(n_components=2)
@@ -1977,7 +2054,6 @@ def evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=20, n
 
     all_res = np.concatenate(all_res, axis=0)
 
-    # For mols
     if isinstance(val_dataset, GraphDataset):
         x_shape = val_dataset.X[0][0].shape
         adj_shape = val_dataset.X[0][1].shape
@@ -2351,17 +2427,19 @@ def main(args):
         # evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=10,
         #                    print_as_mol=True, print_as_graph=True, eval_type=eval_type, predmodel=predmodel)
     elif eval_type == 'generation':
-        dataset_name_eval = ['mnist']
+        dataset_name_eval = ['mnist', 'cifar10']
         assert dataset_name in dataset_name_eval, f'Generation can only be evaluated on {dataset_name_eval}'
         # GENERATION
-        how_much = [1, 10, 30, 50, 78]
+        # how_much = [1, 10, 30, 50, 78]
+        how_much = [dim_per_label, n_dim]
         img_size = dataset.in_size
         z_shape = model.calc_last_z_shape(img_size)
-        for n in how_much:
-            test_generation_on_eigvec(model, val_dataset, gaussian_params=gaussian_params, z_shape=z_shape,
-                                      how_much_dim=n,
-                                      device=device, sample_per_label=10, save_dir=save_dir)
-        generate_meanclasses(model, train_dataset, device, save_dir)
+        evaluate_image_interpolations(model, val_dataset, device, save_dir, n_sample=20, n_interpolation=10,label=7)
+        # for n in how_much:
+        #     test_generation_on_eigvec(model, val_dataset, gaussian_params=gaussian_params, z_shape=z_shape,
+        #                               how_much_dim=n,
+        #                               device=device, sample_per_label=10, save_dir=save_dir)
+        # generate_meanclasses(model, train_dataset, device, save_dir)
     elif eval_type == 'projection':
         img_size = dataset.in_size
         z_shape = model.calc_last_z_shape(img_size)
@@ -2380,12 +2458,13 @@ def main(args):
                 #                            batch_size=200)
         elif dataset_name in ['single_moon', 'double_moon']:
             noise_type = 'gaussian'
-            std_noise = .1 / 5
+            # std_noise = .1 / 5
+            std_noise = .1
             create_figure_train_projections(model, train_dataset, std_noise=std_noise, save_path=save_dir,
                                             device=device)
             n_principal_dim = np.count_nonzero(gaussian_params[0][-2] > 1)
             # evaluate distance n times to calculate the p-value
-            n_times = 5
+            n_times = 20
             kpca_types = ['linear', 'rbf', 'poly', 'sigmoid']
             proj_type = 'gp'
             distance_results = {ktype + '-PCA': [] for ktype in kpca_types}
@@ -2399,8 +2478,10 @@ def main(args):
                 for ktype in kpca_types:
                     distance_results[ktype + '-PCA'].append(res[ktype + '-PCA'])
                 distance_results['Our-' + proj_type].append(res['Our-' + proj_type])
-            # p-value
             print(distance_results)
+            # p-value
+            mean_score = np.mean(distance_results['Our-' + proj_type])
+            print('Mean score: ' + str(mean_score))
             res_pvalue = evaluate_p_value(distance_results)
             if res_pvalue is not None:
                 H, p = res_pvalue
@@ -2424,8 +2505,8 @@ def main(args):
         evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, print_as_graph=True)
         evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=10,
                            print_as_mol=True, print_as_graph=True)
-        evaluate_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z,
-                                print_as_mol=True, print_as_graph=True)
+        evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z,
+                                      print_as_mol=True, print_as_graph=True)
 
 
 if __name__ == "__main__":
