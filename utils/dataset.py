@@ -151,7 +151,10 @@ class BaseDataset(Dataset):
             train_dataset.test_dataset = None
         else:
             if stratified:
-                class_sample_count = np.histogram(self.true_labels)[0]
+                if self.is_regression_dataset():
+                    class_sample_count = np.histogram(self.true_labels)[0]
+                else:
+                    class_sample_count = np.histogram(self.true_labels, bins=np.unique(self.true_labels))[0]
                 idxs = np.argsort(self.true_labels)
                 done = 0
                 val_idx = []
@@ -224,6 +227,9 @@ class BaseDataset(Dataset):
 
     # To implement
     def __getitem__(self, idx):
+        raise NotImplementedError
+
+    def is_regression_dataset(self):
         raise NotImplementedError
 
 

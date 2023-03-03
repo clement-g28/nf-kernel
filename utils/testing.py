@@ -84,15 +84,15 @@ def generate_sample(mean, covariance, nb_sample):
 
 
 def project_inZ(z_noisy, params, how_much):
+    k = how_much
     means, gp = params
     eigenvec = gp[0]
     eigenval = gp[1]
     std = np.sqrt(eigenval)
     noisy_z_norm = (z_noisy - means) / std
     indexes = np.argsort(-eigenval, kind='mergesort')
-    proj_z_noisy = noisy_z_norm @ eigenvec.T
+    proj_z_noisy = noisy_z_norm @ eigenvec[indexes[:k]].T
 
-    k = how_much
     proj = proj_z_noisy[:, :k] @ eigenvec[indexes[:k]]
     proj *= std
     proj += means

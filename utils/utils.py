@@ -4,6 +4,8 @@ import os
 import math
 import numpy as np
 from PIL import Image
+import glob
+import matplotlib.gridspec as gridspec
 
 from utils.density import multivariate_gaussian
 from utils.dataset import GraphDataset
@@ -131,6 +133,110 @@ def save_projection_fig(X, reconstructed_X, labels, label_max, save_path, limits
     plt.close()
 
 
+def organise_data(path, nrow, method=None, format='png', type='horizontal', last_part=None, order=None):
+    images = []
+    if last_part is None:
+        last_part = path.split('/')[-1]
+        last_part = '_' + last_part
+    files = sorted(glob.glob(f"{path}/*{last_part}.{format}"))
+    if order is not None:
+        assert method is not None, 'if order then method should be given'
+        files_ordered = []
+        for lab in order:
+            for file in files:
+                if (method in file.split('/')[-1] and method + file.split('/')[-1].split(method)[1].split('_')[
+                    0] == lab) or file.split('/')[-1].split('_')[0] == lab:
+                    files_ordered.append(file)
+        files = files_ordered
+    for file in files:
+        image = Image.open(file)
+        data = np.asarray(image)
+        # if len(data.shape) < 3:
+        data = np.expand_dims(data, axis=0)
+        images.append(data)
+    images = np.concatenate(images, axis=0).astype(np.float32)
+    images = np.expand_dims(images, axis=1) if len(images.shape) < 4 else images.transpose(0, 3, 1, 2)
+
+    if type == 'vertical':
+        ordered = []
+        ncol = nrow
+        nrow = math.floor(len(files) / ncol)
+        for i in range(ncol):
+            for j in range(nrow):
+                ind = i + j * ncol
+                ordered.append(np.expand_dims(images[ind], axis=0))
+        ordered = np.concatenate(ordered, axis=0)
+        images = ordered
+
+    return images
+
+
+def format(images, nrow, save_path, row_legends=None, col_legends=None, show=False, res_name=None, dark_mode=False):
+    if dark_mode:
+        plt.style.use('dark_background')
+
+    if col_legends is not None:
+        ncol = len(col_legends)
+    else:
+        ncol = math.ceil(images.shape[0] / nrow)
+    ratios = [0.25] + [1] * nrow if col_legends is not None else [1] * nrow
+
+    col_add = 1 if row_legends is not None else 0
+    row_add = 1 if col_legends is not None else 0
+
+    im_size1 = images.shape[-2]
+    im_size2 = images.shape[-1]
+    fig = plt.figure(figsize=(2 * im_size2 * ncol / 100, 2 * im_size2 * nrow / 100))
+    gspec = gridspec.GridSpec(
+        ncols=ncol + col_add, nrows=nrow + row_add, figure=fig, height_ratios=ratios, wspace=0, hspace=0
+    )
+    cmap = plt.get_cmap("gist_gray")
+
+    for row in range(0, nrow):
+        if row_legends is not None:
+            ax = plt.subplot(
+                gspec[row + row_add, 0], frameon=False, xlim=[0, 1], xticks=[], ylim=[0, 1], yticks=[]
+            )
+            ax.text(
+                1,
+                0.7,
+                row_legends[row],
+                family="Roboto Condensed",
+                horizontalalignment="right",
+                verticalalignment="top",
+            )
+
+        for col in range(0, ncol):
+            ax = plt.subplot(
+                gspec[row + row_add, col + col_add],
+                aspect=1,
+                frameon=False,
+                xlim=[0, 1],
+                xticks=[],
+                ylim=[0, 1],
+                yticks=[],
+            )
+            if row * ncol + col < images.shape[0]:
+                ax.imshow(images[row * ncol + col].transpose(1, 2, 0).astype(np.uint8), cmap=cmap, extent=[0, 1, 0, 1],
+                          vmin=0, vmax=255)
+            if col_legends is not None and row == 0:
+                ax.text(
+                    0.5,
+                    1.1,
+                    col_legends[col],
+                    ha="center",
+                    va="bottom",
+                    size="small",
+                    weight="bold",
+                )
+    create_folder(f'{save_path}')
+    name = res_name if res_name is not None else 'grid'
+    plt.savefig(f"{save_path}/{name}.png", bbox_inches='tight')
+    if show:
+        plt.show()
+    plt.close()
+
+
 class AverageMeter(object):
     """Computes and stores the average and current value"""
 
@@ -163,18 +269,16 @@ def initialize_class_gaussian_params(dataset, al_list, isotrope=False, dim_per_l
     else:
         n_dim = dataset.get_n_dim()
     gaussian_params = []
+    eigenvecs = np.zeros((n_dim, n_dim))
+    np.fill_diagonal(eigenvecs, 1)
     if isotrope:
         for i, label in enumerate(uni):
             mean = np.zeros(n_dim)
-            eigenvecs = np.zeros((n_dim, n_dim))
-            np.fill_diagonal(eigenvecs, 1)
             eigenvals = np.ones(n_dim)
             gaussian_params.append((mean, eigenvecs, eigenvals, label))
     else:
         for i, label in enumerate(uni):
             mean = np.zeros(n_dim)
-            eigenvecs = np.zeros((n_dim, n_dim))
-            np.fill_diagonal(eigenvecs, 1)
             if fixed_eigval is None:
                 be = np.power(1 / (math.pow(sum(al_list) / len(al_list), dim_per_label)), 1 / (n_dim - dim_per_label))
                 eigenvals = np.ones(n_dim) * be
@@ -272,7 +376,7 @@ def calculate_log_p_with_gaussian_params(x, label, means, gaussian_params):
     log_p = -0.5 * (k * math.log(2 * math.pi) + torch.diag(
         (torch.diagonal((z_flat - mean) @ diag_inv, offset=0, dim1=0, dim2=1).transpose(1, 0)
          .unsqueeze(0) @ torch.transpose(z_flat - mean, 1, 0))
-        .reshape(b_size, -1), 0)) - torch.log(determinant)
+            .reshape(b_size, -1), 0)) - torch.log(determinant)
 
     return log_p
 

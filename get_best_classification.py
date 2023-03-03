@@ -34,7 +34,7 @@ def evaluate_classification(t_model_params, train_dataset, eval_dataset, full_da
         eval_dataset.permute_graphs_in_dataset()
 
     start_from = None
-    # start_from = 114
+    # start_from = 96
     for i, model_loading_params in enumerate(t_model_params):
         if start_from is not None and i < start_from:
             continue
@@ -268,7 +268,7 @@ def main(args):
     create_folder(save_dir)
 
     evaluate_classification(t_model_params, train_dataset, val_dataset, full_dataset=dataset, save_dir=save_dir,
-                            device=device, with_train=True, batch_size=200)
+                            device=device, with_train=True, batch_size=10)
 
 
 if __name__ == '__main__':
