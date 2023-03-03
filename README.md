@@ -1,4 +1,11 @@
+[//]: # (<<<<<<< HEAD)
 # Machine Learning/Regression without the pre-image problem thanks to normalizing flow
+
+[//]: # (=======)
+[//]: # (# Machine learning without the pre-image problem thanks to normalizing flows)
+
+[//]: # (Codes for regression paper &#40;Regression learning without the pre-image problem thanks to normalizing flows&#41; is available on the branch 'regression'.)
+[//]: # (>>>>>>> 9b1843200399518c768f3e8d05601da41a694dcf)
 
 ## Model codes
 
@@ -30,23 +37,23 @@ python train.py --dataset double_moon --model ffjord --n_block 1 --dims 64-64-64
 ```
 IRIS:
 ```
-python train.py --dataset iris --model seqflow --batch 50 --lr 0.01 --use_tb --validation 0.1 --uniform_eigval --mean_of_eigval 10 --with_noise .2
+python train.py --dataset iris --model seqflow --batch_size 50 --lr 0.01 --use_tb --validation 0.1 --uniform_eigval --mean_of_eigval 10 --with_noise .2
 ```
 ```
-python train.py --dataset iris --model ffjord --n_block 1 --dims 64-64-64 --layer_type concatsquash --batch 50 --lr 0.01 --use_tb --validation 0.1 --uniform_eigval --mean_of_eigval 10 --with_noise .2
+python train.py --dataset iris --model ffjord --n_block 1 --dims 64-64-64 --layer_type concatsquash --batch_size 50 --lr 0.01 --use_tb --validation 0.1 --uniform_eigval --mean_of_eigval 10 --with_noise .2
 ```
 Breast Cancer:
 ```
-python train.py --dataset bcancer --model seqflow --batch 50 --lr 0.005 --use_tb --validation 0.1 --uniform_eigval --mean_of_eigval 10 --with_noise .2
+python train.py --dataset bcancer --model seqflow --batch_size 50 --lr 0.005 --use_tb --validation 0.1 --uniform_eigval --mean_of_eigval 10 --with_noise .2
 ```
 ```
-python train.py --dataset bcancer --model ffjord --n_block 1 --dims 64-64-64 --layer_type concatsquash --batch 50 --lr 0.005 --use_tb --validation 0.1 --uniform_eigval --mean_of_eigval 10 --with_noise .2
+python train.py --dataset bcancer --model ffjord --n_block 1 --dims 64-64-64 --layer_type concatsquash --batch_size 50 --lr 0.005 --use_tb --validation 0.1 --uniform_eigval --mean_of_eigval 10 --with_noise .2
 ```
 
 #### Image datasets
 MNIST:
 ```
-python train.py --dataset mnist --model cglow --batch 16 --use_tb --validation 0.01 --uniform_eigval --mean_of_eigval 10 --with_noise .5
+python train.py --dataset mnist --model cglow --batch_size 16 --use_tb --validation 0.01 --uniform_eigval --mean_of_eigval 10 --with_noise .5
 ```
 
 ### Regression
