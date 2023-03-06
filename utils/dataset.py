@@ -1485,8 +1485,11 @@ class ClassificationGraphDataset(GraphDataset):
                 #             label_map[atom.GetSymbol()] = len(label_map) + 1
                 # hist = np.histogram(n_atoms, bins=range(0, max(n_atoms) + 1))
             elif name in ['AIDS', 'Letter-med', 'MUTAG', 'COIL-DEL']:
+                # node_features = name in ['Letter-med', 'COIL-DEL']  # features if not node labels (e.g Letter-med (x,y))
                 node_features = name in ['Letter-med', 'COIL-DEL']  # features if not node labels (e.g Letter-med (x,y))
                 dset = TUDataset(path, name=name, use_node_attr=node_features, use_edge_attr=True)
+                # TEST with virtual node
+                node_features = name not in ['Letter-med']
                 filter_n_nodes = ClassificationGraphDataset.get_filter_size(name)
                 X, A, Y = ClassificationGraphDataset.convert_tud_dataset(dset, node_features,
                                                                          filter_n_nodes=filter_n_nodes)

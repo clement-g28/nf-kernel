@@ -363,7 +363,7 @@ def calculate_log_p_with_gaussian_params(x, label, means, gaussian_params):
 
     # Change in calculation test
     np_label = label.clone().detach().cpu().numpy()
-    test = np.array(gaussian_params)[np_label]
+    test = np.array(gaussian_params, dtype=object)[np_label]
 
     determinant = torch.from_numpy(test[:, 1].astype(np.float32)).to(x.device)
     diag_inv = torch.diag_embed(
