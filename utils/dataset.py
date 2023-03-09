@@ -1489,12 +1489,11 @@ class ClassificationGraphDataset(GraphDataset):
                 node_features = name in ['Letter-med', 'COIL-DEL']  # features if not node labels (e.g Letter-med (x,y))
                 dset = TUDataset(path, name=name, use_node_attr=node_features, use_edge_attr=True)
                 # TEST with virtual node
-                node_features = name not in ['Letter-med']
+                node_features = False if name in ['Letter-med'] else node_features
                 filter_n_nodes = ClassificationGraphDataset.get_filter_size(name)
                 X, A, Y = ClassificationGraphDataset.convert_tud_dataset(dset, node_features,
                                                                          filter_n_nodes=filter_n_nodes)
 
-                results = ((X, A, Y), test_dataset)
                 if name == 'AIDS':
                     ordered_labels = ['C', 'O', 'N', 'Cl', 'F', 'S', 'Se', 'P', 'Na', 'I', 'Co', 'Br', 'Li', 'Si', 'Mg',
                                       'Cu', 'As', 'B', 'Pt', 'Ru', 'K', 'Pd', 'Au', 'Te', 'W', 'Rh', 'Zn', 'Bi', 'Pb',
@@ -1506,6 +1505,8 @@ class ClassificationGraphDataset(GraphDataset):
                     X, A = ClassificationGraphDataset.clear_aromatic_molecule_bonds_from_dataset(X, A, label_map)
                 else:
                     label_map = None
+
+                results = ((X, A, Y), test_dataset)
 
                 np.save(f'{path}/{name}_X.npy', X)
                 np.save(f'{path}/{name}_A.npy', A)
