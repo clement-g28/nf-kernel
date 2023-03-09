@@ -74,11 +74,15 @@ def train(args, model_single, add_path, train_dataset, val_dataset=None):
                 # loss.clamp_(-10000,10000)
 
                 model.zero_grad()
-                loss.backward()
+                # loss.backward()
 
-                # loss.backward(retain_graph=True)
-                # loss2 = torch.pow(log_det, 2)
-                # loss2.backward()
+                # if epoch < 100:
+                #     loss += log_det
+                    # loss.backward(retain_graph=True)
+                    # loss2 = torch.pow(log_det, 2)
+                    # loss2.backward()
+
+                loss.backward()
 
                 # Gradient clipping
                 # torch.nn.utils.clip_grad_norm_(model.parameters(), 10)
@@ -196,14 +200,15 @@ def main(args):
             transforms.Normalize((0.1307,), (0.3081,))
         ]
     else:
-        transform = []
+        transform = None
 
     noise_str = ''
     if args.with_noise is not None:  # ((dataset.X / 255 -dataset.norm_mean) / dataset.norm_std).std() *1/5 =.2
         transform += [AddGaussianNoise(0., args.with_noise)]
         noise_str = '_noise' + str(args.with_noise).replace('.', '')
 
-    transform = transforms.Compose(transform)
+    if transform is not None:
+        transform = transforms.Compose(transform)
 
     # TEST RANDGENDATASET
     # from utils.dataset import SimpleDataset, ImDataset
