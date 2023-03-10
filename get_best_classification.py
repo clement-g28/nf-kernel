@@ -34,7 +34,7 @@ def evaluate_classification(t_model_params, train_dataset, eval_dataset, full_da
         eval_dataset.permute_graphs_in_dataset()
 
     start_from = None
-    start_from = 100
+    # start_from = 100
     for i, model_loading_params in enumerate(t_model_params):
         if start_from is not None and i < start_from:
             continue
@@ -239,8 +239,8 @@ def main(args):
                                                     reselect_val_idx=args.reselect_val_idx)
 
     # reduce train dataset size (fitting too long)
-    # print('Train dataset reduced in order to accelerate. (stratified)')
-    # train_dataset.reduce_dataset_ratio(0.01, stratified=True)
+    print('Train dataset reduced in order to accelerate. (stratified)')
+    train_dataset.reduce_dataset_ratio(0.5, stratified=True)
     # val_dataset.reduce_dataset_ratio(0.1, stratified=True)
 
     n_dim = dataset.get_n_dim()

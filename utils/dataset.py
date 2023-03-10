@@ -1009,7 +1009,8 @@ class GraphDataset(BaseDataset):
                     edge[2][label_names['edge_labels'][0]] = np.where(full_adj[:, edge[0], edge[1]])[0][0]
 
                 # virtual node check
-                if (attr_node == np.zeros(2)).all():
+                # if (attr_node == np.zeros_like(attr_node)).all():
+                if attr_node[-1] > 0.5:
                     virtual_nodes.append(i_node)
 
         for node in virtual_nodes:
