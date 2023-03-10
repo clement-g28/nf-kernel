@@ -1121,10 +1121,10 @@ class GraphDataset(BaseDataset):
 
         # node attributes
         for i_node in gr.nodes:
+            # If NaN only in the row
+            if np.isnan(np.nanmax(x[i_node])):
+                return None
             if not attributed_node:
-                # If NaN only in the row
-                if np.isnan(np.nanmax(x[i_node])):
-                    return None
 
                 attr_node = np.where(x[i_node] == np.nanmax(x[i_node]))[0][0]
 
@@ -1137,7 +1137,7 @@ class GraphDataset(BaseDataset):
                 for edge in gr.edges(data=True):
                     edge[2][label_names['edge_labels'][0]] = np.where(full_adj[:, edge[0], edge[1]])[0][0]
             else:
-                attr_node = x[i_node]
+                attr_node = x[i_node][:-1]
 
                 gr.nodes[i_node]['node_attr'] = tuple(attr_node)
                 # node_label
@@ -1490,7 +1490,7 @@ class ClassificationGraphDataset(GraphDataset):
                 node_features = name in ['Letter-med', 'COIL-DEL']  # features if not node labels (e.g Letter-med (x,y))
                 dset = TUDataset(path, name=name, use_node_attr=node_features, use_edge_attr=True)
                 # TEST with virtual node
-                node_features = False if name in ['Letter-med'] else node_features
+                # node_features = False if name in ['Letter-med'] else node_features
                 filter_n_nodes = ClassificationGraphDataset.get_filter_size(name)
                 X, A, Y = ClassificationGraphDataset.convert_tud_dataset(dset, node_features,
                                                                          filter_n_nodes=filter_n_nodes)

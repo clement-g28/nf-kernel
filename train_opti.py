@@ -11,7 +11,8 @@ from utils.custom_glow import CGlow
 from utils.models import load_seqflow_model, load_ffjord_model, load_moflow_model
 from utils.training import training_arguments, seqflow_arguments, ffjord_arguments, cglow_arguments, moflow_arguments, \
     graphnvp_arguments, AddGaussianNoise
-from utils.utils import write_dict_to_tensorboard, set_seed, create_folder, AverageMeter, initialize_class_gaussian_params, \
+from utils.utils import write_dict_to_tensorboard, set_seed, create_folder, AverageMeter, \
+    initialize_class_gaussian_params, \
     initialize_regression_gaussian_params, initialize_tmp_regression_gaussian_params
 
 from utils.testing import project_between
@@ -31,6 +32,7 @@ import numpy as np
 from ray.tune import Stopper
 
 from utils.utils import load_dataset
+
 
 def nan_stopper(trial_id: str, result: Dict):
     metric_result = result.get('accuracy')
@@ -73,7 +75,7 @@ def get_val_dataset():
     return ray.get(val_dataset_id)
 
 
-def init_model(var, noise, dataset):
+def init_model(var, noise, dataset, noise_x=None):
     fixed_eigval = None
     eigval_list = [var for i in range(dim_per_label)]
 
@@ -109,6 +111,7 @@ def init_model(var, noise, dataset):
     elif args.model == 'moflow':
         args_moflow, _ = moflow_arguments().parse_known_args()
         args_moflow.noise_scale = noise
+        args_moflow.noise_scale_x = noise_x
         model_single = load_moflow_model(args_moflow, gaussian_params=gaussian_params,
                                          learn_mean=not args.fix_mean, reg_use_var=args.reg_use_var, dataset=dataset)
     else:
@@ -121,7 +124,7 @@ def train_opti(config):
     train_dataset = get_train_dataset()
     val_dataset = get_val_dataset()
     # Init model
-    model = init_model(config["var"], config["noise"], train_dataset)
+    model = init_model(config["var"], config["noise"], train_dataset, config["noise_x"])
 
     device = "cpu"
     if torch.cuda.is_available():
@@ -301,6 +304,7 @@ if __name__ == "__main__":
             dim_per_label = args.dim_per_label
 
     from datetime import datetime
+
     date = datetime.now().strftime("%d_%m_%Y_%H_%M_%S")
 
     folder_path = f'./checkpoint/{args.dataset}/{args.model}/ray_idx/{date}'
@@ -313,11 +317,12 @@ if __name__ == "__main__":
         val_dset.save_split(path)
 
     config = {
-        "var": tune.uniform(1.0, 10.0),
-        "beta": tune.randint(1, 10),
+        "var": tune.uniform(10.0, 20.0),
+        "beta": tune.randint(10, 200),
         "noise": tune.uniform(0.2, 0.9),
-        "lr": tune.loguniform(1e-4, 0.0005),
-        "batch_size": tune.choice([10])
+        "noise_x": tune.uniform(0.05, 0.3),
+        "lr": tune.loguniform(1e-4, 0.001),
+        "batch_size": tune.choice([150, 200, 250])
     }
     scheduler = ASHAScheduler(
         metric="accuracy",

@@ -634,8 +634,9 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
         wl_height = 15
         normalize = False
         if val_dataset.is_attributed_node_dataset():
-            graph_kernel_names = ['mslap']
+            # graph_kernel_names = ['mslap']
             # graph_kernel_names = ['prop']
+            graph_kernel_names = []
             attributed_node = True
             edge_to_node = False
         else:
@@ -962,7 +963,7 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
     with open(f"{save_dir}/eval_res.txt", 'w') as f:
         f.writelines(lines)
 
-    np.save(f"{save_dir}/predictions.npy", predictions)
+    # np.save(f"{save_dir}/predictions.npy", predictions)
 
     return zlinsvc
 
@@ -2023,7 +2024,7 @@ def evaluate_image_interpolations(model, val_dataset, device, save_dir, n_sample
 
 
 def evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=20, n_interpolation=20, Z=None,
-                                  print_as_mol=True, print_as_graph=True):
+                                  print_as_mol=True, print_as_graph=True, eval_type='regression', label=None):
     # si Z est donné, PCA sur 2 dimensions
     if Z is not None:
         pca = PCA(n_components=2)
@@ -2042,16 +2043,36 @@ def evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample
     # batch_size = 2
     # loader = val_dataset.get_loader(batch_size, shuffle=True, drop_last=True, pin_memory=False)
 
-    y_min = model.label_min
-    y_max = model.label_max
-    y_margin = (y_max - y_min) / 3
+    if eval_type == 'regression':
+        y_min = model.label_min
+        y_max = model.label_max
+        y_margin = (y_max - y_min) / 3
+    else:
+        done = []
+        if label is not None:
+            dset_labels = np.array([label])
+        else:
+            dset_labels = np.unique(val_dataset.true_labels)
+
     all_res = []
     with torch.no_grad():
         for j in range(n_sample):
-            i_pt0 = np.random.randint(0, len(val_dataset))
-            i_pt1 = i_pt0
-            while abs(val_dataset.true_labels[i_pt1] - val_dataset.true_labels[i_pt0]) < y_margin:
-                i_pt1 = np.random.randint(0, len(val_dataset))
+            if eval_type == 'regression':
+                i_pt0 = np.random.randint(0, len(val_dataset))
+                i_pt1 = i_pt0
+                while abs(val_dataset.true_labels[i_pt1] - val_dataset.true_labels[i_pt0]) < y_margin:
+                    i_pt1 = np.random.randint(0, len(val_dataset))
+            else:
+                idxs = np.where(val_dataset.true_labels == dset_labels[j % dset_labels.shape[0]])[0]
+                i_pt0 = random.choice(idxs)
+                while i_pt0 in done:
+                    i_pt0 = random.choice(idxs)
+                done.append(i_pt0)
+                i_pt1 = i_pt0
+                while val_dataset.true_labels[i_pt1] != val_dataset.true_labels[
+                    i_pt0] or i_pt0 == i_pt1 or i_pt1 in done:
+                    i_pt1 = np.random.randint(0, len(val_dataset))
+
             pt0, y0 = get_data(val_dataset, i_pt0)
             pt1, y1 = get_data(val_dataset, i_pt1)
             inp = []
@@ -2469,13 +2490,15 @@ def main(args):
     if eval_type == 'classification':
         dataset_name_eval = ['mnist', 'cifar10', 'double_moon', 'iris', 'bcancer'] + GRAPH_CLASSIFICATION_DATASETS
         assert dataset_name in dataset_name_eval, f'Classification can only be evaluated on {dataset_name_eval}'
-        predmodel = evaluate_classification(model, train_dataset, val_dataset, save_dir, device)
+        # predmodel = evaluate_classification(model, train_dataset, val_dataset, save_dir, device)
         _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
                                  only_Z=isinstance(dataset, GraphDataset))
-        evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, print_as_graph=True,
-                          eval_type=eval_type)
-        evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=10,
-                           print_as_mol=True, print_as_graph=True, eval_type=eval_type, predmodel=predmodel)
+        # evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=False, print_as_graph=True,
+        #                   eval_type=eval_type)
+        # evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=10,
+        #                    print_as_mol=True, print_as_graph=True, eval_type=eval_type, predmodel=predmodel)
+        evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z,
+                                      print_as_mol=False, print_as_graph=True, eval_type=eval_type, label=None)
     elif eval_type == 'generation':
         dataset_name_eval = ['mnist', 'cifar10', 'olivetti_faces']
         assert dataset_name in dataset_name_eval, f'Generation can only be evaluated on {dataset_name_eval}'
