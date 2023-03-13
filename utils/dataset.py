@@ -154,7 +154,8 @@ class BaseDataset(Dataset):
                 if self.is_regression_dataset():
                     class_sample_count = np.histogram(self.true_labels)[0]
                 else:
-                    class_sample_count = np.histogram(self.true_labels, bins=np.unique(self.true_labels))[0]
+                    class_sample_count = np.histogram(self.true_labels, bins=np.concatenate(
+                        (np.unique(self.true_labels), np.ones(1) + np.max(self.true_labels))))[0]
                 idxs = np.argsort(self.true_labels)
                 done = 0
                 val_idx = []
@@ -819,7 +820,11 @@ class GraphDataset(BaseDataset):
             train_dataset.test_dataset = None
         else:
             if stratified:
-                class_sample_count = np.histogram(self.true_labels)[0]
+                if self.is_regression_dataset():
+                    class_sample_count = np.histogram(self.true_labels)[0]
+                else:
+                    class_sample_count = np.histogram(self.true_labels, bins=np.concatenate(
+                        (np.unique(self.true_labels), np.ones(1) + np.max(self.true_labels))))[0]
                 idxs = np.argsort(self.true_labels)
                 done = 0
                 val_idx = []
@@ -1506,6 +1511,22 @@ class ClassificationGraphDataset(GraphDataset):
                     X, A = ClassificationGraphDataset.clear_aromatic_molecule_bonds_from_dataset(X, A, label_map)
                 else:
                     label_map = None
+
+                if 'Letter' in name:
+                    # remove 0 adj and graph with unlinked node
+                    bad_graphs = []
+                    for i, adj_mat in enumerate(A):
+                        if adj_mat[:-1].sum() == 0:
+                            bad_graphs.append(i)
+                        else:
+                            for j, feat in enumerate(X[i]):
+                                if feat.sum() != 0 and adj_mat[:-1, j].sum() == 0:
+                                    bad_graphs.append(i)
+                                    break
+
+                    X = np.delete(X, bad_graphs, axis=0)
+                    A = np.delete(A, bad_graphs, axis=0)
+                    Y = np.delete(Y, bad_graphs, axis=0)
 
                 results = ((X, A, Y), test_dataset)
 

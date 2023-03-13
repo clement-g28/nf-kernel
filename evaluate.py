@@ -515,7 +515,7 @@ def evaluate_p_value(predictions, by_pairs=False):
         return None
 
 
-def evaluate_classification(model, train_dataset, val_dataset, save_dir, device, fithyperparam=True):
+def evaluate_classification(model, train_dataset, val_dataset, save_dir, device, fithyperparam=True, batch_size=10):
     if isinstance(train_dataset, GraphDataset):
         train_dataset.permute_graphs_in_dataset()
         val_dataset.permute_graphs_in_dataset()
@@ -524,7 +524,7 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
 
     # Compute results with our approach if not None
     if model is not None:
-        batch_size = 200
+
         loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
 
         start = time.time()
@@ -634,9 +634,9 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
         wl_height = 15
         normalize = False
         if val_dataset.is_attributed_node_dataset():
-            # graph_kernel_names = ['mslap']
+            graph_kernel_names = ['mslap']
             # graph_kernel_names = ['prop']
-            graph_kernel_names = []
+            # graph_kernel_names = []
             attributed_node = True
             edge_to_node = False
         else:
@@ -2490,15 +2490,17 @@ def main(args):
     if eval_type == 'classification':
         dataset_name_eval = ['mnist', 'cifar10', 'double_moon', 'iris', 'bcancer'] + GRAPH_CLASSIFICATION_DATASETS
         assert dataset_name in dataset_name_eval, f'Classification can only be evaluated on {dataset_name_eval}'
-        # predmodel = evaluate_classification(model, train_dataset, val_dataset, save_dir, device)
-        _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
-                                 only_Z=isinstance(dataset, GraphDataset))
-        # evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=False, print_as_graph=True,
+        predmodel = evaluate_classification(model, train_dataset, val_dataset, save_dir, device)
+        # _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
+        #                          only_Z=isinstance(dataset, GraphDataset))
+        # print_as_mol = True
+        # print_as_graph = False
+        # evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=print_as_mol, print_as_graph=print_as_graph,
         #                   eval_type=eval_type)
         # evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=10,
-        #                    print_as_mol=True, print_as_graph=True, eval_type=eval_type, predmodel=predmodel)
-        evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z,
-                                      print_as_mol=False, print_as_graph=True, eval_type=eval_type, label=None)
+        #                    print_as_mol=print_as_mol, print_as_graph=print_as_graph, eval_type=eval_type, predmodel=predmodel)
+        # evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=9, n_interpolation=30, Z=Z,
+        #                               print_as_mol=print_as_mol, print_as_graph=print_as_graph, eval_type=eval_type, label=None)
     elif eval_type == 'generation':
         dataset_name_eval = ['mnist', 'cifar10', 'olivetti_faces']
         assert dataset_name in dataset_name_eval, f'Generation can only be evaluated on {dataset_name_eval}'
