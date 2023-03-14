@@ -1015,8 +1015,8 @@ class GraphDataset(BaseDataset):
 
                 # virtual node check
                 # if (attr_node == np.zeros_like(attr_node)).all():
-                if attr_node[-1] > 0.5:
-                    virtual_nodes.append(i_node)
+                # if attr_node[-1] > 0.5:
+                #     virtual_nodes.append(i_node)
 
         for node in virtual_nodes:
             gr.remove_node(node)
@@ -1142,7 +1142,8 @@ class GraphDataset(BaseDataset):
                 for edge in gr.edges(data=True):
                     edge[2][label_names['edge_labels'][0]] = np.where(full_adj[:, edge[0], edge[1]])[0][0]
             else:
-                attr_node = x[i_node][:-1]
+                # attr_node = x[i_node][:-1]
+                attr_node = x[i_node]
 
                 gr.nodes[i_node]['node_attr'] = tuple(attr_node)
                 # node_label
@@ -1527,6 +1528,10 @@ class ClassificationGraphDataset(GraphDataset):
                     X = np.delete(X, bad_graphs, axis=0)
                     A = np.delete(A, bad_graphs, axis=0)
                     Y = np.delete(Y, bad_graphs, axis=0)
+
+                    # TEST ADD ZERO FEATURES IN X
+                    n_X = np.zeros((X.shape[0], X.shape[1], X.shape[-1] + 2))
+                    n_X[:, :, :-2] = X
 
                 results = ((X, A, Y), test_dataset)
 

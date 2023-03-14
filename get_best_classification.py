@@ -34,7 +34,7 @@ def evaluate_classification(t_model_params, train_dataset, eval_dataset, full_da
         eval_dataset.permute_graphs_in_dataset()
 
     start_from = None
-    # start_from = 100
+    # start_from = 200
     for i, model_loading_params in enumerate(t_model_params):
         if start_from is not None and i < start_from:
             continue
@@ -129,7 +129,7 @@ def evaluate_classification(t_model_params, train_dataset, eval_dataset, full_da
                 best_i = i
                 print(f'New best ({i}).')
                 best_score_str = score_str
-                # save_modelhyperparams(zlinridge, param_gridlin, save_dir, model_type, 'zlinear', scaler_used=False)
+                save_modelhyperparams(svc, param_gridlin, save_dir, model_type, 'zlinear', scaler_used=False)
         else:
             val_loader = eval_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
 

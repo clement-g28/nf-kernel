@@ -634,9 +634,9 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
         wl_height = 15
         normalize = False
         if val_dataset.is_attributed_node_dataset():
-            graph_kernel_names = ['mslap']
+            # graph_kernel_names = ['mslap']
             # graph_kernel_names = ['prop']
-            # graph_kernel_names = []
+            graph_kernel_names = []
             attributed_node = True
             edge_to_node = False
         else:
@@ -1635,13 +1635,17 @@ def create_figures_XZ(model, train_dataset, save_path, device, std_noise=0.1, on
 
 
 def evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, print_as_graph=True,
-                      eval_type='regression', batch_size=20):
+                      eval_type='regression', batch_size=20, means=None):
     assert eval_type in ['regression', 'classification'], 'unknown pre-image generation evaluation type'
+
+    if means is None:
+        model_means = model.means.detach().cpu().numpy()
+    else:
+        model_means = means
 
     if eval_type == 'regression':
         y_min = model.label_min
         y_max = model.label_max
-        model_means = model.means.detach().cpu().numpy()
         samples = []
         # true_X = val_dataset.X
         true_X = val_dataset.get_flattened_X()
@@ -1651,7 +1655,6 @@ def evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, p
             mean = alpha_y * model_means[0] + (1 - alpha_y) * model_means[1]
             samples.append(np.expand_dims(mean, axis=0))
     else:
-        model_means = model.means.detach().cpu().numpy()
         samples = []
         # true_X = val_dataset.X
         true_X = val_dataset.get_flattened_X()
@@ -1736,12 +1739,19 @@ def evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, p
 
 
 def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_by_y=20, print_as_mol=True,
-                       print_as_graph=True, eval_type='regression', batch_size=20, predmodel=None):
+                       print_as_graph=True, eval_type='regression', batch_size=20, predmodel=None, means=None):
     assert eval_type in ['regression', 'classification'], 'unknown pre-image generation evaluation type'
 
-    model_means = model.means.detach().cpu().numpy()
+    if means is None:
+        model_means = model.means.detach().cpu().numpy()
+    else:
+        model_means = means
+
     # covariance_matrix = construct_covariance(model.eigvecs.cpu()[0].squeeze(), model.eigvals.cpu()[0].squeeze())
     covariance_matrices = model.covariance_matrices
+    # TEST smaller variance
+    for cov in covariance_matrices:
+        cov[np.where(cov > 1)] = 1
     samples = []
     datasets_close_samples = []
     datasets_close_y = []
@@ -2491,16 +2501,16 @@ def main(args):
         dataset_name_eval = ['mnist', 'cifar10', 'double_moon', 'iris', 'bcancer'] + GRAPH_CLASSIFICATION_DATASETS
         assert dataset_name in dataset_name_eval, f'Classification can only be evaluated on {dataset_name_eval}'
         predmodel = evaluate_classification(model, train_dataset, val_dataset, save_dir, device)
-        # _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
-        #                          only_Z=isinstance(dataset, GraphDataset))
-        # print_as_mol = True
-        # print_as_graph = False
-        # evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=print_as_mol, print_as_graph=print_as_graph,
-        #                   eval_type=eval_type)
-        # evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=10,
-        #                    print_as_mol=print_as_mol, print_as_graph=print_as_graph, eval_type=eval_type, predmodel=predmodel)
-        # evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=9, n_interpolation=30, Z=Z,
-        #                               print_as_mol=print_as_mol, print_as_graph=print_as_graph, eval_type=eval_type, label=None)
+        _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
+                                 only_Z=isinstance(dataset, GraphDataset))
+        print_as_mol = False
+        print_as_graph = True
+        evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=print_as_mol, print_as_graph=print_as_graph,
+                          eval_type=eval_type)
+        evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=10,
+                           print_as_mol=print_as_mol, print_as_graph=print_as_graph, eval_type=eval_type, predmodel=predmodel)
+        evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=9, n_interpolation=30, Z=Z,
+                                      print_as_mol=print_as_mol, print_as_graph=print_as_graph, eval_type=eval_type, label=None)
     elif eval_type == 'generation':
         dataset_name_eval = ['mnist', 'cifar10', 'olivetti_faces']
         assert dataset_name in dataset_name_eval, f'Generation can only be evaluated on {dataset_name_eval}'

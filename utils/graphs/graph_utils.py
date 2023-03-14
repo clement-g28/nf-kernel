@@ -74,22 +74,30 @@ def save_nx_graph_attr(G, save_path, title=None):
     for i, n in enumerate(G.nodes):
         nodes_pos[i] = G.nodes[i]['node_attr']
 
+    options_node = {
+        "node_color": "skyblue",
+    }
+    options_edge = {
+        "edge_color": [0 for _ in range(len(e0))],
+        "width": 4,
+        "edge_cmap": plt.cm.Blues_r,
+    }
     # nodes
-    nx.draw_networkx_nodes(G, nodes_pos, nodelist=nodes, node_size=150)
+    # nx.draw_networkx_nodes(G, nodes_pos, nodelist=nodes, node_size=10, **options)
+    nx.draw_networkx_nodes(G, nodes_pos, nodelist=nodes, **options_node)
 
     # edges
-    nx.draw_networkx_edges(G, nodes_pos, edgelist=e0, width=1)
-    nx.draw_networkx_edges(G, nodes_pos, edgelist=e1, width=2, edge_color='r')
-    nx.draw_networkx_edges(G, nodes_pos, edgelist=e2, width=3, edge_color='g')
+    # nx.draw_networkx_edges(G, nodes_pos, edgelist=e0, width=10, **options)
+    nx.draw_networkx_edges(G, nodes_pos, edgelist=e0, **options_edge)
+    # nx.draw_networkx_edges(G, nodes_pos, edgelist=e1, width=2, edge_color='r', **options)
+    # nx.draw_networkx_edges(G, nodes_pos, edgelist=e2, width=3, edge_color='g', **options)
     # nx.draw_networkx_edges(G, pos, edgelist=e3, width=2, alpha=0.01, style="dashed")
 
-    ax = plt.gca()
-    # ax.margins(0.08)
     if title is not None:
         plt.title(title)
     plt.axis("off")
     plt.tight_layout()
-    plt.savefig(fname=f'{save_path}.png', format='png')
+    plt.savefig(fname=f'{save_path}.png', format='png', dpi=30)
     plt.close()
 
 

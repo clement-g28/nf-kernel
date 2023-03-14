@@ -286,6 +286,16 @@ class NF(nn.Module):
         mean = self.get_regression_gaussian_mean(label)
         return mean, covariance_matrix
 
+    def refresh_classification_mean_classes(self, z, labels):
+        uni_lab = np.unique(labels)
+        n_means = []
+        for lab in uni_lab:
+            idx = np.where(labels == lab)[0]
+            mean_z = np.expand_dims(z[idx].mean(0), 0)
+            n_means.append(mean_z)
+        n_means = np.concatenate(n_means, 0)
+        return n_means
+
 
 def load_seqflow_model(num_inputs, n_flows, gaussian_params, learn_mean=True, device='cuda:0', reg_use_var=False,
                        dataset=None):

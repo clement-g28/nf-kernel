@@ -130,12 +130,19 @@ if __name__ == "__main__":
         dataset_name_eval = ['mnist', 'cifar10', 'double_moon', 'iris', 'bcancer'] + GRAPH_CLASSIFICATION_DATASETS
         assert dataset_name in dataset_name_eval, f'Classification can only be evaluated on {dataset_name_eval}'
         predmodel = evaluate_classification(model, train_dataset, val_dataset, save_dir, device)
-        # _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
-        #                          only_Z=isinstance(dataset, GraphDataset))
-        # evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, print_as_graph=True,
-        #                   eval_type=eval_type)
-        # evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=10,
-        #                    print_as_mol=True, print_as_graph=True, eval_type=eval_type, predmodel=predmodel)
+        _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
+                                 only_Z=isinstance(dataset, GraphDataset))
+        print_as_mol = False
+        print_as_graph = True
+        computed_means = model.refresh_classification_mean_classes(Z, train_dataset.true_labels)
+        evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=print_as_mol,
+                          print_as_graph=print_as_graph, eval_type=eval_type, means=computed_means)
+        evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=10, print_as_mol=print_as_mol,
+                           print_as_graph=print_as_graph, eval_type=eval_type, predmodel=predmodel,
+                           means=computed_means)
+        evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z,
+                                      print_as_mol=print_as_mol, print_as_graph=print_as_graph, eval_type=eval_type,
+                                      label=None)
     elif eval_type == 'generation':
         dataset_name_eval = ['mnist', 'cifar10', 'olivetti_faces']
         assert dataset_name in dataset_name_eval, f'Generation can only be evaluated on {dataset_name_eval}'
