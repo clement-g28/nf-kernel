@@ -1532,6 +1532,7 @@ class ClassificationGraphDataset(GraphDataset):
                     # TEST ADD ZERO FEATURES IN X
                     n_X = np.zeros((X.shape[0], X.shape[1], X.shape[-1] + 2))
                     n_X[:, :, :-2] = X
+                    X = n_X
 
                 results = ((X, A, Y), test_dataset)
 
