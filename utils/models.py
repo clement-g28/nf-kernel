@@ -65,14 +65,15 @@ class NF(nn.Module):
             self.vis_log_p_calcul = self.vis_log_p_calcul_label
         self.device = device
         self.model = model
-        self.gp = gaussian_params
+        # self.gp = gaussian_params
+        self.gp = [(gp[0], gp[2], gp[3]) for gp in gaussian_params]
         if gaussian_params is not None:
             # self.means = []
             means = []
             self.gaussian_params = []
-            self.eigvals = []
-            self.eigvecs = []
-            self.covariance_matrices = []
+            # self.eigvals = []
+            # self.eigvecs = []
+            # self.covariance_matrices = []
             for gaussian_param in gaussian_params:
                 mean = gaussian_param[0]
                 eigenvec = gaussian_param[1]
@@ -81,7 +82,7 @@ class NF(nn.Module):
                 covariance_matrix = construct_covariance(eigenvec, eigenval)
                 # compute faster determinant and inverse using the diagonal property
                 determinant = np.prod(eigenval)
-                self.covariance_matrices.append(covariance_matrix)
+                # self.covariance_matrices.append(covariance_matrix)
                 inverse_matrix = covariance_matrix.copy()
                 inverse_matrix[np.diag_indices(inverse_matrix.shape[0])] = 1 / np.diag(inverse_matrix)
                 # determinant = np.linalg.det(self.covariance_matrix)
@@ -142,9 +143,12 @@ class NF(nn.Module):
         samples = []
         for i, gaussian_param in enumerate(self.gp):
             mean = self.means[i].detach().cpu().numpy()
-            eigenvec = gaussian_param[1]
-            eigenval = gaussian_param[2]
-            cov = construct_covariance(eigenvec, eigenval)
+
+            # eigenvec = gaussian_param[1]
+            # eigenval = gaussian_param[2]
+            eigenval = gaussian_param[1]
+            cov = eigenval * np.identity(eigenval.shape[0])
+            # cov = construct_covariance(eigenvec, eigenval)
             z = np.random.multivariate_normal(mean, cov, n_per_distrib)
             z_sample = torch.from_numpy(z).reshape(n_per_distrib, -1).float().to(self.device)
             samples.append(z_sample)
@@ -161,7 +165,8 @@ class NF(nn.Module):
             variance = variance * (t_means[1] - t_means[0])
             variance[np.where(variance <= 0)] = 1
         else:
-            variance = torch.from_numpy(self.gp[0][2])
+            # variance = torch.from_numpy(self.gp[0][2])
+            variance = torch.from_numpy(self.gp[0][1])
         samples = torch.normal(mean=sampled_means) * variance.unsqueeze(0)
 
         return samples
@@ -274,9 +279,11 @@ class NF(nn.Module):
         return mean, inv_cov, det
 
     def get_regression_gaussian_sampling_parameters(self, label):
-        eigenvec = self.gp[0][1]
-        eigenval = self.gp[0][2]
-        covariance_matrix = construct_covariance(eigenvec, eigenval)
+        # eigenvec = self.gp[0][1]
+        # eigenval = self.gp[0][2]
+        # covariance_matrix = construct_covariance(eigenvec, eigenval)
+        eigenval = self.gp[0][1]
+        covariance_matrix = eigenval * np.identity(eigenval.shape[0])
         means = self.means.detach().cpu().numpy()
         if self.use_var:
             variance = self.label_mindist / (self.label_max - self.label_min)
@@ -585,9 +592,11 @@ class GlowModel(NF):
         z_samples = []
         for i, gaussian_param in enumerate(self.gp):
             mean = self.means[i].detach().cpu().numpy().squeeze()
-            eigenvec = gaussian_param[1]
-            eigenval = gaussian_param[2]
-            cov = construct_covariance(eigenvec, eigenval)
+            # eigenvec = gaussian_param[1]
+            # eigenval = gaussian_param[2]
+            eigenval = gaussian_param[1]
+            # cov = construct_covariance(eigenvec, eigenval)
+            cov = eigenval * np.identity(eigenval.shape[0])
             z_sample = np.expand_dims(np.random.multivariate_normal(mean, cov).reshape(z_shape), axis=0)
             z_samples.append(z_sample)
         z_sample = torch.from_numpy(np.concatenate(z_samples, axis=0)).float().to(self.device)
@@ -680,6 +689,10 @@ class CMoFlow(NF):
         z, sum_log_det_jacs = output
 
         # compute distance loss
+        # d = torch.cdist(self.means, self.means)
+        # alpha = 0.01
+        # w = torch.exp(- alpha * d)
+        # distloss = w.mean()
         distloss = torch.log(1 + torch.cdist(self.means, self.means).mean())
         # compute log q(z)
         # means = torch.empty_like(self.means).copy_(self.means)

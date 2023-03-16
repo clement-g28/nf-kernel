@@ -400,7 +400,7 @@ def calculate_log_p_with_gaussian_params_regression(x, mean, inv_cov, det):
     return log_ps
 
 
-def load_dataset(args, dataset_name, model_type, to_evaluate=False, transform=None):
+def load_dataset(args, dataset_name, model_type, to_evaluate=False, transform=None, add_feature=None):
     from utils.models import GRAPH_MODELS
     from utils.dataset import ImDataset, SimpleDataset, RegressionGraphDataset, ClassificationGraphDataset, \
         SIMPLE_DATASETS, SIMPLE_REGRESSION_DATASETS, IMAGE_DATASETS, GRAPH_REGRESSION_DATASETS, \
@@ -432,7 +432,7 @@ def load_dataset(args, dataset_name, model_type, to_evaluate=False, transform=No
     elif dataset_name in GRAPH_REGRESSION_DATASETS:
         dataset = RegressionGraphDataset(dataset_name=dataset_name, transform=transform)
     elif dataset_name in GRAPH_CLASSIFICATION_DATASETS:
-        dataset = ClassificationGraphDataset(dataset_name=dataset_name, transform=transform)
+        dataset = ClassificationGraphDataset(dataset_name=dataset_name, transform=transform, add_feature=add_feature)
     else:
         assert False, 'unknown dataset'
     return dataset

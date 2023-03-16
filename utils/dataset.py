@@ -25,7 +25,7 @@ SIMPLE_DATASETS = ['single_moon', 'double_moon', 'iris', 'bcancer']
 IMAGE_DATASETS = ['mnist', 'cifar10', 'olivetti_faces']
 SIMPLE_REGRESSION_DATASETS = ['swissroll', 'diabetes', 'waterquality', 'aquatoxi', 'fishtoxi', 'trafficflow']
 GRAPH_REGRESSION_DATASETS = ['qm7', 'qm9', 'freesolv', 'esol', 'lipo', 'fishtoxi']
-GRAPH_CLASSIFICATION_DATASETS = ['toxcast', 'AIDS', 'Letter-med', 'MUTAG', 'COIL-DEL']
+GRAPH_CLASSIFICATION_DATASETS = ['toxcast', 'AIDS', 'Letter-med', 'MUTAG', 'COIL-DEL', 'BZR']
 
 
 # abstract base kernel dataset class
@@ -757,11 +757,11 @@ def mp_create_graph_func(input_args):
 
 
 class GraphDataset(BaseDataset):
-    def __init__(self, dataset_name, transform=None):
+    def __init__(self, dataset_name, transform=None, add_feature=None):
         self.dataset_name = dataset_name
         # self.label_type = np.int if self.dataset_name not in REGRESSION_DATASETS else np.float
 
-        (train_dataset, test_dataset), self.label_map = self.load_dataset(dataset_name)
+        (train_dataset, test_dataset), self.label_map = self.load_dataset(dataset_name, add_feature=add_feature)
         if len(train_dataset) == 3:
             xs, adjs, y = train_dataset
         else:
@@ -1202,7 +1202,7 @@ class GraphDataset(BaseDataset):
         raise NotImplementedError
 
     @staticmethod
-    def load_dataset(name):
+    def load_dataset(name, add_feature=None):
         raise NotImplementedError
 
     def is_regression_dataset(self):
@@ -1255,7 +1255,7 @@ class RegressionGraphDataset(GraphDataset):
         return result
 
     @staticmethod
-    def load_dataset(name):
+    def load_dataset(name, add_feature=None):
         path = './datasets'
 
         if name in ['qm7', 'qm9', 'freesolv', 'esol', 'lipo']:
@@ -1335,14 +1335,14 @@ class RegressionGraphDataset(GraphDataset):
 
 class ClassificationGraphDataset(GraphDataset):
 
-    def __init__(self, dataset_name, transform=None):
-        super().__init__(dataset_name, transform=transform)
+    def __init__(self, dataset_name, transform=None, add_feature=None):
+        super().__init__(dataset_name, transform=transform, add_feature=add_feature)
 
     def get_dataset_params(self):
-        if self.label_map is not None:
-            node_type_list = [key for key, val in self.label_map.items()]
-        else:
-            node_type_list = [i for i in range(self.X[0][0].shape[-1] - 1)]  # -1 because of virtual node
+        # if self.label_map is not None:
+        #     node_type_list = [key for key, val in self.label_map.items()]
+        # else:
+        node_type_list = [i for i in range(self.X[0][0].shape[-1] - 1)]  # -1 because of virtual node
         if self.dataset_name == 'toxcast':
             b_n_type = 4
             b_n_squeeze = 10
@@ -1350,8 +1350,17 @@ class ClassificationGraphDataset(GraphDataset):
             a_n_type = len(node_type_list) + 1  # 5
         elif self.dataset_name == 'AIDS':
             b_n_type = 4
-            b_n_squeeze = 13
-            a_n_node = 13
+            # b_n_squeeze = 13
+            b_n_squeeze = 19
+            # a_n_node = 13
+            a_n_node = 95
+            a_n_type = len(node_type_list) + 1  # 5
+        elif self.dataset_name == 'BZR':
+            b_n_type = 4
+            # b_n_squeeze = 13
+            b_n_squeeze = 57
+            # a_n_node = 13
+            a_n_node = 57
             a_n_type = len(node_type_list) + 1  # 5
         elif self.dataset_name == 'Letter-med':
             b_n_type = 2
@@ -1418,13 +1427,16 @@ class ClassificationGraphDataset(GraphDataset):
     @staticmethod
     def get_filter_size(dataset_name):
         if dataset_name == 'AIDS':
-            return 22
+            # return 22
+            return None
         elif dataset_name == 'MUTAG':
             return None
         elif dataset_name == 'Letter-med':
             return None
         elif dataset_name == 'COIL-DEL':
             return 60
+        else:
+            return None
 
     @staticmethod
     def clear_aromatic_molecule_bonds_from_dataset(X, A, label_map):
@@ -1450,17 +1462,19 @@ class ClassificationGraphDataset(GraphDataset):
         return n_X, n_A
 
     @staticmethod
-    def load_dataset(name):
+    def load_dataset(name, add_feature=None):
         path = './datasets'
         test_dataset = None
 
-        exist_dataset = os.path.exists(f'{path}/{name}_X.npy') if path is not None else False
+        full_name = f'{name}_p{add_feature}f' if add_feature is not None else name
+
+        exist_dataset = os.path.exists(f'{path}/{full_name}_X.npy') if path is not None else False
         # dset = TUDataset(path, name='DBLP_v1', use_node_attr=False, use_edge_attr=True)
         if exist_dataset:
-            if name in ['AIDS', 'Letter-med', 'MUTAG', 'COIL-DEL']:
-                X = np.load(f'{path}/{name}_X.npy')
-                A = np.load(f'{path}/{name}_A.npy')
-                Y = np.load(f'{path}/{name}_Y.npy')
+            if name in ['AIDS', 'Letter-med', 'MUTAG', 'COIL-DEL', 'BZR']:
+                X = np.load(f'{path}/{full_name}_X.npy')
+                A = np.load(f'{path}/{full_name}_A.npy')
+                Y = np.load(f'{path}/{full_name}_Y.npy')
                 dataset = (X, A, Y)
                 results = (dataset, test_dataset)
                 if name == 'AIDS':
@@ -1480,6 +1494,7 @@ class ClassificationGraphDataset(GraphDataset):
         else:
             if name in ['toxcast']:
                 results, label_map = get_molecular_dataset_mp(name=name, data_path=path)
+                ((X, A, Y), test_dataset) = results
 
                 # TO TEST DATASETS
                 # tasks, (train_dataset, valid_dataset, test_dataset), transformers = dc.molnet.load_toxcast(featurizer='Raw')
@@ -1491,7 +1506,7 @@ class ClassificationGraphDataset(GraphDataset):
                 #         if atom.GetSymbol() not in label_map:
                 #             label_map[atom.GetSymbol()] = len(label_map) + 1
                 # hist = np.histogram(n_atoms, bins=range(0, max(n_atoms) + 1))
-            elif name in ['AIDS', 'Letter-med', 'MUTAG', 'COIL-DEL']:
+            elif name in ['AIDS', 'Letter-med', 'MUTAG', 'COIL-DEL', 'BZR']:
                 # node_features = name in ['Letter-med', 'COIL-DEL']  # features if not node labels (e.g Letter-med (x,y))
                 node_features = name in ['Letter-med', 'COIL-DEL']  # features if not node labels (e.g Letter-med (x,y))
                 dset = TUDataset(path, name=name, use_node_attr=node_features, use_edge_attr=True)
@@ -1528,19 +1543,20 @@ class ClassificationGraphDataset(GraphDataset):
                     X = np.delete(X, bad_graphs, axis=0)
                     A = np.delete(A, bad_graphs, axis=0)
                     Y = np.delete(Y, bad_graphs, axis=0)
-
-                    # TEST ADD ZERO FEATURES IN X
-                    n_X = np.zeros((X.shape[0], X.shape[1], X.shape[-1] + 2))
-                    n_X[:, :, :-2] = X
-                    X = n_X
-
-                results = ((X, A, Y), test_dataset)
-
-                np.save(f'{path}/{name}_X.npy', X)
-                np.save(f'{path}/{name}_A.npy', A)
-                np.save(f'{path}/{name}_Y.npy', Y)
             else:
                 assert False, 'unknown dataset'
+
+            if add_feature is not None:
+                # TEST ADD ZERO FEATURES IN X
+                n_X = np.zeros((X.shape[0], X.shape[1], X.shape[-1] + add_feature))
+                n_X[:, :, :-add_feature] = X
+                X = n_X
+
+            results = ((X, A, Y), test_dataset)
+
+            np.save(f'{path}/{full_name}_X.npy', X)
+            np.save(f'{path}/{full_name}_A.npy', A)
+            np.save(f'{path}/{full_name}_Y.npy', Y)
 
         return results, label_map
 

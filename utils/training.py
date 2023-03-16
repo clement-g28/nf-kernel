@@ -235,6 +235,8 @@ def training_arguments():
 
     parser.add_argument("--add_in_name_folder", type=str, default=None, help='add in folder name the str')
 
+    parser.add_argument("--add_feature", type=int, default=None)
+
     return parser
 
 

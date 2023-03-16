@@ -88,6 +88,8 @@ def project_inZ(z_noisy, params, how_much):
     means, gp = params
     eigenvec = gp[0]
     eigenval = gp[1]
+    # eigenval = gp[0]
+    # eigenvec = np.identity(eigenval.shape[0])
     std = np.sqrt(eigenval)
     noisy_z_norm = (z_noisy - means) / std
     indexes = np.argsort(-eigenval, kind='mergesort')

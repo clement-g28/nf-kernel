@@ -1748,7 +1748,8 @@ def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_b
         model_means = means
 
     # covariance_matrix = construct_covariance(model.eigvecs.cpu()[0].squeeze(), model.eigvals.cpu()[0].squeeze())
-    covariance_matrices = model.covariance_matrices
+    # covariance_matrices = model.covariance_matrices
+    covariance_matrices = [eigval * np.identity(eigval.shape[0]) for _, eigval, _ in model.gp]
     # TEST smaller variance
     for cov in covariance_matrices:
         cov[np.where(cov > 1)] = 1
@@ -2347,7 +2348,8 @@ def create_figure_train_projections(model, train_dataset, std_noise, save_path, 
         zpca_preimage_all.append(zpca_preimage)
 
         gmean = model.means[label].detach().cpu().numpy()
-        gp = model.gp[label][1:-1]
+        # gp = model.gp[label][1:-1]
+        gp = (model.gp[label][1], np.identity(gmean.shape[0]))
         np_proj = project_inZ(Z_lab, params=(gmean, gp), how_much=1)
         proj = torch.from_numpy(np_proj).type(torch.float).to(device)
 
