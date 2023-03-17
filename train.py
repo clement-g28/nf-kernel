@@ -68,7 +68,7 @@ def train(args, model_single, add_path, train_dataset, val_dataset=None):
 
                 # nll_loss, log_p, log_det = calc_loss(log_p, logdet, dataset.im_size, n_bins)
                 nll_loss, log_p, log_det = train_dataset.format_loss(log_p, logdet)
-                loss = nll_loss + beta * distloss
+                loss = nll_loss - beta * distloss
 
                 loss = model_single.upstream_process(loss)
                 # loss.clamp_(-10000,10000)
