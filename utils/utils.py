@@ -430,7 +430,7 @@ def load_dataset(args, dataset_name, model_type, to_evaluate=False, transform=No
     elif dataset_name in SIMPLE_DATASETS or dataset_name in SIMPLE_REGRESSION_DATASETS:
         dataset = SimpleDataset(dataset_name=dataset_name, transform=transform)
     elif dataset_name in GRAPH_REGRESSION_DATASETS:
-        dataset = RegressionGraphDataset(dataset_name=dataset_name, transform=transform)
+        dataset = RegressionGraphDataset(dataset_name=dataset_name, transform=transform, add_feature=add_feature)
     elif dataset_name in GRAPH_CLASSIFICATION_DATASETS:
         dataset = ClassificationGraphDataset(dataset_name=dataset_name, transform=transform, add_feature=add_feature)
     else:

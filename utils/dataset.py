@@ -1210,11 +1210,12 @@ class GraphDataset(BaseDataset):
 
 
 class RegressionGraphDataset(GraphDataset):
-    def __init__(self, dataset_name, transform=None):
-        super().__init__(dataset_name, transform=transform)
+    def __init__(self, dataset_name, transform=None, add_feature=None):
+        super().__init__(dataset_name, transform=transform, add_feature=add_feature)
 
     def get_dataset_params(self):
-        atom_type_list = [key for key, val in self.label_map.items()]
+        # atom_type_list = [key for key, val in self.label_map.items()]
+        atom_type_list = [i for i in range(self.X[0][0].shape[-1] - 1)]  # -1 because of virtual node
         if self.dataset_name == 'qm7':
             # atom_type_list = ['C', 'N', 'S', 'O']
             b_n_type = 4
@@ -1322,6 +1323,27 @@ class RegressionGraphDataset(GraphDataset):
                 # np.save(f'{path}/{name}_testlabels.npy', y_test)
             else:
                 assert False, 'unknown dataset'
+
+        if add_feature is not None:
+            if len(results[0]) == 3:
+                ((X, A, Y), (X_test, A_test, Y_test)) = results
+            else:
+                ((X, A, smiles, Y), (X_test, A_test, smiles_test, Y_test)) = results
+            X = np.concatenate([np.expand_dims(x, 0) for x in X], 0)
+            # TEST ADD ZERO FEATURES IN X
+            n_X = np.zeros((X.shape[0], X.shape[1], X.shape[-1] + add_feature))
+            n_X[:, :, :-add_feature] = X
+            X = n_X
+
+            X_test = np.concatenate([np.expand_dims(x, 0) for x in X_test], 0)
+            n_X = np.zeros((X_test.shape[0], X_test.shape[1], X_test.shape[-1] + add_feature))
+            n_X[:, :, :-add_feature] = X_test
+            X_test = n_X
+
+            if len(results[0]) == 3:
+                results = ((X, A, Y), (X_test, A_test, Y_test))
+            else:
+                results = ((X, A, smiles, Y), (X_test, A_test, smiles_test, Y_test))
 
         return results, label_map
 
