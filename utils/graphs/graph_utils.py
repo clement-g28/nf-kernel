@@ -72,7 +72,7 @@ def save_nx_graph_attr(G, save_path, title=None):
     nodes = [i for i, n in enumerate(G.nodes)]
     nodes_pos = {}
     for i, n in enumerate(G.nodes):
-        nodes_pos[i] = G.nodes[i]['node_attr']
+        nodes_pos[i] = G.nodes[i]['node_attr'][:2]
 
     options_node = {
         "node_color": "skyblue",

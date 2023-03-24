@@ -213,7 +213,7 @@ def main(args):
 
     dataset_name, model_type, folder_name = args.folder.split('/')[-3:]
     # DATASET #
-    dataset = load_dataset(args, dataset_name, model_type, to_evaluate=True)
+    dataset = load_dataset(args, dataset_name, model_type, to_evaluate=True, add_feature=args.add_feature)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -273,6 +273,7 @@ def main(args):
 
 if __name__ == '__main__':
     parser = testing_arguments()
+    parser.add_argument("--add_feature", type=int, default=None)
     args = parser.parse_args()
     args.seed = 0
 
