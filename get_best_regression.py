@@ -312,16 +312,13 @@ def visualize_dataset(dataset, train_dataset, val_dataset, model, save_dir):
         done_val += nb_class_val
 
 
-if __name__ == '__main__':
-    parser = testing_arguments()
-    parser.add_argument("--method", default=0, type=int, help='select between [0,1,2]')
-    args = parser.parse_args()
-
-    set_seed(0)
+def main(args):
+    if args.seed is not None:
+        set_seed(args.seed)
 
     dataset_name, model_type, folder_name = args.folder.split('/')[-3:]
     # DATASET #
-    dataset = load_dataset(args, dataset_name, model_type, to_evaluate=True)
+    dataset = load_dataset(args, dataset_name, model_type, to_evaluate=True, add_feature=args.add_feature)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -377,3 +374,12 @@ if __name__ == '__main__':
 
     best_i = evaluate_regression(t_model_params, train_dataset, val_dataset, full_dataset=dataset, save_dir=save_dir,
                                  device=device, with_train=True, reg_use_var=reg_use_var)
+
+
+if __name__ == '__main__':
+    parser = testing_arguments()
+    parser.add_argument("--add_feature", type=int, default=None)
+    args = parser.parse_args()
+    args.seed = 0
+
+    main(args)
