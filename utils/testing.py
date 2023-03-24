@@ -264,17 +264,17 @@ def initialize_gaussian_params(args, dataset, fixed_eigval, uniform_eigval, gaus
                                                            dim_per_label=dim_per_label, fixed_eigval=fixed_eigval,
                                                            split_graph_dim=split_graph_dim)
     else:
-        if args.method == 0:
-            gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list,
-                                                                    isotrope=isotrope,
-                                                                    dim_per_label=dim_per_label,
-                                                                    fixed_eigval=fixed_eigval)
-        elif args.method == 1:
-            gaussian_params = initialize_tmp_regression_gaussian_params(dataset, eigval_list)
-        elif args.method == 2:
-            gaussian_params = initialize_tmp_regression_gaussian_params(dataset, eigval_list, ones=True)
-        else:
-            assert False, 'no method selected'
+        # if args.method == 0:
+        gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list,
+                                                                isotrope=isotrope,
+                                                                dim_per_label=dim_per_label,
+                                                                fixed_eigval=fixed_eigval)
+        # elif args.method == 1:
+        #     gaussian_params = initialize_tmp_regression_gaussian_params(dataset, eigval_list)
+        # elif args.method == 2:
+        #     gaussian_params = initialize_tmp_regression_gaussian_params(dataset, eigval_list, ones=True)
+        # else:
+        #     assert False, 'no method selected'
     return gaussian_params
 
 
