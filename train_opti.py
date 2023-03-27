@@ -248,21 +248,29 @@ if __name__ == "__main__":
         ]
     elif args.dataset == 'cifar10':
         transform = [
-            transforms.RandomCrop(32, padding=4),
+            # transforms.RandomCrop(32, padding=4),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
         ]
+    elif args.dataset == 'olivetti_faces':
+        transform = [
+            transforms.ToTensor(),
+            transforms.Normalize((0.1307,), (0.3081,))
+        ]
     else:
-        transform = []
+        transform = None
 
+    noise_str = ''
     if args.with_noise is not None:  # ((dataset.X / 255 -dataset.norm_mean) / dataset.norm_std).std() *1/5 =.2
         transform += [AddGaussianNoise(0., args.with_noise)]
+        noise_str = '_noise' + str(args.with_noise).replace('.', '')
 
-    transform = transforms.Compose(transform)
+    if transform is not None:
+        transform = transforms.Compose(transform)
 
     # DATASET #
-    dataset = load_dataset(args, args.dataset, args.model)
+    dataset = load_dataset(args, args.dataset, args.model, transform=transform, add_feature=args.add_feature)
 
     if args.reduce_class_size:
         dataset.reduce_dataset('every_class', how_many=args.reduce_class_size)
