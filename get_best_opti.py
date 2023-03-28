@@ -10,7 +10,8 @@ from utils.dataset import ImDataset, SimpleDataset, GraphDataset, RegressionGrap
     SIMPLE_DATASETS, SIMPLE_REGRESSION_DATASETS, IMAGE_DATASETS, GRAPH_REGRESSION_DATASETS, \
     GRAPH_CLASSIFICATION_DATASETS
 
-from utils.utils import set_seed, create_folder, initialize_class_gaussian_params, initialize_regression_gaussian_params, \
+from utils.utils import set_seed, create_folder, initialize_class_gaussian_params, \
+    initialize_regression_gaussian_params, \
     save_fig, initialize_tmp_regression_gaussian_params
 
 from sklearn.pipeline import make_pipeline
@@ -31,18 +32,14 @@ from utils.testing import retrieve_params_from_name, learn_or_load_modelhyperpar
     prepare_model_loading_params, load_split_dataset, load_model_from_params
 from utils.utils import load_dataset
 
-if __name__ == '__main__':
-    parser = testing_arguments()
-    parser.add_argument("--method", default=0, type=int, help='select between [0,1,2]')
-    parser.add_argument("--eval_type", default='regression', type=str, choices=['regression', 'classification'],
-                        help='select the evaluation type')
-    args = parser.parse_args()
 
-    set_seed(0)
+def main(args):
+    if args.seed is not None:
+        set_seed(args.seed)
 
     dataset_name, model_type, folder_name = args.folder.split('/')[-3:]
     # DATASET #
-    dataset = load_dataset(args, dataset_name, model_type, to_evaluate=True)
+    dataset = load_dataset(args, dataset_name, model_type, to_evaluate=True, add_feature=args.add_feature)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -108,12 +105,10 @@ if __name__ == '__main__':
     save_dir = './save'
     create_folder(save_dir)
 
-
     def loading_func(model, path):
         model_state, optimizer_state = torch.load(path, map_location=device)
         model.load_state_dict(model_state)
         return model
-
 
     if args.eval_type == 'regression':
         best_i = evaluate_regression(t_model_params, train_dataset, val_dataset, full_dataset=dataset,
@@ -122,3 +117,15 @@ if __name__ == '__main__':
     elif args.eval_type == 'classification':
         best_i = evaluate_classification(t_model_params, train_dataset, val_dataset, full_dataset=dataset,
                                          save_dir=save_dir, device=device, with_train=True, cus_load_func=loading_func)
+
+
+if __name__ == '__main__':
+    parser = testing_arguments()
+    parser.add_argument("--method", default=0, type=int, help='select between [0,1,2]')
+    parser.add_argument("--eval_type", default='regression', type=str, choices=['regression', 'classification'],
+                        help='select the evaluation type')
+    parser.add_argument("--add_feature", type=int, default=None)
+    args = parser.parse_args()
+    args.seed = 0
+
+    main(args)
