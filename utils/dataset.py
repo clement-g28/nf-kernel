@@ -1492,6 +1492,47 @@ class ClassificationGraphDataset(GraphDataset):
 
         exist_dataset = os.path.exists(f'{path}/{full_name}_X.npy') if path is not None else False
         # dset = TUDataset(path, name='DBLP_v1', use_node_attr=False, use_edge_attr=True)
+
+        # from gklearn.utils.graph_files import load_gxl
+        # import glob
+        # path = f'{path}/Letter/Letter/MED'
+        # files = sorted(glob.glob(f"{path}/*.gxl"))
+        # graphs = []
+        # for i, file in enumerate(files):
+        #     graph = load_gxl(file)
+        #     graphs.append(graph)
+        #
+        #     save_path = f'{path}/test_{i}'
+        #
+        #     G = graph[0]
+        #     e0 = [(u, v) for (u, v, d) in G.edges(data=True)]
+        #
+        #     nodes = [i for i, n in enumerate(G.nodes)]
+        #     nodes_pos = {}
+        #     for i, n in enumerate(G.nodes):
+        #         x = G.nodes[i]['x']
+        #         y = G.nodes[i]['y']
+        #         nodes_pos[i] = (float(x), float(y))
+        #
+        #     options_node = {
+        #         "node_color": "skyblue",
+        #     }
+        #     options_edge = {
+        #         "edge_color": [0 for _ in range(len(e0))],
+        #         "width": 4,
+        #         "edge_cmap": plt.cm.Blues_r,
+        #     }
+        #     # nodes
+        #     nx.draw_networkx_nodes(G, nodes_pos, nodelist=nodes, **options_node)
+        #
+        #     # edges
+        #     nx.draw_networkx_edges(G, nodes_pos, edgelist=e0, **options_edge)
+        #
+        #     plt.axis("off")
+        #     plt.tight_layout()
+        #     plt.savefig(fname=f'{save_path}.png', format='png', dpi=30)
+        #     plt.close()
+
         if exist_dataset:
             if name in ['AIDS', 'Letter-med', 'MUTAG', 'COIL-DEL', 'BZR']:
                 X = np.load(f'{path}/{full_name}_X.npy')

@@ -129,9 +129,13 @@ def filter_datasets_with_n_atoms(datasets, filter_n_atom, filter_mol_with_H=True
     label_map = {}
     res_mols = [[], [], []]
     res_ys = [[], [], []]
+    max_n_atom = 0
     for k, (dset_mols, ys) in enumerate(datasets):
         for i, mol in enumerate(dset_mols):
-            if mol.GetNumAtoms() <= filter_n_atom:
+            n_atom = mol.GetNumAtoms()
+            if n_atom <= filter_n_atom:
+                if n_atom > max_n_atom:
+                    max_n_atom = n_atom
                 append = True
                 for atom in mol.GetAtoms():
                     if atom.GetSymbol() == 'H' and filter_mol_with_H:
@@ -142,7 +146,7 @@ def filter_datasets_with_n_atoms(datasets, filter_n_atom, filter_mol_with_H=True
                 if append:
                     res_mols[k].append(mol)
                     res_ys[k].append(ys[i])
-    return res_mols, res_ys, label_map
+    return res_mols, res_ys, label_map, max_n_atom
 
 
 def get_molecular_dataset_mp(name='qm7', data_path=None, categorical_values=False, return_smiles=False):
@@ -200,11 +204,11 @@ def get_molecular_dataset_mp(name='qm7', data_path=None, categorical_values=Fals
         val_mols = valid_dataset.X
         test_mols = test_dataset.X
 
-        filter_n_atom = 22
-        res_mols, res_ys, label_map = filter_datasets_with_n_atoms(
+        filter_n_atom = 200 # no filtering
+        res_mols, res_ys, label_map, max_num_nodes = filter_datasets_with_n_atoms(
             datasets=[(train_mols, train_y), (test_mols, test_y), (val_mols, val_y)],
             filter_n_atom=filter_n_atom)
-        max_num_nodes = filter_n_atom
+        # max_num_nodes = filter_n_atom
 
         train_mols, test_mols, val_mols = res_mols
         train_y, test_y, val_y = res_ys
@@ -222,10 +226,9 @@ def get_molecular_dataset_mp(name='qm7', data_path=None, categorical_values=Fals
         test_mols = test_dataset.X
 
         filter_n_atom = 22
-        res_mols, res_ys, label_map = filter_datasets_with_n_atoms(
+        res_mols, res_ys, label_map, max_num_nodes = filter_datasets_with_n_atoms(
             datasets=[(train_mols, train_y), (test_mols, test_y), (val_mols, val_y)],
             filter_n_atom=filter_n_atom)
-        max_num_nodes = filter_n_atom
 
         train_mols, test_mols, val_mols = res_mols
         train_y, test_y, val_y = res_ys
@@ -249,10 +252,9 @@ def get_molecular_dataset_mp(name='qm7', data_path=None, categorical_values=Fals
         test_mols = test_dataset.X
 
         filter_n_atom = 30
-        res_mols, res_ys, label_map = filter_datasets_with_n_atoms(
+        res_mols, res_ys, label_map, max_num_nodes = filter_datasets_with_n_atoms(
             datasets=[(train_mols, train_y), (test_mols, test_y), (val_mols, val_y)],
-            filter_n_atom=filter_n_atom, filter_mol_with_H=True)
-        max_num_nodes = filter_n_atom
+            filter_n_atom=filter_n_atom)
 
         train_mols, test_mols, val_mols = res_mols
     else:
@@ -275,15 +277,15 @@ def process_mols(name, train_data, test_data, max_num_nodes, lmap, dupe_filter, 
     results = []
     for mols, y in (train_data, test_data):
 
-        pool = multiprocessing.Pool()
-        returns = pool.map(multiprocessing_func,
-                           [(chunk, i, max_num_nodes, lmap, name, categorical_values, return_smiles) for i, chunk
-                            in
-                            enumerate(chunks(list(zip(mols, y)), os.cpu_count()))])
-        pool.close()
-        returns = list(itertools.chain.from_iterable(returns))
+        # pool = multiprocessing.Pool()
+        # returns = pool.map(multiprocessing_func,
+        #                    [(chunk, i, max_num_nodes, lmap, name, categorical_values, return_smiles) for i, chunk
+        #                     in
+        #                     enumerate(chunks(list(zip(mols, y)), os.cpu_count()))])
+        # pool.close()
+        # returns = list(itertools.chain.from_iterable(returns))
 
-        # returns = multiprocessing_func((list(zip(mols, y)), 0, max_num_nodes, lmap, name, categorical_values, return_smiles))
+        returns = multiprocessing_func((list(zip(mols, y)), 0, max_num_nodes, lmap, name, categorical_values, return_smiles))
 
         returns = list(filter(None, returns))
 
