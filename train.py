@@ -172,7 +172,7 @@ def train(args, model_single, add_path, train_dataset, val_dataset=None):
                         # writer.add_image('val', img_grid)
                 model.train()
 
-            if epoch % args.save_each_epoch == 0:
+            if epoch > args.save_at_epoch and epoch % args.save_each_epoch == 0:
                 torch.save(model.state_dict(), f"{save_dir}/model_{str(itr + 1).zfill(6)}.pt")
 
 
