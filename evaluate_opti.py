@@ -21,23 +21,16 @@ from evaluate import evaluate_regression, create_figures_XZ, evaluate_preimage, 
     test_generation_on_eigvec, evaluate_projection_1model, evaluate_graph_interpolations, evaluate_image_interpolations, \
     evaluate_p_value, compression_evaluation, create_figure_train_projections
 
-if __name__ == "__main__":
-    choices = ['classification', 'projection', 'generation', 'regression']
-    best_model_choices = ['classification', 'projection', 'regression']
-    for choice in best_model_choices.copy():
-        best_model_choices.append(choice + '_train')
-    parser = testing_arguments()
-    parser.add_argument('--eval_type', type=str, default='classification', choices=choices, help='evaluation type')
-    parser.add_argument('--model_to_use', type=str, default='classification', choices=best_model_choices,
-                        help='what best model to use for the evaluation')
-    parser.add_argument("--method", default=0, type=int, help='select between [0,1,2]')
-    args = parser.parse_args()
+
+def main(args):
     print(args)
-    set_seed(0)
+    if args.seed is not None:
+        set_seed(args.seed)
 
     dataset_name, model_type, folder_name = args.folder.split('/')[-3:]
+
     # DATASET #
-    dataset = load_dataset(args, dataset_name, model_type, to_evaluate=True)
+    dataset = load_dataset(args, dataset_name, model_type, to_evaluate=True, add_feature=args.add_feature)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -164,7 +157,7 @@ if __name__ == "__main__":
         generate_meanclasses(model, train_dataset, device, save_dir)
     elif eval_type == 'projection':
         img_size = dataset.in_size
-        z_shape = model.calc_last_z_shape(img_size)
+        z_shape = model.calc_la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st_z_shape(img_size)
         # PROJECTIONS
         proj_type = 'gp'
         batch_size = 100
@@ -238,3 +231,19 @@ if __name__ == "__main__":
                            print_as_mol=True, print_as_graph=True, predmodel=predmodel)
         evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z,
                                       print_as_mol=True, print_as_graph=True)
+
+
+if __name__ == "__main__":
+    choices = ['classification', 'projection', 'generation', 'regression']
+    best_model_choices = ['classification', 'projection', 'regression']
+    for choice in best_model_choices.copy():
+        best_model_choices.append(choice + '_train')
+    parser = testing_arguments()
+    parser.add_argument('--eval_type', type=str, default='classification', choices=choices, help='evaluation type')
+    parser.add_argument('--model_to_use', type=str, default='classification', choices=best_model_choices,
+                        help='what best model to use for the evaluation')
+    parser.add_argument("--method", default=0, type=int, help='select between [0,1,2]')
+    parser.add_argument("--add_feature", type=int, default=None)
+    args = parser.parse_args()
+    args.seed = 0
+    main(args)
