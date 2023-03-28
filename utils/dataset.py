@@ -1240,7 +1240,8 @@ class RegressionGraphDataset(GraphDataset):
         elif self.dataset_name == 'freesolv':
             b_n_type = 4
             # b_n_squeeze = 1
-            b_n_squeeze = 11
+            # b_n_squeeze = 11
+            b_n_squeeze = 12
             # a_n_node = 22
             a_n_node = 24
             a_n_type = len(atom_type_list) + 1  # 5
