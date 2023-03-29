@@ -192,7 +192,7 @@ def training_arguments():
     parser.add_argument("--lr", default=1e-4, type=float, help="learning rate")
 
     parser.add_argument("--use_tb", action="store_true", help="use tensorboard to save losses")
-    parser.add_argument("--save_at_epoch", default=None, type=int, help='start saving after the epoch')
+    parser.add_argument("--save_at_epoch", default=0, type=int, help='start saving after the epoch')
     parser.add_argument("--save_each_epoch", default=20, type=int, help='save every n epoch')
     parser.add_argument("--sample_every", default=100, type=int, help='sample and generate every n iterations')
     parser.add_argument("--write_train_loss_every", default=100, type=int,
