@@ -8,7 +8,8 @@ from utils.utils import set_seed, create_folder, initialize_class_gaussian_param
 
 from utils.models import load_seqflow_model, load_ffjord_model, load_moflow_model, load_cglow_model
 from utils.dataset import GraphDataset, GRAPH_CLASSIFICATION_DATASETS
-from utils.testing import learn_or_load_modelhyperparams, load_split_dataset, testing_arguments
+from utils.testing import learn_or_load_modelhyperparams, load_split_dataset, testing_arguments, \
+    initialize_gaussian_params
 from utils.training import ffjord_arguments, cglow_arguments, moflow_arguments
 
 from sklearn.svm import SVC
@@ -72,9 +73,12 @@ def main(args):
     # initialize gaussian params
     eigval_list = [mean_of_eigval for i in range(dim_per_label)]
 
+    print('split graph dim should be set to set manually in evaluate opti, default to False...')
+    split_graph_dim = False
     if not dataset.is_regression_dataset():
         gaussian_params = initialize_class_gaussian_params(dataset, eigval_list, isotrope=False,
-                                                           dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
+                                                           dim_per_label=dim_per_label, fixed_eigval=fixed_eigval,
+                                                           split_graph_dim=split_graph_dim)
     else:
         gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list,
                                                                 isotrope=True,
@@ -125,43 +129,53 @@ def main(args):
         predmodel = evaluate_classification(model, train_dataset, val_dataset, save_dir, device)
         _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
                                  only_Z=isinstance(dataset, GraphDataset))
-        print_as_mol = False
+        print_as_mol = True
         print_as_graph = True
-        computed_means = model.refresh_classification_mean_classes(Z, train_dataset.true_labels)
+        refresh_means = False
+        print(f'(print_as_mol, print_as_graph, refresh_means) are set manually to '
+              f'({print_as_mol},{print_as_graph},{refresh_means}).')
+        computed_means = model.refresh_classification_mean_classes(Z, train_dataset.true_labels) if refresh_means \
+            else None
         evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=print_as_mol,
                           print_as_graph=print_as_graph, eval_type=eval_type, means=computed_means)
         evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=10, print_as_mol=print_as_mol,
                            print_as_graph=print_as_graph, eval_type=eval_type, predmodel=predmodel,
                            means=computed_means)
-        evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z,
-                                      print_as_mol=print_as_mol, print_as_graph=print_as_graph, eval_type=eval_type,
-                                      label=None)
+        if isinstance(val_dataset, GraphDataset):
+            evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=9, n_interpolation=30, Z=Z,
+                                          print_as_mol=print_as_mol, print_as_graph=print_as_graph, eval_type=eval_type,
+                                          label=None)
     elif eval_type == 'generation':
         dataset_name_eval = ['mnist', 'cifar10', 'olivetti_faces']
         assert dataset_name in dataset_name_eval, f'Generation can only be evaluated on {dataset_name_eval}'
         # GENERATION
         create_folder(f'{save_dir}/test_generation')
-        # how_much = [1, 10, 30, 50, 78]
-        # how_much = [dim_per_label, n_dim]
-        how_much = [1, dim_per_label]
+
         img_size = dataset.in_size
         z_shape = model.calc_last_z_shape(img_size)
         from utils.training import AddGaussianNoise
         from torchvision import transforms
-
         dataset.transform = transforms.Compose(dataset.transform.transforms + [AddGaussianNoise(0., .2)])
+        print('Gaussian noise added to transforms...')
         evaluate_image_interpolations(model, dataset, device, save_dir, n_sample=20, n_interpolation=10, label=None)
+
+        # how_much = [1, 10, 30, 50, 78]
+        # how_much = [dim_per_label, n_dim]
+        how_much = [1, dim_per_label]
+        print(f'how_much is set manually to {how_much}.')
         for n in how_much:
             test_generation_on_eigvec(model, val_dataset, gaussian_params=gaussian_params, z_shape=z_shape,
                                       how_much_dim=n, device=device, sample_per_label=10, save_dir=save_dir)
         generate_meanclasses(model, train_dataset, device, save_dir)
     elif eval_type == 'projection':
         img_size = dataset.in_size
-        z_shape = model.calc_la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st_z_shape(img_size)
+        z_shape = model.calc_last_z_shape(img_size)
         # PROJECTIONS
         proj_type = 'gp'
         batch_size = 100
         eval_gaussian_std = .1
+        print(f'(proj_type, batch_size, eval_gaussian_std) are set manually to '
+              f'({proj_type},{batch_size},{eval_gaussian_std}).')
         if dataset_name in ['mnist', 'cifar10', 'olivetti_faces']:
             noise_types = ['gaussian', 'speckle', 'poisson', 's&p']
             how_much = list(np.linspace(1, dim_per_label, 6, dtype=np.int))
@@ -170,6 +184,7 @@ def main(args):
             #                 int(dim_per_label + dim_per_label / 6) + dim_per_label, 6, dtype=np.int))
             # how_much = [1,
             #             np.min(np.histogram(train_dataset.true_labels, bins=np.unique(train_dataset.true_labels))[0])]
+            print(f'how_much is set manually to {how_much}.')
             for noise_type in noise_types:
                 compression_evaluation(model, train_dataset, val_dataset, gaussian_params=gaussian_params,
                                        z_shape=z_shape, how_much=how_much, device=device, save_dir=save_dir,
@@ -182,7 +197,6 @@ def main(args):
                                            batch_size=batch_size)
         elif dataset_name in ['single_moon', 'double_moon']:
             noise_type = 'gaussian'
-            # std_noise = .1 / 5
             std_noise = .1
             create_figure_train_projections(model, train_dataset, std_noise=std_noise, save_path=save_dir,
                                             device=device)
@@ -191,6 +205,8 @@ def main(args):
             n_times = 20
             kpca_types = ['linear', 'rbf', 'poly', 'sigmoid']
             proj_type = 'gp'
+            print(f'(n_times, kpca_types, proj_type) are set manually to '
+                  f'({n_times},{kpca_types},{proj_type}).')
             distance_results = {ktype + '-PCA': [] for ktype in kpca_types}
             distance_results['Our-' + proj_type] = []
             for n in range(n_times):
@@ -226,11 +242,17 @@ def main(args):
         predmodel = evaluate_regression(model, train_dataset, val_dataset, save_dir, device)
         _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
                                  only_Z=isinstance(dataset, GraphDataset))
-        evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, print_as_graph=True)
-        evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=10,
-                           print_as_mol=True, print_as_graph=True, predmodel=predmodel)
-        evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z,
-                                      print_as_mol=True, print_as_graph=True)
+        print_as_mol = True
+        print_as_graph = True
+        print(f'(print_as_mol, print_as_graph) are set manually to '
+              f'({print_as_mol},{print_as_graph}).')
+        evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=print_as_mol,
+                          print_as_graph=print_as_graph)
+        evaluate_preimage2(model, val_dataset, device, save_dir, n_y=12, n_samples_by_y=1,
+                           print_as_mol=print_as_mol, print_as_graph=print_as_graph, predmodel=predmodel)
+        if isinstance(val_dataset, GraphDataset):
+            evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z,
+                                          print_as_mol=print_as_mol, print_as_graph=print_as_graph)
 
 
 if __name__ == "__main__":
@@ -245,5 +267,5 @@ if __name__ == "__main__":
     parser.add_argument("--method", default=0, type=int, help='select between [0,1,2]')
     parser.add_argument("--add_feature", type=int, default=None)
     args = parser.parse_args()
-    args.seed = 0
+    args.seed = 3
     main(args)

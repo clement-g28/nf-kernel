@@ -272,8 +272,8 @@ def check_validity(adj, x, atomic_num_list, gpu=-1, return_unique=True,
             valid.append(
                 valid_mol(construct_mol(x_elem, adj_elem, atomic_num_list, custom_bond_assignement=custom_bond_assignement,
                                         virtual_bond_idx=virtual_bond_idx)))
-    valid = [mol for mol in valid if mol is not None]  # len()=valid number, say 794
     idxs = [i for i, mol in enumerate(valid) if mol is not None]
+    valid = [mol for mol in valid if mol is not None]  # len()=valid number, say 794
     if debug:
         print("valid molecules: {}/{}".format(len(valid), adj.shape[0]))
         for i, mol in enumerate(valid):
@@ -282,12 +282,19 @@ def check_validity(adj, x, atomic_num_list, gpu=-1, return_unique=True,
     n_mols = x.shape[0]
     valid_ratio = len(valid) / n_mols  # say 794/1000
     valid_smiles = [Chem.MolToSmiles(mol, isomericSmiles=False) for mol in valid]
-    unique_smiles = list(set(valid_smiles))  # unique valid, say 788
+    unique_smiles = []
+    unique_idxs = []
+    for i, valid_s in enumerate(valid_smiles):
+        if valid_s not in unique_smiles:
+            unique_smiles.append(valid_s)
+            unique_idxs.append(i)
+    # unique_smiles = list(set(valid_smiles))  # unique valid, say 788
     unique_ratio = 0.
     if len(valid) > 0:
         unique_ratio = len(unique_smiles) / len(valid)  # say 788/794
     if return_unique:
         valid_smiles = unique_smiles
+        idxs = unique_idxs
     valid_mols = [Chem.MolFromSmiles(s) for s in valid_smiles]
     abs_unique_ratio = len(unique_smiles) / n_mols
     if debug:

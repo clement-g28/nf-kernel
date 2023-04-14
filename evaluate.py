@@ -631,7 +631,7 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
                 assert False, f'unknown graph kernel: {graph_kernel}'
             return K
 
-        wl_height = 15
+        wl_height = 5
         normalize = False
         if val_dataset.is_attributed_node_dataset():
             # graph_kernel_names = ['mslap']
@@ -1265,7 +1265,7 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
 
     # GRAPH KERNELS FIT
     if isinstance(train_dataset, GraphDataset):
-        def compute_kernel(name, dataset, edge_to_node, normalize, wl_height=10):
+        def compute_kernel(name, dataset, edge_to_node, normalize, wl_height=5):
             if name == 'wl':
                 K = compute_wl_kernel(dataset, wl_height=wl_height, edge_to_node=edge_to_node,
                                       normalize=normalize)
@@ -1279,7 +1279,7 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
                 assert False, f'unknown graph kernel: {graph_kernel}'
             return K
 
-        wl_height = 15
+        wl_height = 5
         edge_to_node = True
         normalize = False
         # graph_kernel_names = ['wl', 'sp', 'hadcode']
@@ -1680,7 +1680,7 @@ def evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, p
     distance = np.mean(np.power(all_res - true_X, 2))
     print(f'Pre-image distance :{distance}')
 
-    # For mols
+    # For graphs
     if isinstance(val_dataset, GraphDataset):
         x_shape = val_dataset.X[0][0].shape
         adj_shape = val_dataset.X[0][1].shape
@@ -1690,26 +1690,17 @@ def evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, p
         x = all_res[:, :x_sh].reshape(all_res.shape[0], *x_shape)
         adj = all_res[:, x_sh:].reshape(all_res.shape[0], *adj_shape)
 
-        # Test if we are using different adj shape
-        # if val_dataset.dataset_name in ['MUTAG']:
-        #     from rdkit import Chem
-        #     virtual_bond_idx = 4
-        #     custom_bond_assignement = [Chem.rdchem.BondType.AROMATIC, Chem.rdchem.BondType.SINGLE,
-        #                                Chem.rdchem.BondType.DOUBLE, Chem.rdchem.BondType.TRIPLE]
-        # else:
-        #     virtual_bond_idx = 3
-        #     custom_bond_assignement = None
+        # if mols
         if print_as_mol and val_dataset.atomic_num_list is not None:
             from utils.graphs.mol_utils import check_validity, save_mol_png
             atomic_num_list = val_dataset.atomic_num_list
-            # valid_mols = check_validity(adj, x, atomic_num_list, custom_bond_assignement=custom_bond_assignement,
-            #                             virtual_bond_idx=virtual_bond_idx)['valid_mols']
             valid_mols = check_validity(adj, x, atomic_num_list)['valid_mols']
             mol_dir = os.path.join(save_dir, 'generated_means')
             os.makedirs(mol_dir, exist_ok=True)
             for ind, mol in enumerate(valid_mols):
                 save_mol_png(mol, os.path.join(mol_dir, '{}.png'.format(ind)))
 
+        # if graphs
         if print_as_graph:
             # define the colormap
             cmap = plt.cm.jet
@@ -1750,9 +1741,10 @@ def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_b
     # covariance_matrix = construct_covariance(model.eigvecs.cpu()[0].squeeze(), model.eigvals.cpu()[0].squeeze())
     # covariance_matrices = model.covariance_matrices
     covariance_matrices = [eigval * np.identity(eigval.shape[0]) for _, eigval, _ in model.gp]
+    # covariance_matrices = [0.1 * np.identity(eigval.shape[0]) for _, eigval, _ in model.gp]
     # TEST smaller variance
-    for cov in covariance_matrices:
-        cov[np.where(cov > 1)] = 1
+    # for cov in covariance_matrices:
+    #     cov[np.where(cov > 1)] = 1
     samples = []
     datasets_close_samples = []
     datasets_close_y = []
@@ -1822,7 +1814,7 @@ def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_b
         save_fig(all_res, ys, size=5, save_path=f'{save_dir}/pre_images_inX', eps=True)
         save_fig(samples.detach().cpu().numpy(), ys, size=5, save_path=f'{save_dir}/pre_images_inZ', eps=True)
 
-    # For mols
+    # For graphs
     if isinstance(val_dataset, GraphDataset):
         x_shape = val_dataset.X[0][0].shape
         adj_shape = val_dataset.X[0][1].shape
@@ -1832,28 +1824,18 @@ def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_b
         x = all_res[:, :x_sh].reshape(all_res.shape[0], *x_shape)
         adj = all_res[:, x_sh:].reshape(all_res.shape[0], *adj_shape)
 
-        # Test if we are using different adj shape
-        # if val_dataset.dataset_name in ['MUTAG']:
-        #     from rdkit import Chem
-        #     virtual_bond_idx = 4
-        #     custom_bond_assignement = [Chem.rdchem.BondType.AROMATIC, Chem.rdchem.BondType.SINGLE,
-        #                                Chem.rdchem.BondType.DOUBLE, Chem.rdchem.BondType.TRIPLE]
-        # else:
-        #     virtual_bond_idx = 3
-        #     custom_bond_assignement = None
+        # if mols
         if print_as_mol and val_dataset.atomic_num_list is not None:
             from utils.graphs.mol_utils import check_validity, save_mol_png
             atomic_num_list = val_dataset.atomic_num_list
-            # results = check_validity(adj, x, atomic_num_list, with_idx=True,
-            #                          custom_bond_assignement=custom_bond_assignement,
-            #                          virtual_bond_idx=virtual_bond_idx)
-            results = check_validity(adj, x, atomic_num_list, with_idx=True)
-            valid_mols = results['valid_mols']
-            valid_smiles = results['valid_smiles']
-            idxs_valid = results['idxs']
+            results_g = check_validity(adj, x, atomic_num_list, with_idx=True)
+            valid_mols = results_g['valid_mols']
+            valid_smiles = results_g['valid_smiles']
+            idxs_valid = results_g['idxs']
             mol_dir = os.path.join(save_dir, 'generated_samples')
             os.makedirs(mol_dir, exist_ok=True)
 
+            psize = (200, 200)
             from rdkit import Chem, DataStructs
             from rdkit.Chem import Draw, AllChem
             from ordered_set import OrderedSet
@@ -1861,7 +1843,6 @@ def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_b
                 # save_mol_png(mol, os.path.join(mol_dir, '{}.png'.format(ind)))
 
                 # show with closest dataset samples
-                psize = (200, 200)
                 mol_idx = idxs_valid[ind]
                 y_idx = math.floor(mol_idx / n_samples_by_y)
                 close_samples_x = datasets_close_samples[y_idx][0]
@@ -1889,6 +1870,26 @@ def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_b
                                            subImgSize=psize)
 
                 img.save(f'{save_dir}/generated_samples/{ind}_close_grid.png')
+
+            # save image of generated mols
+            legends_with_seed = valid_smiles
+            ys_idx = np.floor(np.array(idxs_valid) / n_samples_by_y).astype(int)
+            # legends_with_seed = [legend + ', y:' + str(round(ys[ys_idx[i]], 2)) for i, legend in enumerate(legends_with_seed)]
+            legends_with_seed = ['y=' + str(round(ys[ys_idx[i]], 2)) for i, legend in enumerate(legends_with_seed)]
+            if predmodel is not None:
+                legends_with_seed = [legend + ', f(G)=' + str(round(pred_ys[ys_idx[i]], 2)) for i, legend in
+                                     enumerate(legends_with_seed)]
+            img = Draw.MolsToGridImage(valid_mols, legends=legends_with_seed,
+                                       # molsPerRow=int(2* math.sqrt(len(valid_mols))),
+                                       molsPerRow=6,
+                                       subImgSize=psize, useSVG=True)
+            with open(f'{save_dir}/generated_samples/all_generated_grid.svg', 'w') as f:
+                f.write(img)
+            # img.save(f'{save_dir}/generated_samples/all_generated_grid.png')
+
+            print('mean_error between y sampled and pred y:', np.mean(ys - pred_ys))
+
+        # if graphs
         if print_as_graph:
 
             # define the colormap
@@ -1979,9 +1980,6 @@ def evaluate_image_interpolations(model, val_dataset, device, save_dir, n_sample
 
         return img, target
 
-    # batch_size = 2
-    # loader = val_dataset.get_loader(batch_size, shuffle=True, drop_last=True, pin_memory=False)
-
     if label is not None:
         dset_labels = np.array([label])
     else:
@@ -2051,9 +2049,6 @@ def evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample
             sample = dataset.transform(*sample)
         return sample, y
 
-    # batch_size = 2
-    # loader = val_dataset.get_loader(batch_size, shuffle=True, drop_last=True, pin_memory=False)
-
     if eval_type == 'regression':
         y_min = model.label_min
         y_max = model.label_max
@@ -2112,30 +2107,9 @@ def evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample
                 lab[-(2 + n_interpolation):] = 1
                 save_fig(data, lab, size=5, save_path=f'{save_dir}/generated_interp/{str(j).zfill(4)}_res_pca')
 
-    # with torch.no_grad():
-    #     for j, data in enumerate(loader):
-    #         inp, labels = data
-    #         inp = val_dataset.format_data(inp, device)
-    #         labels = labels.to(device)
-    #         log_p, distloss, logdet, out = model(inp, labels)
-    #
-    #         d = out[1] - out[0]
-    #         z_list = [(out[0] + i * 1.0 / (n_interpolation + 1) * d).unsqueeze(0) for i in range(n_interpolation + 2)]
-    #
-    #         z_array = torch.cat(z_list, dim=0)
-    #
-    #         res = model.reverse(z_array)
-    #         all_res.append(res.detach().cpu().numpy())
-    #
-    #         if Z is not None:
-    #             pca_interp = pca.transform(z_array.detach().cpu().numpy())
-    #             data = np.concatenate((pca_Z, pca_interp), axis=0)
-    #             lab = np.zeros(data.shape[0])
-    #             lab[-(batch_size + n_interpolation):] = 1
-    #             save_fig(data, lab, size=5, save_path=f'{save_dir}/generated_interp/{str(j).zfill(4)}_res_pca')
-
     all_res = np.concatenate(all_res, axis=0)
 
+    # for graphs
     if isinstance(val_dataset, GraphDataset):
         x_shape = val_dataset.X[0][0].shape
         adj_shape = val_dataset.X[0][1].shape
@@ -2164,6 +2138,7 @@ def evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample
             xm = x[n * (n_interpolation + 2):(n + 1) * (n_interpolation + 2)]
             adjm = adj[n * (n_interpolation + 2):(n + 1) * (n_interpolation + 2)]
 
+            # if mols
             if print_as_mol and atomic_num_list is not None:
                 interpolation_mols = [valid_mol(construct_mol(x_elem, adj_elem, atomic_num_list))
                                       for x_elem, adj_elem in zip(xm, adjm)]
@@ -2202,6 +2177,8 @@ def evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample
                     os.makedirs(f'{save_dir}/generated_interp')
                 img.save(
                     f'{save_dir}/generated_interp/{str(n).zfill(4)}_res_grid_valid{len(valid_mols)}_{len(interpolation_mols)}.png')
+
+            # if graphs
             if print_as_graph:
                 graphs = val_dataset.get_full_graphs(data=list(zip(xm, adjm)),
                                                      attributed_node=val_dataset.is_attributed_node_dataset())
@@ -2232,14 +2209,6 @@ def evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample
                 images[:, :-1, :, -margin:] = 0
                 res_name = f'{str(n).zfill(4)}_res_grid'
                 format(images, nrow=nrow, save_path=f'{save_dir}/generated_interp_graphs', res_name=res_name)
-
-        # from utils.graphs.mol_utils import check_validity, save_mol_png
-        # atomic_num_list = val_dataset.atomic_num_list
-        # valid_mols = check_validity(adj, x, atomic_num_list)['valid_mols']
-        # mol_dir = os.path.join(save_dir, 'generated_interp')
-        # os.makedirs(mol_dir, exist_ok=True)
-        # for ind, mol in enumerate(valid_mols):
-        #     save_mol_png(mol, os.path.join(mol_dir, '{}.png'.format(ind)))
 
 
 def create_figure_train_projections(model, train_dataset, std_noise, save_path, device):
@@ -2505,28 +2474,40 @@ def main(args):
         predmodel = evaluate_classification(model, train_dataset, val_dataset, save_dir, device)
         _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
                                  only_Z=isinstance(dataset, GraphDataset))
-        print_as_mol = False
+        print_as_mol = True
         print_as_graph = True
-        evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=print_as_mol, print_as_graph=print_as_graph,
-                          eval_type=eval_type)
-        evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=10,
-                           print_as_mol=print_as_mol, print_as_graph=print_as_graph, eval_type=eval_type, predmodel=predmodel)
-        evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=9, n_interpolation=30, Z=Z,
-                                      print_as_mol=print_as_mol, print_as_graph=print_as_graph, eval_type=eval_type, label=None)
+        refresh_means = False
+        print(f'(print_as_mol, print_as_graph, refresh_means) are set manually to '
+              f'({print_as_mol},{print_as_graph},{refresh_means}).')
+        computed_means = model.refresh_classification_mean_classes(Z, train_dataset.true_labels) if refresh_means \
+            else None
+        evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=print_as_mol,
+                          print_as_graph=print_as_graph, eval_type=eval_type, means=computed_means)
+        evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=10, print_as_mol=print_as_mol,
+                           print_as_graph=print_as_graph, eval_type=eval_type, predmodel=predmodel,
+                           means=computed_means)
+        if isinstance(val_dataset, GraphDataset):
+            evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=9, n_interpolation=30, Z=Z,
+                                          print_as_mol=print_as_mol, print_as_graph=print_as_graph, eval_type=eval_type,
+                                          label=None)
     elif eval_type == 'generation':
         dataset_name_eval = ['mnist', 'cifar10', 'olivetti_faces']
         assert dataset_name in dataset_name_eval, f'Generation can only be evaluated on {dataset_name_eval}'
         # GENERATION
         create_folder(f'{save_dir}/test_generation')
-        # how_much = [1, 10, 30, 50, 78]
-        # how_much = [dim_per_label, n_dim]
-        how_much = [1, dim_per_label]
+
         img_size = dataset.in_size
         z_shape = model.calc_last_z_shape(img_size)
         from utils.training import AddGaussianNoise
         from torchvision import transforms
         dataset.transform = transforms.Compose(dataset.transform.transforms + [AddGaussianNoise(0., .2)])
+        print('Gaussian noise added to transforms...')
         evaluate_image_interpolations(model, dataset, device, save_dir, n_sample=20, n_interpolation=10, label=None)
+
+        # how_much = [1, 10, 30, 50, 78]
+        # how_much = [dim_per_label, n_dim]
+        how_much = [1, dim_per_label]
+        print(f'how_much is set manually to {how_much}.')
         for n in how_much:
             test_generation_on_eigvec(model, val_dataset, gaussian_params=gaussian_params, z_shape=z_shape,
                                       how_much_dim=n, device=device, sample_per_label=10, save_dir=save_dir)
@@ -2538,6 +2519,8 @@ def main(args):
         proj_type = 'gp'
         batch_size = 100
         eval_gaussian_std = .1
+        print(f'(proj_type, batch_size, eval_gaussian_std) are set manually to '
+              f'({proj_type},{batch_size},{eval_gaussian_std}).')
         if dataset_name in ['mnist', 'cifar10', 'olivetti_faces']:
             noise_types = ['gaussian', 'speckle', 'poisson', 's&p']
             how_much = list(np.linspace(1, dim_per_label, 6, dtype=np.int))
@@ -2546,6 +2529,7 @@ def main(args):
             #                 int(dim_per_label + dim_per_label / 6) + dim_per_label, 6, dtype=np.int))
             # how_much = [1,
             #             np.min(np.histogram(train_dataset.true_labels, bins=np.unique(train_dataset.true_labels))[0])]
+            print(f'how_much is set manually to {how_much}.')
             for noise_type in noise_types:
                 compression_evaluation(model, train_dataset, val_dataset, gaussian_params=gaussian_params,
                                        z_shape=z_shape, how_much=how_much, device=device, save_dir=save_dir,
@@ -2558,7 +2542,6 @@ def main(args):
                                            batch_size=batch_size)
         elif dataset_name in ['single_moon', 'double_moon']:
             noise_type = 'gaussian'
-            # std_noise = .1 / 5
             std_noise = .1
             create_figure_train_projections(model, train_dataset, std_noise=std_noise, save_path=save_dir,
                                             device=device)
@@ -2567,6 +2550,8 @@ def main(args):
             n_times = 20
             kpca_types = ['linear', 'rbf', 'poly', 'sigmoid']
             proj_type = 'gp'
+            print(f'(n_times, kpca_types, proj_type) are set manually to '
+                  f'({n_times},{kpca_types},{proj_type}).')
             distance_results = {ktype + '-PCA': [] for ktype in kpca_types}
             distance_results['Our-' + proj_type] = []
             for n in range(n_times):
@@ -2602,11 +2587,17 @@ def main(args):
         predmodel = evaluate_regression(model, train_dataset, val_dataset, save_dir, device)
         _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
                                  only_Z=isinstance(dataset, GraphDataset))
-        evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, print_as_graph=True)
-        evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=10,
-                           print_as_mol=True, print_as_graph=True, predmodel=predmodel)
-        evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z,
-                                      print_as_mol=True, print_as_graph=True)
+        print_as_mol = True
+        print_as_graph = True
+        print(f'(print_as_mol, print_as_graph) are set manually to '
+              f'({print_as_mol},{print_as_graph}).')
+        evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=print_as_mol,
+                          print_as_graph=print_as_graph)
+        evaluate_preimage2(model, val_dataset, device, save_dir, n_y=12, n_samples_by_y=1,
+                           print_as_mol=print_as_mol, print_as_graph=print_as_graph, predmodel=predmodel)
+        if isinstance(val_dataset, GraphDataset):
+            evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z,
+                                          print_as_mol=print_as_mol, print_as_graph=print_as_graph)
 
 
 if __name__ == "__main__":
