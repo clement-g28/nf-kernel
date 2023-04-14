@@ -46,9 +46,22 @@ python train.py --dataset bcancer --model ffjord --n_block 1 --dims 64-64-64 --l
 ```
 
 #### Image datasets
+
 MNIST:
 ```
 python train.py --dataset mnist --model cglow --batch_size 16 --use_tb --validation 0.01 --uniform_eigval --mean_of_eigval 10 --with_noise .5
+```
+
+#### Graph datasets
+
+MUTAG:
+```
+python train.py --dataset MUTAG --model moflow --n_flow 32 --n_block 1 --batch_size 10 --lr 0.0002 --noise_scale 0.6 --use_tb --validation 0.1 --uniform_eigval --beta 200 --mean_of_eigval 1.5 --n_epoch 3000 --save_each_epoch 10 --split_graph_dim
+```
+
+Letter-med:
+```
+python train.py --dataset Letter-med --model moflow --n_flow 32 --n_block 1 --batch_size 200 --lr 0.001 --noise_scale 0.6 --noise_scale_x 0.2 --use_tb --validation 0.1 --uniform_eigval --beta 200 --mean_of_eigval 20 --n_epoch 10000 --save_each_epoch 10 --split_graph_dim
 ```
 
 ### Regression
@@ -86,7 +99,6 @@ python train.py --dataset fishtoxi --model ffjord --n_block 1 --dims 64-64-64 --
 
 #### Graph datasets
 
-### Regression
 QM7:
 ```
 python train.py --dataset qm7 --model moflow --n_flow 32 --n_block 1 --batch_size 100 --lr 0.0004 --noise_scale 0.5674 --use_tb --validation 0.1 --uniform_eigval --beta 157 --mean_of_eigval 0.2140 --n_epoch 1000 --save_each_epoch 1 --isotrope_gaussian
@@ -105,17 +117,6 @@ python train.py --dataset esol --model moflow --n_flow 32 --n_block 1 --batch_si
 FREESOLV:
 ```
 python train.py --dataset freesolv --model moflow --n_flow 32 --n_block 1 --batch_size 100 --lr 0.0004 --noise_scale 0.5674 --use_tb --validation 0.1 --uniform_eigval --beta 145 --mean_of_eigval 0.8 --n_epoch 10000 --save_each_epoch 10 --isotrope_gaussian
-```
-
-### Classification
-MUTAG:
-```
-python train.py --dataset MUTAG --model moflow --n_flow 32 --n_block 1 --batch_size 10 --lr 0.0002 --noise_scale 0.6 --use_tb --validation 0.1 --uniform_eigval --beta 200 --mean_of_eigval 1.5 --n_epoch 3000 --save_each_epoch 10 --split_graph_dim
-```
-
-Letter-med:
-```
-python train.py --dataset Letter-med --model moflow --n_flow 32 --n_block 1 --batch_size 200 --lr 0.001 --noise_scale 0.6 --noise_scale_x 0.2 --use_tb --validation 0.1 --uniform_eigval --beta 200 --mean_of_eigval 20 --n_epoch 10000 --save_each_epoch 10 --split_graph_dim
 ```
 
 ## Find Models
