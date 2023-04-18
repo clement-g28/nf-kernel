@@ -1690,6 +1690,11 @@ def evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, p
         x = all_res[:, :x_sh].reshape(all_res.shape[0], *x_shape)
         adj = all_res[:, x_sh:].reshape(all_res.shape[0], *adj_shape)
 
+        # if feature has been added
+        if val_dataset.add_feature is not None:
+            af = val_dataset.add_feature
+            x = x[:, :, :-af]
+
         # if mols
         if print_as_mol and val_dataset.atomic_num_list is not None:
             from utils.graphs.mol_utils import check_validity, save_mol_png
@@ -1757,6 +1762,7 @@ def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_b
         ys = np.linspace(y_min, y_max, n_y)
     else:
         ys = np.unique(val_dataset.true_labels)
+    sampled_ys = np.concatenate([[y] * n_samples_by_y for y in ys])
 
     close_samples_dist = scipy.spatial.distance.cdist(np.expand_dims(ys, axis=1),
                                                       np.expand_dims(val_dataset.true_labels, axis=1))
@@ -1824,6 +1830,11 @@ def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_b
         x = all_res[:, :x_sh].reshape(all_res.shape[0], *x_shape)
         adj = all_res[:, x_sh:].reshape(all_res.shape[0], *adj_shape)
 
+        # if feature has been added
+        if val_dataset.add_feature is not None:
+            af = val_dataset.add_feature
+            x = x[:, :, :-af]
+
         # if mols
         if print_as_mol and val_dataset.atomic_num_list is not None:
             from utils.graphs.mol_utils import check_validity, save_mol_png
@@ -1877,7 +1888,7 @@ def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_b
             # legends_with_seed = [legend + ', y:' + str(round(ys[ys_idx[i]], 2)) for i, legend in enumerate(legends_with_seed)]
             legends_with_seed = ['y=' + str(round(ys[ys_idx[i]], 2)) for i, legend in enumerate(legends_with_seed)]
             if predmodel is not None:
-                legends_with_seed = [legend + ', f(G)=' + str(round(pred_ys[ys_idx[i]], 2)) for i, legend in
+                legends_with_seed = [legend + ', f(G)=' + str(round(pred_ys[i], 2)) for i, legend in
                                      enumerate(legends_with_seed)]
             img = Draw.MolsToGridImage(valid_mols, legends=legends_with_seed,
                                        # molsPerRow=int(2* math.sqrt(len(valid_mols))),
@@ -1887,7 +1898,7 @@ def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_b
                 f.write(img)
             # img.save(f'{save_dir}/generated_samples/all_generated_grid.png')
 
-            print('mean_error between y sampled and pred y:', np.mean(ys - pred_ys))
+            print('mean_error between y sampled and pred y:', np.mean(sampled_ys - pred_ys))
 
         # if graphs
         if print_as_graph:
@@ -2128,6 +2139,11 @@ def evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample
         x = all_res[:, :x_sh].reshape(all_res.shape[0], *x_shape)
         adj = all_res[:, x_sh:].reshape(all_res.shape[0], *adj_shape)
         atomic_num_list = val_dataset.atomic_num_list
+
+        # if feature has been added
+        if val_dataset.add_feature is not None:
+            af = val_dataset.add_feature
+            x = x[:, :, :-af]
 
         from rdkit import Chem, DataStructs
         from rdkit.Chem import Draw, AllChem

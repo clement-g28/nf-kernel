@@ -761,6 +761,7 @@ class GraphDataset(BaseDataset):
         self.dataset_name = dataset_name
         # self.label_type = np.int if self.dataset_name not in REGRESSION_DATASETS else np.float
 
+        self.add_feature = add_feature
         (train_dataset, test_dataset), self.label_map = self.load_dataset(dataset_name, add_feature=add_feature)
         if len(train_dataset) == 3:
             xs, adjs, y = train_dataset
