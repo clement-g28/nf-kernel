@@ -34,7 +34,7 @@ def evaluate_classification(t_model_params, train_dataset, eval_dataset, full_da
         eval_dataset.permute_graphs_in_dataset()
 
     start_from = None
-    start_from = 454
+    # start_from = 454
     for i, model_loading_params in enumerate(t_model_params):
         if start_from is not None and i < start_from:
             continue

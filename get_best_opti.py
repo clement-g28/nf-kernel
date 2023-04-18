@@ -87,9 +87,12 @@ def main(args):
         # initialize gaussian params
         eigval_list = [mean_of_eigval for i in range(dim_per_label)]
 
+        print('split graph dim should be set to set manually in evaluate opti, default to False...')
+        split_graph_dim = False
         if not dataset.is_regression_dataset():
             gaussian_params = initialize_class_gaussian_params(dataset, eigval_list, isotrope=True,
-                                                               dim_per_label=dim_per_label, fixed_eigval=fixed_eigval)
+                                                               dim_per_label=dim_per_label, fixed_eigval=fixed_eigval,
+                                                               split_graph_dim=split_graph_dim)
         else:
             gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list,
                                                                     isotrope=True,
