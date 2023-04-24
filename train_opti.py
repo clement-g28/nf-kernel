@@ -262,7 +262,8 @@ if __name__ == "__main__":
         transform = None
 
     noise_str = ''
-    if args.with_noise is not None:  # ((dataset.X / 255 -dataset.norm_mean) / dataset.norm_std).std() *1/5 =.2
+    if args.with_noise is not None:
+        transform = [] if transform is None else transform
         transform += [AddGaussianNoise(0., args.with_noise)]
         noise_str = '_noise' + str(args.with_noise).replace('.', '')
 
