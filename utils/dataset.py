@@ -30,7 +30,7 @@ GRAPH_CLASSIFICATION_DATASETS = ['toxcast', 'AIDS', 'Letter-med', 'MUTAG', 'COIL
 
 # abstract base kernel dataset class
 class BaseDataset(Dataset):
-    def __init__(self, X, true_labels, test_dataset=None):
+    def __init__(self, X, true_labels, test_dataset=None, add_feature=None):
         self.ori_X = X
         self.ori_true_labels = true_labels
         self.X = X
@@ -43,6 +43,8 @@ class BaseDataset(Dataset):
         self.test_dataset = test_dataset
 
         self.in_size = -1
+
+        self.add_feature = add_feature
 
     def __len__(self):
         return len(self.X)
@@ -235,12 +237,13 @@ class BaseDataset(Dataset):
 
 
 class SimpleDataset(BaseDataset):
-    def __init__(self, dataset_name, transform=None):
+    def __init__(self, dataset_name, transform=None, add_feature=None):
         self.dataset_name = dataset_name
         self.label_type = np.int if self.dataset_name not in SIMPLE_REGRESSION_DATASETS else np.float
+        # self.label_type = np.int
         self.transform = transform
-        ori_X, ori_true_labels, test_dataset = self.load_dataset(dataset_name)
-        super().__init__(ori_X, ori_true_labels, test_dataset)
+        ori_X, ori_true_labels, test_dataset = self.load_dataset(dataset_name, add_feature=add_feature)
+        super().__init__(ori_X, ori_true_labels, test_dataset, add_feature=add_feature)
 
         self.in_size = ori_X.shape[-1]
 
@@ -283,7 +286,7 @@ class SimpleDataset(BaseDataset):
         return self.reduce_dataset(reduce_type, label, how_many, reduce_from_ori)
 
     @staticmethod
-    def load_dataset(name):
+    def load_dataset(name, add_feature=None):
         path = './datasets'
         exist_dataset = os.path.exists(f'{path}/{name}_data.npy') if path is not None else False
         test_dataset = None
@@ -305,6 +308,8 @@ class SimpleDataset(BaseDataset):
             # X = np.load(f'{path}/{name_c}_data.npy') /5
             X = np.load(f'{path}/{name_c}_data.npy')
             labels = np.load(f'{path}/{name_c}_labels.npy')
+            # test denoising
+            # labels = np.zeros_like(labels).astype(np.int)
             if name == 'single_moon':
                 visualize_flow.LOW = -1.5
                 visualize_flow.HIGH = 2.5
@@ -506,6 +511,19 @@ class SimpleDataset(BaseDataset):
             np.save(f'{path}/{name}_data.npy', X)
             np.save(f'{path}/{name}_labels.npy', labels)
 
+        if add_feature is not None:
+            # TEST ADD ZERO FEATURES IN X
+            n_X = np.zeros((X.shape[0], X.shape[-1] + add_feature))
+            n_X[:, :-add_feature] = X
+            X = n_X
+
+            if test_dataset is not None:
+                X_test = test_dataset[0]
+                n_X = np.zeros((X_test.shape[0], X_test.shape[-1] + add_feature))
+                n_X[:, :-add_feature] = X_test
+                X_test = n_X
+                test_dataset = (X_test, test_dataset[1])
+
         return X, labels, test_dataset
 
     def format_data(self, input, device):
@@ -520,6 +538,7 @@ class SimpleDataset(BaseDataset):
         return x
 
     def is_regression_dataset(self):
+        # return False
         return self.dataset_name in SIMPLE_REGRESSION_DATASETS
 
 
@@ -761,7 +780,6 @@ class GraphDataset(BaseDataset):
         self.dataset_name = dataset_name
         # self.label_type = np.int if self.dataset_name not in REGRESSION_DATASETS else np.float
 
-        self.add_feature = add_feature
         (train_dataset, test_dataset), self.label_map = self.load_dataset(dataset_name, add_feature=add_feature)
         if len(train_dataset) == 3:
             xs, adjs, y = train_dataset
@@ -786,7 +804,7 @@ class GraphDataset(BaseDataset):
         # Graphs for tests
         self.define_networkx_labels()
 
-        super().__init__(graphs, y, test_dataset)
+        super().__init__(graphs, y, test_dataset, add_feature=add_feature)
         # self.Gn = self.init_graphs_mp()
 
         # if self.is_regression_dataset():

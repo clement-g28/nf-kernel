@@ -248,7 +248,7 @@ def main(args):
               f'({print_as_mol},{print_as_graph}).')
         evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=print_as_mol,
                           print_as_graph=print_as_graph)
-        evaluate_preimage2(model, val_dataset, device, save_dir, n_y=12, n_samples_by_y=1,
+        evaluate_preimage2(model, val_dataset, device, save_dir, n_y=24, n_samples_by_y=1,
                            print_as_mol=print_as_mol, print_as_graph=print_as_graph, predmodel=predmodel)
         if isinstance(val_dataset, GraphDataset):
             evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z,

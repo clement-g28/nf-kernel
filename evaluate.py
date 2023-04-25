@@ -1152,6 +1152,9 @@ def evaluate_distances(model, train_dataset, val_dataset, gaussian_params, z_sha
     print(f'Our approach ({proj_type}) : {mean_dist}')
     distances_results[f'Our-{proj_type}'] = mean_dist
 
+    base_dist = np.mean(np.sum(np.abs(val_noised - ordered_val.reshape(ordered_val.shape[0], -1)), axis=1))
+    distances_results['NoiseDist'] = base_dist
+    print(f'Noise base distance : {base_dist}')
     # from get_best_projection import save_fig
     # save_fig(ordered_val, all_res, ordered_elabels, label_max=1, size=5,
     #          save_path=f'{save_dir}/projection_zpca_model')
@@ -2184,15 +2187,21 @@ def evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample
 
                 psize = (200, 200)
                 with_seeds = [mol0] + valid_mols_unique + [mol1]
-                legends_with_seed = [smile0] + valid_mols_smiles_unique + [smile1]
+                # legends_with_seed = [smile0] + valid_mols_smiles_unique + [smile1]
+                legends_with_seed = None
+                mol_per_row = min(int((n_interpolation + 2) / 4), len(with_seeds))
                 img = Draw.MolsToGridImage(with_seeds, legends=legends_with_seed,
-                                           molsPerRow=int((n_interpolation + 2) / 4),
-                                           subImgSize=psize)
+                                           molsPerRow=mol_per_row,
+                                           subImgSize=psize, useSVG=True)
 
                 if not os.path.exists(f'{save_dir}/generated_interp'):
                     os.makedirs(f'{save_dir}/generated_interp')
-                img.save(
-                    f'{save_dir}/generated_interp/{str(n).zfill(4)}_res_grid_valid{len(valid_mols)}_{len(interpolation_mols)}.png')
+
+                with open(f'{save_dir}/generated_interp/{str(n).zfill(4)}_res_grid_valid{len(valid_mols)}_{len(interpolation_mols)}.svg', 'w') as f:
+                    f.write(img)
+
+                # img.save(
+                #     f'{save_dir}/generated_interp/{str(n).zfill(4)}_res_grid_valid{len(valid_mols)}_{len(interpolation_mols)}.png')
 
             # if graphs
             if print_as_graph:
@@ -2227,7 +2236,7 @@ def evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample
                 format(images, nrow=nrow, save_path=f'{save_dir}/generated_interp_graphs', res_name=res_name)
 
 
-def create_figure_train_projections(model, train_dataset, std_noise, save_path, device):
+def create_figure_train_projections(model, train_dataset, std_noise, save_path, device, how_much=1):
     size_pt_fig = 5
 
     batch_size = 20
@@ -2275,12 +2284,12 @@ def create_figure_train_projections(model, train_dataset, std_noise, save_path, 
             Z_lab = Z_noise[np.where(tlabels == label)]
 
             # Learn the ZPCA projection
-            label_zpcas[j] = (PCA(n_components=1), label)
+            label_zpcas[j] = (PCA(n_components=how_much), label)
             label_zpcas[j][0].fit(Z_lab)
         zpcas = label_zpcas
     else:
         # Learn the ZPCA projection
-        zpca = PCA(n_components=1)
+        zpca = PCA(n_components=how_much)
         zpca.fit(Z_noise)
         zpcas = [(zpca, 0)]
 
@@ -2334,8 +2343,9 @@ def create_figure_train_projections(model, train_dataset, std_noise, save_path, 
 
         gmean = model.means[label].detach().cpu().numpy()
         # gp = model.gp[label][1:-1]
-        gp = (model.gp[label][1], np.identity(gmean.shape[0]))
-        np_proj = project_inZ(Z_lab, params=(gmean, gp), how_much=1)
+        # gp = (model.gp[label][1], np.identity(gmean.shape[0]))
+        gp = (np.identity(gmean.shape[0]), model.gp[label][1])
+        np_proj = project_inZ(Z_lab, params=(gmean, gp), how_much=how_much)
         proj = torch.from_numpy(np_proj).type(torch.float).to(device)
 
         np_proj_all.append(np_proj)
@@ -2499,7 +2509,7 @@ def main(args):
             else None
         evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=print_as_mol,
                           print_as_graph=print_as_graph, eval_type=eval_type, means=computed_means)
-        evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=10, print_as_mol=print_as_mol,
+        evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=12, print_as_mol=print_as_mol,
                            print_as_graph=print_as_graph, eval_type=eval_type, predmodel=predmodel,
                            means=computed_means)
         if isinstance(val_dataset, GraphDataset):
@@ -2556,20 +2566,22 @@ def main(args):
                                            proj_type=proj_type, noise_type=noise_type,
                                            eval_gaussian_std=eval_gaussian_std,
                                            batch_size=batch_size)
-        elif dataset_name in ['single_moon', 'double_moon']:
+        else:
+        # elif dataset_name in ['single_moon', 'double_moon']:
             noise_type = 'gaussian'
             std_noise = .1
-            create_figure_train_projections(model, train_dataset, std_noise=std_noise, save_path=save_dir,
-                                            device=device)
             n_principal_dim = np.count_nonzero(gaussian_params[0][-2] > 1)
+            create_figure_train_projections(model, train_dataset, std_noise=std_noise, save_path=save_dir,
+                                            device=device, how_much=n_principal_dim)
             # evaluate distance n times to calculate the p-value
             n_times = 20
             kpca_types = ['linear', 'rbf', 'poly', 'sigmoid']
-            proj_type = 'gp'
+            proj_type = 'zpca_l'
             print(f'(n_times, kpca_types, proj_type) are set manually to '
                   f'({n_times},{kpca_types},{proj_type}).')
             distance_results = {ktype + '-PCA': [] for ktype in kpca_types}
             distance_results['Our-' + proj_type] = []
+            distance_results['NoiseDist'] = []
             for n in range(n_times):
                 res = evaluate_distances(model, train_dataset, val_dataset, gaussian_params=gaussian_params,
                                          z_shape=z_shape, how_much=n_principal_dim,
@@ -2579,8 +2591,11 @@ def main(args):
                 for ktype in kpca_types:
                     distance_results[ktype + '-PCA'].append(res[ktype + '-PCA'])
                 distance_results['Our-' + proj_type].append(res['Our-' + proj_type])
+                distance_results['NoiseDist'].append(res['NoiseDist'])
             print(distance_results)
             # p-value
+            mean_noisedist = np.mean(distance_results['NoiseDist'])
+            print('Mean noise dist: ' + str(mean_noisedist))
             mean_score = np.mean(distance_results['Our-' + proj_type])
             print('Mean score: ' + str(mean_score))
             res_pvalue = evaluate_p_value(distance_results)
@@ -2595,9 +2610,9 @@ def main(args):
                     H, p = v
                     score_str = 'Kruskal-Wallis H-test with ' + str(k) + ', H: ' + str(H) + ', p-value: ' + str(p)
                     print(score_str)
-        else:
-            dataset_name_eval = ['mnist', 'single_moon', 'double_moon']
-            assert dataset_name in dataset_name_eval, f'Projection can only be evaluated on {dataset_name_eval}'
+        # else:
+        #     dataset_name_eval = ['mnist', 'single_moon', 'double_moon']
+        #     assert dataset_name in dataset_name_eval, f'Projection can only be evaluated on {dataset_name_eval}'
     elif eval_type == 'regression':
         assert dataset.is_regression_dataset(), 'the dataset is not made for regression purposes'
         predmodel = evaluate_regression(model, train_dataset, val_dataset, save_dir, device)

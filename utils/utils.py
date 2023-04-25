@@ -424,11 +424,11 @@ def load_dataset(args, dataset_name, model_type, to_evaluate=False, transform=No
     elif dataset_name == 'fishtoxi':  # Special case where the data can be either graph or vectorial data
         use_graph_type = model_type in GRAPH_MODELS
         if use_graph_type:
-            dataset = RegressionGraphDataset(dataset_name=dataset_name, transform=transform)
+            dataset = RegressionGraphDataset(dataset_name=dataset_name, transform=transform, add_feature=add_feature)
         else:
-            dataset = SimpleDataset(dataset_name=dataset_name, transform=transform)
+            dataset = SimpleDataset(dataset_name=dataset_name, transform=transform, add_feature=add_feature)
     elif dataset_name in SIMPLE_DATASETS or dataset_name in SIMPLE_REGRESSION_DATASETS:
-        dataset = SimpleDataset(dataset_name=dataset_name, transform=transform)
+        dataset = SimpleDataset(dataset_name=dataset_name, transform=transform, add_feature=add_feature)
     elif dataset_name in GRAPH_REGRESSION_DATASETS:
         dataset = RegressionGraphDataset(dataset_name=dataset_name, transform=transform, add_feature=add_feature)
     elif dataset_name in GRAPH_CLASSIFICATION_DATASETS:

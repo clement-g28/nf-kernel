@@ -15,11 +15,12 @@ from sklearn.decomposition import PCA
 
 from utils.testing import testing_arguments, noise_data, save_fig, retrieve_params_from_name, \
     learn_or_load_modelhyperparams, initialize_gaussian_params, prepare_model_loading_params, load_split_dataset, \
-    load_model_from_params
+    load_model_from_params, project_inZ
 
 
 def evaluate_distances(t_model_params, train_dataset, val_dataset, full_dataset, gaussian_params, how_much, device,
-                       noise_type='gaussian', eval_gaussian_std=.1, cus_load_func=None, batch_size=200):
+                       save_dir, noise_type='gaussian', eval_gaussian_std=.1, cus_load_func=None, batch_size=200,
+                       proj_type='zpca_l'):
     train_dataset.ori_X = train_dataset.X
     val_dataset.ori_X = val_dataset.X
     train_dataset.ori_true_labels = train_dataset.true_labels
@@ -92,7 +93,9 @@ def evaluate_distances(t_model_params, train_dataset, val_dataset, full_dataset,
         projs = []
         ordered_val = []
         ordered_elabels = []
-        for gaussian_param in gaussian_params:
+        for j, gaussian_param in enumerate(gaussian_params):
+            gmean = model.means[j].detach().cpu().numpy()
+            gp = gaussian_param[1:-1]
             label = gaussian_param[-1]
 
             indexes = np.where(elabels == label)[0]
@@ -102,12 +105,15 @@ def evaluate_distances(t_model_params, train_dataset, val_dataset, full_dataset,
 
             ordered_elabels.append(np.array([label for _ in range(indexes.shape[0])]))
 
-            # Z-PCA
-            Z_lab = Z[np.where(tlabels == label)]
-            pca = PCA(n_components=how_much)
-            pca.fit(Z_lab)
-            pca_projection = pca.transform(val_Z_lab)
-            proj = pca.inverse_transform(pca_projection)
+            if proj_type == 'zpca_l':
+                # Z-PCA
+                Z_lab = Z[np.where(tlabels == label)]
+                pca = PCA(n_components=how_much)
+                pca.fit(Z_lab)
+                pca_projection = pca.transform(val_Z_lab)
+                proj = pca.inverse_transform(pca_projection)
+            else:
+                proj = project_inZ(val_Z_lab, params=(gmean, gp), how_much=how_much)
 
             projs.append(proj)
             ordered_val.append(val_lab)
@@ -152,15 +158,13 @@ def evaluate_distances(t_model_params, train_dataset, val_dataset, full_dataset,
     )
 
 
-if __name__ == '__main__':
-    parser = testing_arguments()
-    args = parser.parse_args()
-
-    set_seed(0)
+def main(args):
+    if args.seed is not None:
+        set_seed(args.seed)
 
     dataset_name, model_type, folder_name = args.folder.split('/')[-3:]
     # DATASET #
-    dataset = load_dataset(args, dataset_name, model_type, to_evaluate=True)
+    dataset = load_dataset(args, dataset_name, model_type, to_evaluate=True, add_feature=args.add_feature)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -212,4 +216,13 @@ if __name__ == '__main__':
 
     n_principal_dim = np.count_nonzero(gaussian_params[0][-2] > 1)
     evaluate_distances(t_model_params, train_dataset, val_dataset, dataset, gaussian_params, n_principal_dim, device,
-                       noise_type='gaussian', eval_gaussian_std=.1)
+                       noise_type='gaussian', eval_gaussian_std=.1, save_dir=save_dir, proj_type='gp')
+
+
+if __name__ == '__main__':
+    parser = testing_arguments()
+    parser.add_argument("--add_feature", type=int, default=None)
+    args = parser.parse_args()
+    args.seed = 0
+
+    main(args)
