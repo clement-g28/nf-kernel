@@ -13,6 +13,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 from sklearn.decomposition import PCA
 
+from utils.dataset import ImDataset, SimpleDataset
+
 from utils.testing import testing_arguments, noise_data, save_fig, retrieve_params_from_name, \
     learn_or_load_modelhyperparams, initialize_gaussian_params, prepare_model_loading_params, load_split_dataset, \
     load_model_from_params, project_inZ
@@ -140,9 +142,9 @@ def evaluate_distances(t_model_params, train_dataset, val_dataset, full_dataset,
         if mean_dist <= best_score:
             best_score = mean_dist
             best_i = i
-
-        save_fig(ordered_val, all_res, np.concatenate(ordered_elabels, axis=0), label_max=1, size=5,
-                 save_path=f'{save_dir}/projection_zpca_model{i}')
+        if isinstance(val_dataset, SimpleDataset):
+            save_fig(ordered_val, all_res, np.concatenate(ordered_elabels, axis=0), label_max=1, size=5,
+                     save_path=f'{save_dir}/projection_zpca_model{i}')
 
     print(best_i)
     model_loading_params = t_model_params[best_i]
@@ -214,9 +216,17 @@ def main(args):
     save_dir = './save'
     create_folder(save_dir)
 
+    noise_type = 'gaussian'
+    noise_std = .1
+    proj_type = 'gp'
+    batch_size = 16
+
+    print(f'(noise_type, noise_std, proj_type, batch_size) are set manually to '
+          f'({noise_type},{noise_std},{proj_type},{batch_size}).')
     n_principal_dim = np.count_nonzero(gaussian_params[0][-2] > 1)
     evaluate_distances(t_model_params, train_dataset, val_dataset, dataset, gaussian_params, n_principal_dim, device,
-                       noise_type='gaussian', eval_gaussian_std=.1, save_dir=save_dir, proj_type='gp')
+                       noise_type=noise_type, eval_gaussian_std=noise_std, save_dir=save_dir, proj_type=proj_type,
+                       batch_size=batch_size)
 
 
 if __name__ == '__main__':

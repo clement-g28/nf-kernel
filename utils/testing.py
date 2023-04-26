@@ -218,7 +218,7 @@ def retrieve_params_from_name(folder_name):
             mean_of_eigval = in_split[0].replace("eigvalgaussian", "")
             mean_of_eigval = float(mean_of_eigval.replace("-", "."))
             std_value = float(str(in_split[-1]).replace('-', '.'))
-            gaussian_eigval = [0.0, std_value]
+            gaussian_eigval = [mean_of_eigval, std_value]
             print(f'Flow trained with gaussian eigenvalues params: {mean_of_eigval},{gaussian_eigval}')
         elif 'dimperlab' in split:
             dpl_split = split
@@ -245,10 +245,11 @@ def initialize_gaussian_params(args, dataset, fixed_eigval, uniform_eigval, gaus
 
             dist = st.norm(loc=gaussian_eigval[0], scale=gaussian_eigval[1])
             border = 1.6
-            step = border * 2 / dim_per_label
-            x = np.linspace(-border, border, dim_per_label) if (dim_per_label % 2) != 0 else np.concatenate(
-                (np.linspace(-border, gaussian_eigval[0], int(dim_per_label / 2))[:-1], [gaussian_eigval[0]],
-                 np.linspace(step, border, int(dim_per_label / 2))))
+            # step = border * 2 / dim_per_label
+            x = np.linspace(-border, border, dim_per_label)
+                # if (dim_per_label % 2) != 0 else np.concatenate(
+                # (np.linspace(-border, g_param[0], int(dim_per_label / 2))[:-1], [g_param[0]],
+                #  np.linspace(step, border, int(dim_per_label / 2))))
             eigval_list = dist.pdf(x)
             mean_eigval = mean_of_eigval
             a = mean_eigval * dim_per_label / eigval_list.sum()

@@ -38,8 +38,7 @@ def classification_score(pred, true):
 
 
 def test_generation_on_eigvec(model_single, val_dataset, gaussian_params, z_shape, how_much_dim, device,
-                              sample_per_label=10,
-                              save_dir='./save'):
+                              sample_per_label=10,save_dir='./save'):
     create_folder(f'{save_dir}/test_generation')
 
     all_generation = []
@@ -69,7 +68,7 @@ def test_generation_on_eigvec(model_single, val_dataset, gaussian_params, z_shap
             images,
             f"{save_dir}/test_generation/label{str(i)}_{how_much_dim}dim.png",
             normalize=True,
-            nrow=10,
+            nrow=7,
             range=(0, 255),
         )
         all_generation.append(images[:n_image_per_lab])
@@ -100,7 +99,7 @@ def test_generation_on_eigvec(model_single, val_dataset, gaussian_params, z_shap
 
 def evaluate_projection_1model(model, train_dataset, val_dataset, gaussian_params, z_shape, how_much, device,
                                save_dir='./save', proj_type='gp', noise_type='gaussian', eval_gaussian_std=.2,
-                               batch_size=20):
+                               batch_size=20, how_much_per_lab=6):
     train_dataset.ori_X = train_dataset.X
     val_dataset.ori_X = val_dataset.X
     train_dataset.ori_true_labels = train_dataset.true_labels
@@ -112,20 +111,21 @@ def evaluate_projection_1model(model, train_dataset, val_dataset, gaussian_param
     grid_im, distances_results = projection_evaluation(model, train_dataset, val_dataset, gaussian_params,
                                                        z_shape, how_much, kpca_types, device, save_dir=save_dir,
                                                        proj_type=proj_type, noise_type=noise_type,
-                                                       eval_gaussian_std=eval_gaussian_std, batch_size=batch_size)
+                                                       eval_gaussian_std=eval_gaussian_std, batch_size=batch_size,
+                                                       how_much_per_lab=how_much_per_lab)
 
     grid_im = np.concatenate(grid_im, axis=0)
     grid_im = val_dataset.rescale(grid_im)
 
     # used_method = ['ori', 'noisy', 'linear'] + kpca_types + [proj_type]
     used_method = ['ori', 'noisy'] + kpca_types + [proj_type]
-    methods = used_method * len(gaussian_params)
-    labels = [[g[-1]] * len(used_method) for g in gaussian_params]
+    methods = used_method * len(gaussian_params) * how_much_per_lab
+    labels = [[str(g[-1]) + f'_{n}'] * len(used_method) for g in gaussian_params for n in range(how_much_per_lab)]
     labels = [item for sublist in labels for item in sublist]
     save_every_pic(f'{save_dir}/projections/{noise_type}/every_pics/{proj_type}', grid_im, methods, labels,
                    add_str=proj_type, rgb=val_dataset.n_channel > 1)
 
-    nrow = math.floor(grid_im.shape[0] / np.unique(val_dataset.true_labels).shape[0])
+    nrow = math.floor(grid_im.shape[0] / (np.unique(val_dataset.true_labels).shape[0]*how_much_per_lab))
     utils.save_image(
         torch.from_numpy(grid_im),
         f"{save_dir}/projections/{noise_type}/projection_eval_{proj_type}.png",
@@ -137,7 +137,7 @@ def evaluate_projection_1model(model, train_dataset, val_dataset, gaussian_param
 
 def projection_evaluation(model, train_dataset, val_dataset, gaussian_params, z_shape, how_much, kpca_types, device,
                           save_dir='./save', proj_type='gp', noise_type='gaussian', eval_gaussian_std=.2,
-                          batch_size=20):
+                          batch_size=20, how_much_per_lab=6):
     create_folder(f'{save_dir}/projections')
 
     if train_dataset.dataset_name != 'olivetti_faces':
@@ -303,21 +303,24 @@ def projection_evaluation(model, train_dataset, val_dataset, gaussian_params, z_
         label = gaussian_param[-1]
         if label in elabels:
             ind = np.where(ordered_elabels == label)[0]
-            grid_im.append(
-                np.expand_dims(val_normalized[np.where(val_dataset.true_labels == label)][vis_index], axis=0))
-            grid_im.append(
-                np.expand_dims(val_normalized_noised[np.where(val_dataset.true_labels == label)][vis_index], axis=0))
-            # grid_im.append(np.expand_dims(pca_projs[ind][vis_index].reshape(val_dataset.X[0].shape), axis=0))
-            for kpca_proj in kpca_projs:
-                grid_im.append(np.expand_dims(kpca_proj[ind][vis_index].reshape(val_dataset.X[0].shape), axis=0))
-            grid_im.append(np.expand_dims(all_im[ind][vis_index], axis=0))
+            for n in range(how_much_per_lab):
+                grid_im.append(
+                    np.expand_dims(val_normalized[np.where(val_dataset.true_labels == label)][vis_index + n], axis=0))
+                grid_im.append(
+                    np.expand_dims(val_normalized_noised[np.where(val_dataset.true_labels == label)][vis_index + n],
+                                   axis=0))
+                # grid_im.append(np.expand_dims(pca_projs[ind][vis_index].reshape(val_dataset.X[0].shape), axis=0))
+                for kpca_proj in kpca_projs:
+                    grid_im.append(
+                        np.expand_dims(kpca_proj[ind][vis_index + n].reshape(val_dataset.X[0].shape), axis=0))
+                grid_im.append(np.expand_dims(all_im[ind][vis_index + n], axis=0))
 
     return grid_im, distances_results
 
 
 def compression_evaluation(model, train_dataset, val_dataset, gaussian_params, z_shape, how_much, device,
                            save_dir='./save', proj_type='gp', noise_type='gaussian', eval_gaussian_std=.2,
-                           batch_size=400):
+                           batch_size=400, how_much_by_label=6):
     assert isinstance(how_much, list), 'how-much should be a list of number of dimension to project on'
     create_folder(f'{save_dir}/projections')
 
@@ -350,15 +353,21 @@ def compression_evaluation(model, train_dataset, val_dataset, gaussian_params, z
         Z = np.concatenate(Z, axis=0).reshape(len(train_dataset), -1)
         tlabels = np.concatenate(tlabels, axis=0)
 
+    done = []
     val_data = []
     elabels = []
     for i, gaussian_param in enumerate(gaussian_params):
         label = gaussian_param[-1]
         if label in val_dataset.true_labels:
             idx = np.where(val_dataset.true_labels == label)[0]
-            rand_i = np.random.choice(idx)
-            val_data.append(np.expand_dims(val_dataset.X[rand_i], axis=0))
-            elabels.append(label)
+            for n in range(how_much_by_label):
+                rand_i = np.random.choice(idx)
+                while rand_i in done:
+                    rand_i = np.random.choice(idx)
+                done.append(rand_i)
+
+                val_data.append(np.expand_dims(val_dataset.X[rand_i], axis=0))
+                elabels.append(label)
     val_data = np.concatenate(val_data, axis=0)
     elabels = np.array(elabels)
 
@@ -404,15 +413,17 @@ def compression_evaluation(model, train_dataset, val_dataset, gaussian_params, z
     # elabels = np.concatenate(elabels, axis=0)
 
     # val_normalized = (val_dataset.X / 255 - val_dataset.norm_mean) / val_dataset.norm_std
-    grid_im = [[] for _ in range(len(gaussian_params))]
+    grid_im = [[] for _ in range(len(gaussian_params) * how_much_by_label)]
     vis_index = 0
     # add in grid ori and noisy
     for i, gaussian_param in enumerate(gaussian_params):
         label = gaussian_param[-1]
         if label in val_dataset.true_labels:
             # grid_im[i].append(np.expand_dims(val_normalized[np.where(elabels == label)][vis_index], axis=0))
-            grid_im[i].append(
-                np.expand_dims(val_normalized_noised[np.where(elabels == label)][vis_index], axis=0))
+            i_grid = i * how_much_by_label
+            for n in range(how_much_by_label):
+                grid_im[i_grid + n].append(
+                    np.expand_dims(val_normalized_noised[np.where(elabels == label)][vis_index + n], axis=0))
 
     for n in range(len(how_much)):
         n_dim_projection = how_much[n]
@@ -468,8 +479,10 @@ def compression_evaluation(model, train_dataset, val_dataset, gaussian_params, z
         for i, gaussian_param in enumerate(gaussian_params):
             label = gaussian_param[-1]
             if label in ordered_elabels:
-                ind = np.where(ordered_elabels == label)[0]
-                grid_im[i].append(np.expand_dims(all_im[ind][vis_index], axis=0))
+                i_grid = i * how_much_by_label
+                for n in range(how_much_by_label):
+                    ind = np.where(ordered_elabels == label)[0]
+                    grid_im[i_grid + n].append(np.expand_dims(all_im[ind][vis_index + n], axis=0))
 
     grid_im = [item for sublist in grid_im for item in sublist]
     grid_im = np.concatenate(grid_im, axis=0)
@@ -479,13 +492,13 @@ def compression_evaluation(model, train_dataset, val_dataset, gaussian_params, z
     used_method = ['noisy']
     for n in range(len(how_much)):
         used_method += [proj_type + str(how_much[n])]
-    methods = used_method * len(gaussian_params)
-    labels = [[g[-1]] * len(used_method) for g in gaussian_params]
+    methods = used_method * len(gaussian_params) * how_much_by_label
+    labels = [[str(g[-1]) + f'_{n}'] * len(used_method) for g in gaussian_params for n in range(how_much_by_label)]
     labels = [item for sublist in labels for item in sublist]
     save_every_pic(f'{save_dir}/compressions/{noise_type}/every_pics/{proj_type}', grid_im, methods, labels,
                    add_str=proj_type, rgb=val_dataset.n_channel > 1)
 
-    nrow = math.floor(grid_im.shape[0] / np.unique(val_dataset.true_labels).shape[0])
+    nrow = math.floor(grid_im.shape[0] / (np.unique(val_dataset.true_labels).shape[0] * how_much_by_label))
     utils.save_image(
         torch.from_numpy(grid_im),
         f"{save_dir}/compressions/{noise_type}/compression_eval_{proj_type}.png",
@@ -2197,7 +2210,9 @@ def evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample
                 if not os.path.exists(f'{save_dir}/generated_interp'):
                     os.makedirs(f'{save_dir}/generated_interp')
 
-                with open(f'{save_dir}/generated_interp/{str(n).zfill(4)}_res_grid_valid{len(valid_mols)}_{len(interpolation_mols)}.svg', 'w') as f:
+                with open(
+                        f'{save_dir}/generated_interp/{str(n).zfill(4)}_res_grid_valid{len(valid_mols)}_{len(interpolation_mols)}.svg',
+                        'w') as f:
                     f.write(img)
 
                 # img.save(
@@ -2528,23 +2543,24 @@ def main(args):
         from torchvision import transforms
         dataset.transform = transforms.Compose(dataset.transform.transforms + [AddGaussianNoise(0., .2)])
         print('Gaussian noise added to transforms...')
-        evaluate_image_interpolations(model, dataset, device, save_dir, n_sample=20, n_interpolation=10, label=None)
+        evaluate_image_interpolations(model, dataset, device, save_dir, n_sample=6, n_interpolation=10, label=None)
 
         # how_much = [1, 10, 30, 50, 78]
         # how_much = [dim_per_label, n_dim]
-        how_much = [1, dim_per_label]
+        # how_much = [1, dim_per_label]
+        how_much = list(np.linspace(1, dim_per_label, 6, dtype=np.int))
         print(f'how_much is set manually to {how_much}.')
         for n in how_much:
             test_generation_on_eigvec(model, val_dataset, gaussian_params=gaussian_params, z_shape=z_shape,
-                                      how_much_dim=n, device=device, sample_per_label=10, save_dir=save_dir)
+                                      how_much_dim=n, device=device, sample_per_label=49, save_dir=save_dir)
         generate_meanclasses(model, train_dataset, device, save_dir)
     elif eval_type == 'projection':
         img_size = dataset.in_size
         z_shape = model.calc_last_z_shape(img_size)
         # PROJECTIONS
         proj_type = 'gp'
-        batch_size = 100
-        eval_gaussian_std = .1
+        batch_size = 20  # 100
+        eval_gaussian_std = .2  # .1
         print(f'(proj_type, batch_size, eval_gaussian_std) are set manually to '
               f'({proj_type},{batch_size},{eval_gaussian_std}).')
         if dataset_name in ['mnist', 'cifar10', 'olivetti_faces']:
@@ -2567,7 +2583,7 @@ def main(args):
                                            eval_gaussian_std=eval_gaussian_std,
                                            batch_size=batch_size)
         else:
-        # elif dataset_name in ['single_moon', 'double_moon']:
+            # elif dataset_name in ['single_moon', 'double_moon']:
             noise_type = 'gaussian'
             std_noise = .1
             n_principal_dim = np.count_nonzero(gaussian_params[0][-2] > 1)
@@ -2643,5 +2659,5 @@ if __name__ == "__main__":
     parser.add_argument("--method", default=0, type=int, help='select between [0,1,2]')
     parser.add_argument("--add_feature", type=int, default=None)
     args = parser.parse_args()
-    args.seed = 0
+    args.seed = 2
     main(args)

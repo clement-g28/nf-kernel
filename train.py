@@ -277,10 +277,11 @@ def main(args):
 
             dist = st.norm(loc=g_param[0], scale=g_param[1])
             border = 1.6
-            step = border * 2 / dim_per_label
-            x = np.linspace(-border, border, dim_per_label) if (dim_per_label % 2) != 0 else np.concatenate(
-                (np.linspace(-border, g_param[0], int(dim_per_label / 2))[:-1], [g_param[0]],
-                 np.linspace(step, border, int(dim_per_label / 2))))
+            # step = border * 2 / dim_per_label
+            x = np.linspace(-border, border, dim_per_label)
+                # if (dim_per_label % 2) != 0 else np.concatenate(
+                # (np.linspace(-border, g_param[0], int(dim_per_label / 2))[:-1], [g_param[0]],
+                #  np.linspace(step, border, int(dim_per_label / 2))))
             eigval_list = dist.pdf(x)
             mean_eigval = args.mean_of_eigval
             a = mean_eigval * dim_per_label / eigval_list.sum()
