@@ -246,10 +246,10 @@ def main(args):
         print_as_graph = True
         print(f'(print_as_mol, print_as_graph) are set manually to '
               f'({print_as_mol},{print_as_graph}).')
-        evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=print_as_mol,
-                          print_as_graph=print_as_graph)
+        # evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=print_as_mol,
+        #                   print_as_graph=print_as_graph)
         evaluate_preimage2(model, val_dataset, device, save_dir, n_y=24, n_samples_by_y=1,
-                           print_as_mol=print_as_mol, print_as_graph=print_as_graph, predmodel=predmodel)
+                           print_as_mol=print_as_mol, print_as_graph=print_as_graph, predmodel=predmodel, debug=True)
         if isinstance(val_dataset, GraphDataset):
             evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z,
                                           print_as_mol=print_as_mol, print_as_graph=print_as_graph)

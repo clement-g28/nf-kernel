@@ -8,3 +8,14 @@ def transform_graph_permutation(x, adj):
     features = x[node_list]
     adj = adj[:, node_list][:, :, node_list]
     return features, adj
+
+
+def batch_graph_permutation(graph_li):
+    x = graph_li[0]
+    adj = graph_li[1]
+    node_list = [i for i in range(x.shape[1])]
+    np.random.shuffle(node_list)
+
+    features = x[:, node_list]
+    adj = adj[:, :, node_list][:, :, :, node_list]
+    return features, adj

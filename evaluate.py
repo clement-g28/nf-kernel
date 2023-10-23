@@ -38,7 +38,7 @@ def classification_score(pred, true):
 
 
 def test_generation_on_eigvec(model_single, val_dataset, gaussian_params, z_shape, how_much_dim, device,
-                              sample_per_label=10,save_dir='./save'):
+                              sample_per_label=10, save_dir='./save', debug=False):
     create_folder(f'{save_dir}/test_generation')
 
     all_generation = []
@@ -62,7 +62,12 @@ def test_generation_on_eigvec(model_single, val_dataset, gaussian_params, z_shap
 
         z_sample = torch.from_numpy(res).reshape(sample_per_label, *z_shape).float().to(device)
 
-        images = model_single.reverse(z_sample).cpu().data
+        if debug:
+            create_folder(f"{save_dir}/test_generation/eigvec_flows_gen/{str(i)}_{how_much_dim}")
+            images = model_single.reverse_debug(z_sample, val_dataset,
+                                                save_dir=f"{save_dir}/test_generation/eigvec_flows_gen/{str(i)}_{how_much_dim}").cpu().data
+        else:
+            images = model_single.reverse(z_sample).cpu().data
         images = val_dataset.rescale(images)
         utils.save_image(
             images,
@@ -125,7 +130,7 @@ def evaluate_projection_1model(model, train_dataset, val_dataset, gaussian_param
     save_every_pic(f'{save_dir}/projections/{noise_type}/every_pics/{proj_type}', grid_im, methods, labels,
                    add_str=proj_type, rgb=val_dataset.n_channel > 1)
 
-    nrow = math.floor(grid_im.shape[0] / (np.unique(val_dataset.true_labels).shape[0]*how_much_per_lab))
+    nrow = math.floor(grid_im.shape[0] / (np.unique(val_dataset.true_labels).shape[0] * how_much_per_lab))
     utils.save_image(
         torch.from_numpy(grid_im),
         f"{save_dir}/projections/{noise_type}/projection_eval_{proj_type}.png",
@@ -981,7 +986,7 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
     return zlinsvc
 
 
-def generate_meanclasses(model, val_dataset, device, save_dir):
+def generate_meanclasses(model, val_dataset, device, save_dir, debug=False):
     model.eval()
     create_folder(f'{save_dir}/test_generation')
 
@@ -1007,7 +1012,12 @@ def generate_meanclasses(model, val_dataset, device, save_dir):
 
     z_sample = torch.from_numpy(Z_means).float().to(device)
     with torch.no_grad():
-        images = model.reverse(z_sample).cpu().data
+        if debug:
+            create_folder(f"{save_dir}/test_generation/mean_flows_gen")
+            images = model.reverse_debug(z_sample, val_dataset,
+                                         save_dir=f"{save_dir}/test_generation/mean_flows_gen").cpu().data
+        else:
+            images = model.reverse(z_sample).cpu().data
     images = val_dataset.rescale(images)
 
     utils.save_image(
@@ -1751,7 +1761,8 @@ def evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, p
 
 
 def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_by_y=20, print_as_mol=True,
-                       print_as_graph=True, eval_type='regression', batch_size=20, predmodel=None, means=None):
+                       print_as_graph=True, eval_type='regression', batch_size=20, predmodel=None, means=None,
+                       debug=False):
     assert eval_type in ['regression', 'classification'], 'unknown pre-image generation evaluation type'
 
     if means is None:
@@ -1828,7 +1839,11 @@ def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_b
             size = samples[j * batch_size:(j + 1) * batch_size].shape[0]
             input = samples[j * batch_size:(j + 1) * batch_size].reshape(size, *z_shape).float().to(device)
 
-            res = model.reverse(input)
+            if debug:
+                create_folder(f"{save_dir}/flows_gen/{j}")
+                res = model.reverse_debug(input, val_dataset, save_dir=f"{save_dir}/flows_gen/{j}")
+            else:
+                res = model.reverse(input)
             all_res.append(res.detach().cpu().numpy())
     all_res = np.concatenate(all_res, axis=0)
 
@@ -1979,7 +1994,8 @@ def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_b
                 format(images, nrow=nrow, save_path=f'{save_dir}/generated_samples_graphs', res_name=res_name)
 
 
-def evaluate_image_interpolations(model, val_dataset, device, save_dir, n_sample=20, n_interpolation=20, label=None):
+def evaluate_image_interpolations(model, val_dataset, device, save_dir, n_sample=20, n_interpolation=20, label=None,
+                                  debug=False):
     def get_PIL_image_RGB(dataset, idx):
         im = dataset.X[idx].transpose(1, 2, 0)
         im = Image.fromarray(im.squeeze(), mode='RGB')
@@ -2039,7 +2055,12 @@ def evaluate_image_interpolations(model, val_dataset, device, save_dir, n_sample
 
             z_array = torch.cat(z_list, dim=0)
 
-            res = model.reverse(z_array)
+            if debug:
+                create_folder(f'{save_dir}/test_generation/test_flows_gen/{j}')
+                res = model.reverse_debug(z_array, val_dataset,
+                                          save_dir=f"{save_dir}/test_generation/test_flows_gen/{j}")
+            else:
+                res = model.reverse(z_array)
             all_res.append(res.detach().cpu().numpy())
 
     # to_remove = [0, 2, 6, 11, 12, 13, 14]
@@ -2508,6 +2529,12 @@ def main(args):
     save_dir = './save'
     create_folder(save_dir)
 
+    # generate flows
+    std_noise = .1 if dataset_name in ['double_moon', 'single_moon', 'swissroll'] else None
+    # fig_limits = ((-23,23),(-4,4))
+    fig_limits = None
+    # model.interpret_transformation(train_dataset, save_dir, device, std_noise=std_noise, fig_limits=fig_limits)
+
     eval_type = args.eval_type
     if eval_type == 'classification':
         dataset_name_eval = ['mnist', 'cifar10', 'double_moon', 'iris', 'bcancer'] + GRAPH_CLASSIFICATION_DATASETS
@@ -2522,11 +2549,11 @@ def main(args):
               f'({print_as_mol},{print_as_graph},{refresh_means}).')
         computed_means = model.refresh_classification_mean_classes(Z, train_dataset.true_labels) if refresh_means \
             else None
-        evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=print_as_mol,
-                          print_as_graph=print_as_graph, eval_type=eval_type, means=computed_means)
+        # evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=print_as_mol,
+        #                   print_as_graph=print_as_graph, eval_type=eval_type, means=computed_means)
         evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=12, print_as_mol=print_as_mol,
                            print_as_graph=print_as_graph, eval_type=eval_type, predmodel=predmodel,
-                           means=computed_means)
+                           means=computed_means, debug=True)
         if isinstance(val_dataset, GraphDataset):
             evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=9, n_interpolation=30, Z=Z,
                                           print_as_mol=print_as_mol, print_as_graph=print_as_graph, eval_type=eval_type,
@@ -2543,7 +2570,10 @@ def main(args):
         from torchvision import transforms
         dataset.transform = transforms.Compose(dataset.transform.transforms + [AddGaussianNoise(0., .2)])
         print('Gaussian noise added to transforms...')
-        evaluate_image_interpolations(model, dataset, device, save_dir, n_sample=6, n_interpolation=10, label=None)
+        debug = True
+        # transformation_interpretation(model, val_dataset, device, save_dir, debug=False)
+        evaluate_image_interpolations(model, dataset, device, save_dir, n_sample=6, n_interpolation=10, label=None,
+                                      debug=debug)
 
         # how_much = [1, 10, 30, 50, 78]
         # how_much = [dim_per_label, n_dim]
@@ -2552,8 +2582,9 @@ def main(args):
         print(f'how_much is set manually to {how_much}.')
         for n in how_much:
             test_generation_on_eigvec(model, val_dataset, gaussian_params=gaussian_params, z_shape=z_shape,
-                                      how_much_dim=n, device=device, sample_per_label=49, save_dir=save_dir)
-        generate_meanclasses(model, train_dataset, device, save_dir)
+                                      how_much_dim=n, device=device, sample_per_label=49, save_dir=save_dir,
+                                      debug=debug)
+        generate_meanclasses(model, train_dataset, device, save_dir, debug=debug)
     elif eval_type == 'projection':
         img_size = dataset.in_size
         z_shape = model.calc_last_z_shape(img_size)
@@ -2638,10 +2669,10 @@ def main(args):
         print_as_graph = True
         print(f'(print_as_mol, print_as_graph) are set manually to '
               f'({print_as_mol},{print_as_graph}).')
-        evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=print_as_mol,
-                          print_as_graph=print_as_graph)
+        # evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=print_as_mol,
+        #                   print_as_graph=print_as_graph)
         evaluate_preimage2(model, val_dataset, device, save_dir, n_y=12, n_samples_by_y=1,
-                           print_as_mol=print_as_mol, print_as_graph=print_as_graph, predmodel=predmodel)
+                           print_as_mol=print_as_mol, print_as_graph=print_as_graph, predmodel=predmodel, debug=True)
         if isinstance(val_dataset, GraphDataset):
             evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z,
                                           print_as_mol=print_as_mol, print_as_graph=print_as_graph)

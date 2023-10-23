@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 from utils.density import construct_covariance, multivariate_gaussian
 from utils.visualize_flow import visualize_transform
 from utils.utils import create_folder, calculate_log_p_with_gaussian_params, \
-    calculate_log_p_with_gaussian_params_regression
+    calculate_log_p_with_gaussian_params_regression, visualize_points, create_animation
 from utils.ffjord_model import build_model_tabular, create_regularization_fns, add_spectral_norm, set_cnf_options, \
     get_regularization, spectral_norm_power_iteration
 from utils.seqflow_model import load_flow_model
@@ -132,11 +132,17 @@ class NF(nn.Module):
     def upstream_process(self, loss):
         raise NotImplementedError
 
+    def interpret_transformation(self, dataset, save_dir, device, std_noise=.1, fig_limits=None):
+        raise NotImplementedError
+
     def forward(self, input, label, pair_with_noise=False):
         raise NotImplementedError
 
     def reverse(self, z, reconstruct=False):
         raise NotImplementedError
+
+    def reverse_debug(self, z, dataset, save_dir, reconstruct=False):
+        return self.reverse(z, reconstruct)
 
     def sample_from_distrib_label(self, n, dim):
         n_per_distrib = math.ceil(n / len(self.gaussian_params))
@@ -328,6 +334,53 @@ class SeqFlow(NF):
     def upstream_process(self, loss):
         return loss
 
+    def interpret_transformation(self, dataset, save_dir, device, std_noise=.1, fig_limits=None):
+        from sklearn.decomposition import PCA
+        self.eval()
+        create_folder(f'{save_dir}/interpretation_transformation')
+
+        batch_size = 20
+        # nb_batch = math.ceil(dataset.X.shape[0] / batch_size)
+
+        cond_inputs = None
+        modules = self.model._modules
+        tmp_dataset = dataset.duplicate()
+        tmp_dataset.X = tmp_dataset.X + np.random.randn(*tmp_dataset.X.shape) * std_noise
+        # fig_limits = (tmp_dataset.X.min(), tmp_dataset.X.max())
+        with torch.no_grad():
+            for i, module in enumerate(modules.values()):
+                flows = []
+                loader = tmp_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+                for j, data in enumerate(loader):
+                    # for j in range(nb_batch):
+                    #     data = dataset.X[j * batch_size:(j + 1) * batch_size]
+                    inputs = tmp_dataset.format_data(data[0], device)
+                    # inputs = inputs + torch.from_numpy(np.random.randn(*inputs.shape)).float().to(device) * std_noise
+
+                    logdets = torch.zeros(inputs.size(0), 1, device=device)
+
+                    outputs, logdet = module(inputs, cond_inputs, 'direct')
+                    logdets += logdet
+                    flows.append(outputs.detach().cpu().numpy())
+
+                np_flows = np.concatenate(flows, axis=0)
+                np_flows.reshape(np_flows.shape[0], -1)
+                if np_flows.shape[-1] > 2:
+                    pca = PCA(n_components=2)
+                    pca.fit(np_flows)
+                    pca_projection = pca.transform(np_flows)
+                    vis_np_flows = pca_projection
+                else:
+                    vis_np_flows = np_flows
+
+                fig_filename = os.path.join(save_dir, 'interpretation_transformation', 'flows_{:04d}.png'.format(i))
+                visualize_points(vis_np_flows, dataset.true_labels, fig_filename, limits=fig_limits)
+
+                tmp_dataset.X = np_flows
+                tmp_dataset.transform = None
+
+        create_animation(dir=f'{save_dir}/interpretation_transformation')
+
     def forward(self, input, label, pair_with_noise=False):
         z, delta_logp = self.model(input)
 
@@ -438,6 +491,54 @@ class FFJORD(NF):
             )
             loss = loss + reg_loss
         return loss
+
+    def interpret_transformation(self, dataset, save_dir, device, std_noise=.1, fig_limits=None):
+        from sklearn.decomposition import PCA
+        self.eval()
+        create_folder(f'{save_dir}/interpretation_transformation')
+
+        batch_size = 20
+        # nb_batch = math.ceil(dataset.X.shape[0] / batch_size)
+
+        # modules = self.model._modules
+        tmp_dataset = dataset.duplicate()
+        tmp_dataset.X = tmp_dataset.X + np.random.randn(*tmp_dataset.X.shape) * std_noise
+        how_much_div = 20
+        with torch.no_grad():
+            inds = range(len(self.model.chain))
+            for i in inds:
+                end_integration_time = self.model.chain[i].sqrt_end_time * self.model.chain[i].sqrt_end_time
+                step_time = end_integration_time / how_much_div
+                for t in range(how_much_div):
+                    flows = []
+                    loader = tmp_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+                    for j, data in enumerate(loader):
+                        inputs = tmp_dataset.format_data(data[0], device)
+                        # inputs = inputs + torch.from_numpy(np.random.randn(*inputs.shape)).float().to(device) * std_noise
+
+                        integration_times = torch.tensor([t * step_time, (t + 1) * step_time]).to(inputs)
+                        outputs = self.model.chain[i](inputs, reverse=False, integration_times=integration_times)
+                        # logdets += logdet
+                        flows.append(outputs.detach().cpu().numpy())
+
+                    np_flows = np.concatenate(flows, axis=0)
+                    np_flows.reshape(np_flows.shape[0], -1)
+                    if np_flows.shape[-1] > 2:
+                        pca = PCA(n_components=2)
+                        pca.fit(np_flows)
+                        pca_projection = pca.transform(np_flows)
+                        vis_np_flows = pca_projection
+                    else:
+                        vis_np_flows = np_flows
+
+                    fig_filename = os.path.join(save_dir, 'interpretation_transformation',
+                                                'flows_{:04d}_t_{:04d}.png'.format(i, t))
+                    visualize_points(vis_np_flows, dataset.true_labels, fig_filename, limits=fig_limits)
+
+                    tmp_dataset.X = np_flows
+                    tmp_dataset.transform = None
+
+        create_animation(dir=f'{save_dir}/interpretation_transformation')
 
     def forward(self, input, label, pair_with_noise=False):
         zero = torch.zeros(input.shape[0], 1).to(input)
@@ -587,6 +688,85 @@ class GlowModel(NF):
     def reverse(self, z, reconstruct=False):
         return self.model.reverse(z, reconstruct)
 
+    def reverse_debug(self, z, dataset, save_dir, reconstruct=False):
+        blocks = self.model.blocks
+        input = z
+        flows_res = []
+        for i, block in enumerate(blocks[::-1]):
+            flows = block.flows
+
+            for f_i, flow in enumerate(flows[::-1]):
+                input = flow.reverse(input)
+                output = input.detach().cpu()
+
+                b_size, n_channel, height, width = output.shape
+                while n_channel > dataset.X[0].shape[0]:
+                    unsqueezed = output.view(b_size, n_channel // 4, 2, 2, height, width)
+                    unsqueezed = unsqueezed.permute(0, 1, 4, 2, 5, 3)
+                    unsqueezed = unsqueezed.contiguous().view(
+                        b_size, n_channel // 4, height * 2, width * 2
+                    )
+                    output = unsqueezed
+                    b_size, n_channel, height, width = output.shape
+                np_output = output.numpy()
+
+                images = dataset.rescale(np_output)
+                th_utils.save_image(
+                    torch.from_numpy(images),
+                    f"{save_dir}/b_{i:04}_flow_{f_i:04}.png",
+                    normalize=True,
+                    # nrow=int(all_res.shape[0]/(n_interpolation+2)),
+                    nrow=math.floor(np.sqrt(np_output.shape[0])),
+                    range=(0, 255),
+                )
+
+                # flows_res.append(input)
+
+            b_size, n_channel, height, width = input.shape
+
+            unsqueezed = input.view(b_size, n_channel // 4, 2, 2, height, width)
+            unsqueezed = unsqueezed.permute(0, 1, 4, 2, 5, 3)
+            unsqueezed = unsqueezed.contiguous().view(
+                b_size, n_channel // 4, height * 2, width * 2
+            )
+
+            input = unsqueezed
+            # input = block.reverse(input, None, reconstruct=reconstruct)
+            # flows_results.append(input)
+
+        # create gif of the generation
+        create_animation(dir=f'{save_dir}', how_much_repeat=10)
+
+        res = input
+
+        # for n in range(len(flows_res)):
+        #     # res[n] = res[n].reshape(n_interpolation + 2, *pt0.shape).detach().cpu().numpy()
+        #
+        #     b_size, n_channel, height, width = flows_res[n].shape
+        #     while n_channel > res.shape[1]:
+        #         unsqueezed = flows_res[n].view(b_size, n_channel // 4, 2, 2, height, width)
+        #         unsqueezed = unsqueezed.permute(0, 1, 4, 2, 5, 3)
+        #         unsqueezed = unsqueezed.contiguous().view(
+        #             b_size, n_channel // 4, height * 2, width * 2
+        #         )
+        #         flows_res[n] = unsqueezed
+        #         b_size, n_channel, height, width = flows_res[n].shape
+        #     flows_res[n] = flows_res[n].detach().cpu().numpy()
+        # # all_res = np.concatenate(res, axis=0)
+        # for n_i in range(res.shape[0]):
+        #     all_res_flows = np.concatenate([np.expand_dims(r[n_i], 0) for r in flows_res], axis=0)
+        #     images = dataset.rescale(all_res_flows)
+        #     th_utils.save_image(
+        #         torch.from_numpy(images),
+        #         f"{save_dir}/{n_i}.png",
+        #         normalize=True,
+        #         # nrow=int(all_res.shape[0]/(n_interpolation+2)),
+        #         nrow=math.floor(np.sqrt(all_res_flows.shape[0])),
+        #         range=(0, 255),
+        #     )
+
+        return res
+
     def sample_evaluation(self, itr, train_dataset, val_dataset, save_dir, writer=None, batch_size=200):
         z_shape = self.calc_last_z_shape(val_dataset.in_size)
         z_samples = []
@@ -708,6 +888,162 @@ class CMoFlow(NF):
         flat_x = torch.cat([x.reshape(x.shape[0], -1), adj.reshape(adj.shape[0], -1)], dim=1)
 
         return flat_x
+
+    def reverse_debug(self, z, dataset, save_dir, reconstruct=False):
+        from utils.graphs.mol_utils import valid_mol, construct_mol
+        from utils.graphs.mol_utils import check_validity, save_mol_png
+        import rdkit.Chem as Chem
+        from rdkit.Chem import Draw, AllChem
+        moflow = self.model
+        bond_model = self.model.bond_model
+        atom_model = self.model.atom_model
+
+        batch_size = z.shape[0]  # 100,  z.shape: (100,369)
+
+        atomic_num_list = dataset.atomic_num_list
+
+        res_dir = save_dir
+
+        def discretize_adj(h_adj):
+            # decode adjacency matrix from h_adj
+            adj = h_adj
+            adj = adj + adj.permute(0, 1, 3, 2)
+            adj = adj / 2
+            adj = adj.softmax(dim=1)  # (100,4!!!,9,9) prob. for edge 0-3 for every pair of nodes
+            max_bond = adj.max(dim=1).values.reshape(batch_size, -1, moflow.a_n_node, moflow.a_n_node)  # (100,1,9,9)
+            adj = torch.floor(adj / max_bond)  # (100,4,9,9) /  (100,1,9,9) -->  (100,4,9,9)
+            return adj
+
+        with torch.no_grad():
+            z_x = z[:, :moflow.a_size]  # (100, 45)
+            z_adj = z[:, moflow.a_size:]  # (100, 324)
+
+            h_adj = z_adj.reshape(batch_size, moflow.b_n_type, moflow.a_n_node, moflow.a_n_node)  # (100,4,9,9)
+            bond_blocks = bond_model.blocks
+            # h_adj = bond_model.reverse(h_adj)
+
+            # (bs, 4,9,9), zz: (bs, 9, 5)
+            outputs_bond_flows = []
+            input_bond = h_adj
+            for i, block in enumerate(bond_blocks[::-1]):
+                bond_flows = block.flows
+
+                input_bond = block._squeeze(input_bond)
+
+                for f_i, flow in enumerate(bond_flows[::-1]):
+                    output_bond_flow = flow.reverse(input_bond)
+                    input_bond = output_bond_flow
+                    output_bond_flow = block._unsqueeze(output_bond_flow)
+                    flow_adj = discretize_adj(output_bond_flow)
+                    flow_adj = flow_adj.detach().cpu().numpy()
+                    outputs_bond_flows.append(flow_adj)
+
+                input_bond = block._unsqueeze(input_bond)
+
+                # input_bond = block.reverse(input_bond)
+            h_adj = input_bond
+
+            if moflow.noise_scale == 0:
+                h_adj = (h_adj + 0.5) * 2
+
+            adj = discretize_adj(h_adj)
+
+            h_x = z_x.reshape(batch_size, moflow.a_n_node, moflow.a_n_type)
+            adj_normalized = rescale_adj(adj).to(h_x)
+            atom_blocks = atom_model.blocks
+            # h_x = self.atom_model.reverse(adj_normalized, h_x)
+
+            # (bs, 4,9,9), zz: (bs, 9, 5)
+            np_adj = adj.detach().cpu().numpy()
+            input_atom = h_x
+            for i, block in enumerate(atom_blocks[::-1]):
+                atom_flows = block.flows
+
+                for f_i, flow in enumerate(atom_flows[::-1]):
+                    output_atom_flow = flow.reverse(adj_normalized, input_atom)
+                    input_atom = output_atom_flow
+                    flow_atom = output_atom_flow.detach().cpu().numpy()
+                    # if feature has been added
+                    if dataset.add_feature is not None:
+                        af = dataset.add_feature
+                        flow_atom = flow_atom[:, :, :-af]
+
+                    force_graph = True
+                    if not force_graph and dataset.atomic_num_list is not None:  # if mol dataset
+                        results_g = check_validity(np_adj, flow_atom, atomic_num_list, with_idx=True)
+                        # create empty mols to complete the list
+                        all_mols = []
+                        val_i = 0
+                        for m in range(flow_atom.shape[0]):
+                            if m in results_g['idxs']:
+                                all_mols.append(results_g['valid_mols'][val_i])
+                                val_i += 1
+                            else:
+                                all_mols.append(Chem.RWMol())
+                        # smiles = results_g['valid_smiles']
+                        # legends_with_seed = smiles
+                        svg = False
+                        img = Draw.MolsToGridImage(all_mols,
+                                                   # legends=legends_with_seed,
+                                                   # molsPerRow=int(2* math.sqrt(len(valid_mols))),
+                                                   molsPerRow=6,
+                                                   subImgSize=(200, 200),
+                                                   useSVG=svg
+                                                   )
+                        if svg:
+                            with open(f"{res_dir}/b_{i:04}_flow_{f_i:04}.png", 'w') as f:
+                                f.write(img)
+                        else:
+                            img.save(f"{res_dir}/b_{i:04}_flow_{f_i:04}.png")
+                    else:
+                        res_dir = save_dir + '/graphs'
+                        path = f"{res_dir}/b_{i:04}_flow_{f_i:04}"
+                        create_folder(path)
+
+                        from utils.graphs.graph_utils import save_nx_graph, save_nx_graph_attr
+                        from utils.utils import format, organise_data
+                        graphs = dataset.get_full_graphs(data=list(zip(flow_atom, np_adj)),
+                                                         attributed_node=dataset.is_attributed_node_dataset())
+                        if dataset.label_map is None:
+                            inv_map = {i + 1: str(i) for i in range(flow_atom.shape[-1])}
+                        else:
+                            inv_map = {v: k for k, v in dataset.label_map.items()}
+
+                        for g_i, graph in enumerate(graphs):
+                            if graph is None:
+                                continue
+
+                            # define the colormap
+                            cmap = plt.cm.jet
+                            # extract all colors from the .jet map
+                            cmaplist = [cmap(i) for i in range(cmap.N)]
+                            n_type = flow_atom.shape[-1] - 1
+                            node_colors = [cmaplist[i * math.floor(len(cmaplist) / n_type)] for i in range(0, n_type)]
+
+                            if dataset.is_attributed_node_dataset():
+                                save_nx_graph_attr(graph, save_path=f'{path}/{g_i:04}_b_{i:04}_flow_{f_i:04}')
+                            else:
+                                save_nx_graph(graph, inv_map, save_path=f'{path}/{g_i:04}_b_{i:04}_flow_{f_i:04}',
+                                              n_atom_type=n_type, colors=node_colors)
+                        # create grid
+                        nrow = math.ceil(math.sqrt(flow_atom.shape[0]))
+                        images = organise_data(path, nrow=nrow)
+                        res_name = f'b_{i:04}_flow_{f_i:04}'
+                        format(images, nrow=nrow, save_path=f'{res_dir}',
+                               res_name=res_name)
+
+            # input_atom = block.reverse(adj_normalized, input_atom)
+            h_x = input_atom
+
+            if moflow.noise_scale == 0:
+                h_x = (h_x + 0.5) * 2
+                # h_x = torch.sigmoid(h_x)  # to delete for logit
+
+        create_animation(dir=f'{res_dir}', how_much_repeat=10)
+        flat_x = torch.cat([h_x.reshape(h_x.shape[0], -1), adj.reshape(adj.shape[0], -1)], dim=1)
+
+        return flat_x
+        # return adj, h_x  # (100,4,9,9), (100,9,5)
 
     @staticmethod
     def get_transforms(model):

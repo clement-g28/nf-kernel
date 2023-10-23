@@ -110,6 +110,7 @@ def logit_pre_process(x, a=0.05, bounds=0.9):
     return y, sldj
 
 
+
 class MoFlow(nn.Module):
     def __init__(self, hyper_params: Hyperparameters):
         super(MoFlow, self).__init__()

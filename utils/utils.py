@@ -436,3 +436,73 @@ def load_dataset(args, dataset_name, model_type, to_evaluate=False, transform=No
     else:
         assert False, 'unknown dataset'
     return dataset
+
+
+def visualize_points(data, data_labels, path, limits=None):
+    plt.rcParams["font.size"] = 10.0
+    plt.rcParams["font.serif"] = ["Source Serif Pro"]
+    plt.rcParams["font.sans-serif"] = ["Source Sans Pro"]
+    plt.rcParams["font.monospace"] = ["Source Code Pro"]
+    plt.rcParams["savefig.format"] = 'png'
+
+    fig = plt.figure(figsize=(5, 5))
+    ax = plt.axes()
+
+    ax.set_xlabel("X", weight="medium")
+    ax.set_ylabel("Y", weight="medium")
+
+    n = int(data.shape[0] / 2)
+    np.random.seed(1)
+    X = data[:, 0]
+    Y = data[:, 1]
+    S = np.ones(2 * n) * 40
+
+    cmap = plt.get_cmap("RdYlBu")
+    scatter = plt.scatter(X, Y, s=S, edgecolor="black", linewidth=0.75, zorder=-20)
+    scatter = plt.scatter(X, Y, s=S, edgecolor="None", facecolor="white", zorder=-10)
+    scatter = plt.scatter(X, Y, c=data_labels, cmap=cmap, edgecolor="None", alpha=0.5)
+
+    if limits is not None:
+        plt.xlim([limits[0][0], limits[0][1]])
+        plt.ylim([limits[1][0], limits[1][1]])
+    plt.savefig(path)
+    plt.show()
+    plt.close()
+
+
+def create_animation(dir, how_much_repeat=0, figsize=None):
+    # GIF
+    import matplotlib.animation as animation
+
+    files = sorted(glob.glob(f"{dir}/*.png"))
+    image_array = []
+
+    for my_file in files:
+        image = Image.open(my_file)
+        image_array.append(image)
+
+    for i in range(how_much_repeat):
+        image_array.append(image_array[-1])
+
+    # Create the figure and axes objects
+    if figsize is not None:
+        fig, ax = plt.subplots(figsize=figsize)
+    else:
+        fig, ax = plt.subplots()
+    ax.axis('off')
+
+    # Set the initial image
+    im = ax.imshow(image_array[0], animated=True)
+
+    def update(i):
+        im.set_array(image_array[i])
+        return im,
+
+    # Create the animation object
+    animation_fig = animation.FuncAnimation(fig, update, frames=len(image_array), interval=100, blit=True,
+                                            repeat_delay=400, )
+
+    # Show the animation
+    plt.show()
+    animation_fig.save(f"{dir}/animation.gif")
+    plt.close()

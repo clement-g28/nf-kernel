@@ -699,6 +699,12 @@ class ImDataset(BaseDataset):
             test_dataset = datasets.MNIST(root='./datasets', train=False, download=True, transform=transform)
             train_dataset.data = train_dataset.data.unsqueeze(1)
             test_dataset.data = test_dataset.data.unsqueeze(1)
+
+            # keep only 1 label
+            # train_dataset.data = train_dataset.data[train_dataset.targets == 3]
+            # train_dataset.targets = np.zeros(train_dataset.data.shape[0]).astype(np.int)
+            # test_dataset.data = test_dataset.data[test_dataset.targets == 3]
+            # test_dataset.targets = np.zeros(test_dataset.data.shape[0]).astype(np.int)
         elif name == 'cifar10':
             if transform is None:
                 transform = transforms.Compose([
