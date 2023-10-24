@@ -48,6 +48,19 @@ def train(args, model_single, add_path, train_dataset, val_dataset=None):
 
     # define an instance of the PairwiseDistance
     pdist = torch.nn.PairwiseDistance(p=2)
+    k = train_dataset.get_n_dim()
+
+    # Let the distance target_D be the distance for which we have a probability of target_p
+    target_D = (torch.ones(args.batch_size) * 0.1).to(device)
+    target_p = 0.1
+    sigma = ((k * torch.pow(target_D / 2, 2)) / math.log(target_p)).abs()
+    determinant = (k * sigma)
+
+    inv_id = torch.eye(k, k).to(device)
+    inverse_matrix = torch.einsum('ij,k->kij', inv_id, 1 / sigma)
+
+    print(f'Target log_p : {math.log(target_p):.04} in order to have a prob of {target_p} with a mean distance '
+          f'of {target_D.mean().item():.04} using a sigma of {sigma.mean().item():.04}.')
 
     with tqdm(range(args.n_epoch)) as pbar:
         for epoch in pbar:
@@ -77,28 +90,26 @@ def train(args, model_single, add_path, train_dataset, val_dataset=None):
                     o_mean = torch.mean(torch.cat((o.unsqueeze(0), o2.unsqueeze(0)), 0), 0)
 
                     # compute the pairwise distance
-                    D = pdist(o, o2)
+                    D = pdist(o, o2).mean()
 
                     # D = torch.diag(torch.cdist(o, o2))
 
                     b_size = o_mean.shape[0]
                     k = o_mean.shape[1]
-                    inv_id = torch.eye(k, k).to(o.device)
 
                     # p*max computing approx (0.9,0.01) (0.1,10) (p*max, D)
                     # p_max = torch.nan_to_num(torch.clamp(0.85 * torch.log10(-D + 11.5), min=math.pow(10, -10)), 0.1)
-                    p_max = torch.nan_to_num(torch.clamp(0.75 * torch.log10(-D + 21.5), min=math.pow(10, -10)), 0.1)
+                    # p_max = torch.nan_to_num(torch.clamp(0.75 * torch.log10(-D + 21.5), min=0.1), 0.1)
                     # sigma computing
-                    sigma = torch.sqrt(-torch.pow(D / 2, 2) / (2 * torch.log(p_max)))
+                    # sigma = torch.clamp(torch.sqrt(-torch.pow(D / 2, 2) / (2 * torch.log(p_max))), max=5)
+                    # sigma = torch.ones_like(sigma) * 0.001
 
-                    # sigma = 0.5 * torch.sqrt(D / 2)
-                    inverse_matrix = torch.einsum('ij,k->kij', inv_id, sigma)
+                    # inverse_matrix = torch.einsum('ij,k->kij', inv_id, 1 / sigma)
 
-                    determinant = (k * sigma)
                     log_p_o_mean = -0.5 * (k * math.log(2 * math.pi) + torch.diag(
-                        (torch.diagonal((o - o_mean) @ inverse_matrix,
-                                        offset=0, dim1=0, dim2=1).transpose(1, 0).unsqueeze(0) @ torch.transpose(
-                            o - o_mean, 1, 0)).reshape(b_size, -1), 0)) - torch.log(determinant)
+                        (torch.diagonal((o - o_mean) @ inverse_matrix, offset=0, dim1=0, dim2=1).transpose(1,
+                                                                                                           0).unsqueeze(
+                            0) @ torch.transpose(o - o_mean, 1, 0)).reshape(b_size, -1), 0)) - torch.log(determinant)
                     log_p_o_mean = log_p_o_mean.unsqueeze(1)
                     log_p_o2_mean = -0.5 * (k * math.log(2 * math.pi) + torch.diag(
                         (torch.diagonal((o2 - o_mean) @ inverse_matrix,
@@ -112,15 +123,16 @@ def train(args, model_single, add_path, train_dataset, val_dataset=None):
                 # logdet = logdet.mean()
 
                 # nll_loss, log_p, log_det = calc_loss(log_p, logdet, dataset.im_size, n_bins)
-                # nll_o1_loss, log_p, log_det = train_dataset.format_loss(log_p, logdet)
+                nll_o1_loss, log_p, log_det = train_dataset.format_loss(log_p, logdet)
                 nll_o1_mean_loss, log_p_o_mean, log_det = train_dataset.format_loss(log_p_o_mean, logdet)
-                # nll_o2_loss, log_p2, log_det2 = train_dataset.format_loss(log_p2, logdet2)
+                nll_o2_loss, log_p2, log_det2 = train_dataset.format_loss(log_p2, logdet2)
                 nll_o2_mean_loss, log_p_o2_mean, log_det2 = train_dataset.format_loss(log_p_o2_mean, logdet2)
 
-                # loss_o1 = nll_o1_loss + nll_o1_mean_loss
-                # loss_o2 = nll_o2_loss + nll_o2_mean_loss
+                loss_o1 = nll_o1_loss + nll_o1_mean_loss
+                loss_o2 = nll_o2_loss + nll_o2_mean_loss
 
-                loss = nll_o1_mean_loss + nll_o2_mean_loss  # - beta * distloss
+                # loss = loss_o1 + loss_o2 - beta * distloss
+                loss = nll_o1_mean_loss + nll_o2_mean_loss
 
                 loss = model_single.upstream_process(loss)
                 # loss.clamp_(-10000,10000)
@@ -134,8 +146,12 @@ def train(args, model_single, add_path, train_dataset, val_dataset=None):
                 # loss2 = torch.pow(log_det, 2)
                 # loss2.backward()
 
+                # if 10 < epoch < 50:
+                #     loss.backward(retain_graph=True)
+                #     loss_tmp = torch.pow(log_det - 500,2) + torch.pow(log_det2 - 500,2)
+                #     loss_tmp.backward()
+                # else:
                 loss.backward()
-
                 # Gradient clipping
                 # torch.nn.utils.clip_grad_norm_(model.parameters(), 10)
 
@@ -145,11 +161,11 @@ def train(args, model_single, add_path, train_dataset, val_dataset=None):
                 optimizer.step()
 
                 pbar.set_description(
-                    f"Loss: {loss.item():.5f}; "
-                    f"logP1: {log_p.mean().item():.5f}; logdet1: {log_det.item():.5f}; "
-                    f"logP2: {log_p2.mean().item():.5f}; logdet2: {log_det2.item():.5f}; "
-                    f"D: {D.mean().item():.5f}; log_p_o_mean: {log_p_o_mean.mean().item():.5f}; log_p_o2_mean: {log_p_o2_mean.mean().item():.5f}; "
-                    f"lr: {warmup_lr:.7f}; distloss: {distloss.item():.7f}"
+                    f"Loss: {loss.item():.4f}; "
+                    f"logP1: {log_p.mean().item():.4f}; logdet1: {log_det.item():.4f}; "
+                    f"logP2: {log_p2.mean().item():.4f}; logdet2: {log_det2.item():.4f}; "
+                    f"D: {D.mean().item():.4f}; logP1_con: {log_p_o_mean.mean().item():.4f}; logP2_con: {log_p_o2_mean.mean().item():.4f}; "
+                    f"lr: {warmup_lr:.5f}; Lmu: {distloss.item():.5f}"
                 )
 
                 if itr % args.write_train_loss_every == 0:
@@ -162,8 +178,8 @@ def train(args, model_single, add_path, train_dataset, val_dataset=None):
                                      "logP1_Mean": log_p_o_mean.mean().item(),
                                      "logP2_Mean": log_p_o2_mean.mean().item(),
                                      "D": D.mean().item(),
-                                     "P_max": p_max.mean().item(),
-                                     "Sigma": sigma.mean().item(),
+                                     # "P_max": p_max.mean().item(),
+                                     # "Sigma": sigma.mean().item(),
                                      "distloss": distloss.item()}
                         write_dict_to_tensorboard(writer, loss_dict, base_name="TRAIN", iteration=itr)
 
