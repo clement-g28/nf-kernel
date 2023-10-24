@@ -51,7 +51,7 @@ def train(args, model_single, add_path, train_dataset, val_dataset=None):
     k = train_dataset.get_n_dim()
 
     # Let the distance target_D be the distance for which we have a probability of target_p
-    target_D = (torch.ones(args.batch_size) * 0.1).to(device)
+    target_D = (torch.ones(args.batch_size) * 0.005).to(device)
     target_p = 0.1
     sigma = ((k * torch.pow(target_D / 2, 2)) / math.log(target_p)).abs()
     determinant = (k * sigma)
