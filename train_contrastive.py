@@ -46,6 +46,9 @@ def train(args, model_single, add_path, train_dataset, val_dataset=None):
         val_loader = val_dataset.get_loader(args.batch_size, shuffle=True, drop_last=False)
     loader_size = len(train_loader)
 
+    # define an instance of the PairwiseDistance
+    pdist = torch.nn.PairwiseDistance(p=2)
+
     with tqdm(range(args.n_epoch)) as pbar:
         for epoch in pbar:
             for i, data in enumerate(train_loader):
@@ -69,25 +72,29 @@ def train(args, model_single, add_path, train_dataset, val_dataset=None):
                     log_p, distloss, logdet, o = model(input, label)
 
                     # nll2
-                    log_p2, _, logdet2, o2 = model(input, label)
+                    log_p2, _, logdet2, o2 = model(input_p, label)
                     # nllmean
                     o_mean = torch.mean(torch.cat((o.unsqueeze(0), o2.unsqueeze(0)), 0), 0)
 
-                    D = torch.diag(torch.cdist(o, o2))
+                    # compute the pairwise distance
+                    D = pdist(o, o2)
+
+                    # D = torch.diag(torch.cdist(o, o2))
 
                     b_size = o_mean.shape[0]
                     k = o_mean.shape[1]
                     inv_id = torch.eye(k, k).to(o.device)
 
                     # p*max computing approx (0.9,0.01) (0.1,10) (p*max, D)
-                    p_max = torch.nan_to_num(torch.clamp(0.85 * torch.log10(-D + 11.5), min=0.1), 0.1)
+                    # p_max = torch.nan_to_num(torch.clamp(0.85 * torch.log10(-D + 11.5), min=math.pow(10, -10)), 0.1)
+                    p_max = torch.nan_to_num(torch.clamp(0.75 * torch.log10(-D + 21.5), min=math.pow(10, -10)), 0.1)
                     # sigma computing
-                    sigma = torch.sqrt(-torch.pow(D/2, 2) / (2*torch.log(p_max)))
+                    sigma = torch.sqrt(-torch.pow(D / 2, 2) / (2 * torch.log(p_max)))
 
                     # sigma = 0.5 * torch.sqrt(D / 2)
                     inverse_matrix = torch.einsum('ij,k->kij', inv_id, sigma)
 
-                    determinant = torch.tensor(1.).to(o.device)
+                    determinant = (k * sigma)
                     log_p_o_mean = -0.5 * (k * math.log(2 * math.pi) + torch.diag(
                         (torch.diagonal((o - o_mean) @ inverse_matrix,
                                         offset=0, dim1=0, dim2=1).transpose(1, 0).unsqueeze(0) @ torch.transpose(
@@ -99,15 +106,21 @@ def train(args, model_single, add_path, train_dataset, val_dataset=None):
                             o2 - o_mean, 1, 0)).reshape(b_size, -1), 0)) - torch.log(determinant)
                     log_p_o2_mean = log_p_o2_mean.unsqueeze(1)
 
-                    log_p_loss = torch.mean(torch.cat((log_p.unsqueeze(0), log_p_o_mean.unsqueeze(0)), 0), 0)
-                    log_p2_loss = torch.mean(torch.cat((log_p2.unsqueeze(0), log_p_o2_mean.unsqueeze(0)), 0), 0)
+                    # log_p_loss = torch.mean(torch.cat((log_p.unsqueeze(0), log_p_o_mean.unsqueeze(0)), 0), 0)
+                    # log_p2_loss = torch.mean(torch.cat((log_p2.unsqueeze(0), log_p_o2_mean.unsqueeze(0)), 0), 0)
 
                 # logdet = logdet.mean()
 
                 # nll_loss, log_p, log_det = calc_loss(log_p, logdet, dataset.im_size, n_bins)
-                nll_loss, log_p_loss, log_det = train_dataset.format_loss(log_p_loss, logdet)
-                nll2_loss, log_p2_loss, log_det2 = train_dataset.format_loss(log_p2_loss, logdet2)
-                loss = nll_loss + nll2_loss - beta * distloss
+                # nll_o1_loss, log_p, log_det = train_dataset.format_loss(log_p, logdet)
+                nll_o1_mean_loss, log_p_o_mean, log_det = train_dataset.format_loss(log_p_o_mean, logdet)
+                # nll_o2_loss, log_p2, log_det2 = train_dataset.format_loss(log_p2, logdet2)
+                nll_o2_mean_loss, log_p_o2_mean, log_det2 = train_dataset.format_loss(log_p_o2_mean, logdet2)
+
+                # loss_o1 = nll_o1_loss + nll_o1_mean_loss
+                # loss_o2 = nll_o2_loss + nll_o2_mean_loss
+
+                loss = nll_o1_mean_loss + nll_o2_mean_loss  # - beta * distloss
 
                 loss = model_single.upstream_process(loss)
                 # loss.clamp_(-10000,10000)
