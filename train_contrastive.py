@@ -131,8 +131,8 @@ def train(args, model_single, add_path, train_dataset, val_dataset=None):
                 loss_o1 = nll_o1_loss + nll_o1_mean_loss
                 loss_o2 = nll_o2_loss + nll_o2_mean_loss
 
-                # loss = loss_o1 + loss_o2 - beta * distloss
-                loss = nll_o1_mean_loss + nll_o2_mean_loss
+                loss = loss_o1 + loss_o2 - beta * distloss
+                # loss = nll_o1_mean_loss + nll_o2_mean_loss
 
                 loss = model_single.upstream_process(loss)
                 # loss.clamp_(-10000,10000)
