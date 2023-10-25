@@ -248,7 +248,7 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
     return best_i
 
 
-def visualize_dataset(dataset, train_dataset, val_dataset, model, save_dir):
+def visualize_dataset(dataset, train_dataset, val_dataset, model, save_dir, device):
     save_path = f'{save_dir}/visualize'
     create_folder(save_path)
     hist_train = np.histogram(train_dataset.true_labels)
@@ -345,8 +345,7 @@ def main(args):
 
     # reduce train dataset size (fitting too long)
     # print('Train dataset reduced in order to accelerate. (stratified)')
-    # train_dataset.reduce_regression_dataset(0.2, stratified=True)
-    # val_dataset.reduce_regression_dataset(0.5, stratified=True)
+    # train_dataset.reduce_dataset_ratio(0.05, stratified=True)
 
     n_dim = dataset.get_n_dim()
 

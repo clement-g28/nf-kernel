@@ -451,11 +451,11 @@ def visualize_points(data, data_labels, path, limits=None):
     ax.set_xlabel("X", weight="medium")
     ax.set_ylabel("Y", weight="medium")
 
-    n = int(data.shape[0] / 2)
+    n = data.shape[0]
     np.random.seed(1)
     X = data[:, 0]
     Y = data[:, 1]
-    S = np.ones(2 * n) * 40
+    S = np.ones(n) * 40
 
     cmap = plt.get_cmap("RdYlBu")
     scatter = plt.scatter(X, Y, s=S, edgecolor="black", linewidth=0.75, zorder=-20)

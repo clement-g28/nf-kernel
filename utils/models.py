@@ -862,6 +862,101 @@ class CMoFlow(NF):
     def upstream_process(self, loss):
         return loss
 
+    def interpret_transformation(self, dataset, save_dir, device, std_noise=.1, fig_limits=None):
+        from sklearn.decomposition import PCA
+        self.eval()
+        create_folder(f'{save_dir}/interpretation_transformation')
+
+        batch_size = 20
+        # nb_batch = math.ceil(dataset.X.shape[0] / batch_size)
+
+        bond_model = self.model.bond_model
+        atom_model = self.model.atom_model
+        tmp_dataset = dataset.duplicate()
+        # tmp_dataset.X = tmp_dataset.X + np.random.randn(*tmp_dataset.X.shape) * std_noise
+
+        # fig_limits = (tmp_dataset.X.min(), tmp_dataset.X.max())
+
+        def concatenate_zs(out):
+            all_h = []
+            all_adj_h = []
+            for h, adj_h in out:
+                all_h.append(h)
+                all_adj_h.append(adj_h)
+            all_h = np.concatenate(all_h, 0)
+            all_adj_h = np.concatenate(all_adj_h, 0)
+            z_all = [all_h, all_adj_h]
+            return z_all
+
+        def save_visu(z_all, flow_id):
+            np_flows = np.concatenate([zi.reshape(zi.shape[0], -1) for zi in z_all], axis=1)
+            if np_flows.shape[-1] > 2:
+                pca = PCA(n_components=2)
+                pca.fit(np_flows)
+                pca_projection = pca.transform(np_flows)
+                vis_np_flows = pca_projection
+            else:
+                vis_np_flows = np_flows
+
+            fig_filename = os.path.join(save_dir, 'interpretation_transformation', 'flows_{:04d}.png'.format(flow_id))
+            visualize_points(vis_np_flows, dataset.true_labels, fig_filename, limits=fig_limits)
+
+        with torch.no_grad():
+            # atom
+            for block in atom_model.blocks:
+                atom_flows = block.flows
+                for i_atomflow, atom_flow in enumerate(atom_flows):
+                    flows = []
+                    loader = tmp_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+                    for j, data in enumerate(loader):
+                        inputs = tmp_dataset.format_data(data[0], device)
+                        x, adj = inputs
+                        adj_normalized = rescale_adj(adj).to(self.device)
+
+                        out, det = atom_flow(adj_normalized, x)
+
+                        z = [out.detach().cpu().numpy(), adj.detach().cpu().numpy()]
+                        # flat_z = torch.cat([zi.reshape(zi.shape[0], -1) for zi in z], dim=1)
+                        # flows.append(flat_z.detach().cpu().numpy())
+                        flows.append(z)
+
+                    z_all = concatenate_zs(flows)
+
+                    save_visu(z_all, i_atomflow)
+
+                    tmp_dataset.X = list(zip(*z_all))
+                    tmp_dataset.transform = None
+
+            # bond
+            for block in bond_model.blocks:
+                bond_flows = block.flows
+                for i, bond_flow in enumerate(bond_flows):
+                    flows = []
+                    loader = tmp_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+                    for j, data in enumerate(loader):
+                        inputs = tmp_dataset.format_data(data[0], device)
+                        x, adj = inputs
+
+                        adj = block._squeeze(adj)
+
+                        out_adj, det = bond_flow(adj)
+
+                        out_adj = block._unsqueeze(out_adj)
+
+                        z = [x.detach().cpu().numpy(), out_adj.detach().cpu().numpy()]
+                        # flat_z = torch.cat([zi.reshape(zi.shape[0], -1) for zi in z], dim=1)
+                        # flows.append(flat_z.detach().cpu().numpy())
+                        flows.append(z)
+
+                    z_all = concatenate_zs(flows)
+
+                    save_visu(z_all, i+i_atomflow)
+
+                    tmp_dataset.X = list(zip(*z_all))
+                    tmp_dataset.transform = None
+
+        create_animation(dir=f'{save_dir}/interpretation_transformation', how_much_repeat=10)
+
     def forward(self, input, label, pair_with_noise=False):
         x, adj = input
         adj_normalized = rescale_adj(adj).to(self.device)
@@ -968,7 +1063,7 @@ class CMoFlow(NF):
                         af = dataset.add_feature
                         flow_atom = flow_atom[:, :, :-af]
 
-                    force_graph = True
+                    force_graph = False
                     if not force_graph and dataset.atomic_num_list is not None:  # if mol dataset
                         results_g = check_validity(np_adj, flow_atom, atomic_num_list, with_idx=True)
                         # create empty mols to complete the list

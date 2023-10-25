@@ -2533,7 +2533,7 @@ def main(args):
     std_noise = .1 if dataset_name in ['double_moon', 'single_moon', 'swissroll'] else None
     # fig_limits = ((-23,23),(-4,4))
     fig_limits = None
-    # model.interpret_transformation(train_dataset, save_dir, device, std_noise=std_noise, fig_limits=fig_limits)
+    model.interpret_transformation(train_dataset, save_dir, device, std_noise=std_noise, fig_limits=fig_limits)
 
     eval_type = args.eval_type
     if eval_type == 'classification':
@@ -2666,11 +2666,11 @@ def main(args):
         _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
                                  only_Z=isinstance(dataset, GraphDataset))
         print_as_mol = True
-        print_as_graph = True
+        print_as_graph = False
         print(f'(print_as_mol, print_as_graph) are set manually to '
               f'({print_as_mol},{print_as_graph}).')
-        # evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=print_as_mol,
-        #                   print_as_graph=print_as_graph)
+        evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=print_as_mol,
+                          print_as_graph=print_as_graph)
         evaluate_preimage2(model, val_dataset, device, save_dir, n_y=12, n_samples_by_y=1,
                            print_as_mol=print_as_mol, print_as_graph=print_as_graph, predmodel=predmodel, debug=True)
         if isinstance(val_dataset, GraphDataset):

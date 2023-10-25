@@ -94,9 +94,6 @@ def train(args, model_single, add_path, train_dataset, val_dataset=None):
 
                     # D = torch.diag(torch.cdist(o, o2))
 
-                    b_size = o_mean.shape[0]
-                    k = o_mean.shape[1]
-
                     # p*max computing approx (0.9,0.01) (0.1,10) (p*max, D)
                     # p_max = torch.nan_to_num(torch.clamp(0.85 * torch.log10(-D + 11.5), min=math.pow(10, -10)), 0.1)
                     # p_max = torch.nan_to_num(torch.clamp(0.75 * torch.log10(-D + 21.5), min=0.1), 0.1)
@@ -106,16 +103,33 @@ def train(args, model_single, add_path, train_dataset, val_dataset=None):
 
                     # inverse_matrix = torch.einsum('ij,k->kij', inv_id, 1 / sigma)
 
-                    log_p_o_mean = -0.5 * (k * math.log(2 * math.pi) + torch.diag(
+                    # positive
+                    pos_log_p1_mean = -0.5 * (k * math.log(2 * math.pi) + torch.diag(
                         (torch.diagonal((o - o_mean) @ inverse_matrix, offset=0, dim1=0, dim2=1).transpose(1,
                                                                                                            0).unsqueeze(
-                            0) @ torch.transpose(o - o_mean, 1, 0)).reshape(b_size, -1), 0)) - torch.log(determinant)
-                    log_p_o_mean = log_p_o_mean.unsqueeze(1)
-                    log_p_o2_mean = -0.5 * (k * math.log(2 * math.pi) + torch.diag(
+                            0) @ torch.transpose(o - o_mean, 1, 0)).reshape(args.batch_size, -1), 0)) - torch.log(
+                        determinant)
+                    pos_log_p1_mean = pos_log_p1_mean.unsqueeze(1)
+                    pos_log_p2_mean = -0.5 * (k * math.log(2 * math.pi) + torch.diag(
                         (torch.diagonal((o2 - o_mean) @ inverse_matrix,
                                         offset=0, dim1=0, dim2=1).transpose(1, 0).unsqueeze(0) @ torch.transpose(
-                            o2 - o_mean, 1, 0)).reshape(b_size, -1), 0)) - torch.log(determinant)
-                    log_p_o2_mean = log_p_o2_mean.unsqueeze(1)
+                            o2 - o_mean, 1, 0)).reshape(args.batch_size, -1), 0)) - torch.log(determinant)
+                    pos_log_p2_mean = pos_log_p2_mean.unsqueeze(1)
+
+                    # negative
+                    # o_mean_neg = torch.cat([o_mean[i_row - 1].unsqueeze(0) for i_row in range(o_mean.shape[0])], 0)
+
+                    # neg_log_p1_mean = -0.5 * (k * math.log(2 * math.pi) + torch.diag(
+                    #     (torch.diagonal((o - o_mean_neg) @ inverse_matrix, offset=0, dim1=0, dim2=1).transpose(1,
+                    #                                                                                            0).unsqueeze(
+                    #         0) @ torch.transpose(o - o_mean_neg, 1, 0)).reshape(args.batch_size, -1), 0)) - torch.log(
+                    #     determinant)
+                    # neg_log_p1_mean = neg_log_p1_mean.unsqueeze(1)
+                    # neg_log_p2_mean = -0.5 * (k * math.log(2 * math.pi) + torch.diag(
+                    #     (torch.diagonal((o2 - o_mean_neg) @ inverse_matrix,
+                    #                     offset=0, dim1=0, dim2=1).transpose(1, 0).unsqueeze(0) @ torch.transpose(
+                    #         o2 - o_mean_neg, 1, 0)).reshape(args.batch_size, -1), 0)) - torch.log(determinant)
+                    # neg_log_p2_mean = neg_log_p2_mean.unsqueeze(1)
 
                     # log_p_loss = torch.mean(torch.cat((log_p.unsqueeze(0), log_p_o_mean.unsqueeze(0)), 0), 0)
                     # log_p2_loss = torch.mean(torch.cat((log_p2.unsqueeze(0), log_p_o2_mean.unsqueeze(0)), 0), 0)
@@ -123,16 +137,24 @@ def train(args, model_single, add_path, train_dataset, val_dataset=None):
                 # logdet = logdet.mean()
 
                 # nll_loss, log_p, log_det = calc_loss(log_p, logdet, dataset.im_size, n_bins)
+                # standard loss
                 nll_o1_loss, log_p, log_det = train_dataset.format_loss(log_p, logdet)
-                nll_o1_mean_loss, log_p_o_mean, log_det = train_dataset.format_loss(log_p_o_mean, logdet)
                 nll_o2_loss, log_p2, log_det2 = train_dataset.format_loss(log_p2, logdet2)
-                nll_o2_mean_loss, log_p_o2_mean, log_det2 = train_dataset.format_loss(log_p_o2_mean, logdet2)
 
-                loss_o1 = nll_o1_loss + nll_o1_mean_loss
-                loss_o2 = nll_o2_loss + nll_o2_mean_loss
+                # positive contrastive loss
+                nll_o1_mean_loss, pos_log_p1_mean, log_det = train_dataset.format_loss(pos_log_p1_mean, logdet)
+                nll_o2_mean_loss, pos_log_p2_mean, log_det2 = train_dataset.format_loss(pos_log_p2_mean, logdet2)
+
+                # negative contrastive loss
+                # neg_nll_o1_mean_loss, neg_log_p1_mean, log_det = train_dataset.format_loss(neg_log_p1_mean, logdet)
+                # neg_nll_o2_mean_loss, neg_log_p2_mean, log_det2 = train_dataset.format_loss(neg_log_p2_mean, logdet2)
+
+                loss_o1 = nll_o1_loss + nll_o1_mean_loss  # - neg_nll_o1_mean_loss
+                loss_o2 = nll_o2_loss + nll_o2_mean_loss  # - neg_nll_o2_mean_loss
 
                 loss = loss_o1 + loss_o2 - beta * distloss
-                # loss = nll_o1_mean_loss + nll_o2_mean_loss
+                # loss = nll_o1_mean_loss - torch.clamp(neg_nll_o1_mean_loss, max=1000) + nll_o2_mean_loss - torch.clamp(
+                #     neg_nll_o2_mean_loss, max=1000)
 
                 loss = model_single.upstream_process(loss)
                 # loss.clamp_(-10000,10000)
@@ -164,7 +186,8 @@ def train(args, model_single, add_path, train_dataset, val_dataset=None):
                     f"Loss: {loss.item():.4f}; "
                     f"logP1: {log_p.mean().item():.4f}; logdet1: {log_det.item():.4f}; "
                     f"logP2: {log_p2.mean().item():.4f}; logdet2: {log_det2.item():.4f}; "
-                    f"D: {D.mean().item():.4f}; logP1_con: {log_p_o_mean.mean().item():.4f}; logP2_con: {log_p_o2_mean.mean().item():.4f}; "
+                    f"D: {D.mean().item():.4f}; logP1_con: {pos_log_p1_mean.mean().item():.4f}; "
+                    f"logP2_con: {pos_log_p2_mean.mean().item():.4f}; "
                     f"lr: {warmup_lr:.5f}; Lmu: {distloss.item():.5f}"
                 )
 
@@ -175,8 +198,10 @@ def train(args, model_single, add_path, train_dataset, val_dataset=None):
                                      "logP2": log_p2.mean().item(),
                                      "logdet": log_det.item(),
                                      "logdet2": log_det.item(),
-                                     "logP1_Mean": log_p_o_mean.mean().item(),
-                                     "logP2_Mean": log_p_o2_mean.mean().item(),
+                                     "Pos_logP1_Mean": pos_log_p1_mean.mean().item(),
+                                     "Pos_logP2_Mean": pos_log_p2_mean.mean().item(),
+                                     # "Neg_logP1_Mean": neg_log_p1_mean.mean().item(),
+                                     # "Neg_logP2_Mean": neg_log_p2_mean.mean().item(),
                                      "D": D.mean().item(),
                                      # "P_max": p_max.mean().item(),
                                      # "Sigma": sigma.mean().item(),
@@ -326,8 +351,8 @@ def main(args):
         val_dataset = None
 
     # reduce train dataset size (fitting too long)
-    print('Train dataset reduced in order to accelerate. (stratified)')
-    train_dataset.reduce_dataset_ratio(0.05, stratified=True)
+    # print('Train dataset reduced in order to accelerate. (stratified)')
+    # train_dataset.reduce_dataset_ratio(0.05, stratified=True)
 
     device = 'cuda:0'
 
