@@ -32,6 +32,10 @@ from utils.utils import set_seed, create_folder, save_every_pic, save_fig, save_
 
 from scipy.stats import kruskal
 
+from rdkit import Chem, DataStructs
+from rdkit.Chem import Draw, AllChem
+from ordered_set import OrderedSet
+
 
 def classification_score(pred, true):
     return np.count_nonzero((pred == true)) / true.shape[0]
@@ -2182,10 +2186,6 @@ def evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample
             af = val_dataset.add_feature
             x = x[:, :, :-af]
 
-        from rdkit import Chem, DataStructs
-        from rdkit.Chem import Draw, AllChem
-        from ordered_set import OrderedSet
-
         # Interps
         for n in range(int(all_res.shape[0] / (n_interpolation + 2))):
             xm = x[n * (n_interpolation + 2):(n + 1) * (n_interpolation + 2)]
@@ -2425,6 +2425,81 @@ def create_figure_train_projections(model, train_dataset, std_noise, save_path, 
                         save_path=f'{save_path}/noisytrain_distance_gp')
 
 
+def evaluate_graph_permutation(model, train_dataset, val_dataset, save_dir, device):
+    from utils.graphs.utils_datasets import batch_graph_permutation
+
+    assert isinstance(train_dataset, GraphDataset), 'Evaluation for graph datasets !'
+    train_dataset.permute_graphs_in_dataset()
+    val_dataset.permute_graphs_in_dataset()
+
+    create_folder(f'{save_dir}/eval_graph_perm')
+
+    batch_size = 200
+    loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+
+    # define an instance of the PairwiseDistance
+    pdist = torch.nn.PairwiseDistance(p=2)
+
+    # n_permutation test
+    n_perm = 10
+
+    model.eval()
+    shuffle_ids = []
+    outs = []
+    perm_dists = []
+    with torch.no_grad():
+        for j, data in enumerate(loader):
+            inp, labels = data
+            inp = train_dataset.format_data(inp, device)
+            labels = labels.to(device)
+            log_p, distloss, logdet, out = model(inp, labels)
+            outs.append(out.detach().cpu())
+
+            for n in range(n_perm):
+                inp_p, sh_id = batch_graph_permutation(inp, return_sh_id=True)
+                while sh_id in shuffle_ids:
+                    inp_p, sh_id = batch_graph_permutation(inp, return_sh_id=True)
+                shuffle_ids.append(sh_id)
+
+                _, _, _, out2 = model(inp_p, labels)
+                outs.append(out2.detach().cpu())
+                perm_dists.append(pdist(out, out2).detach().cpu().unsqueeze(0))
+
+                D = torch.cdist(out, out2)
+                for i in range(D.shape[0]):
+                    sorted_id_row = torch.argsort(D[i])
+                    first_sorted_id = sorted_id_row[:10]
+                    cpt = 0
+                    while i not in first_sorted_id:
+                        cpt += 1
+                        first_sorted_id = sorted_id_row[:(10+cpt)]
+                    graphs = tuple([v[first_sorted_id].detach().cpu() for v in inp_p])
+
+                    ori_mol = valid_mol(construct_mol(inp[0][i].detach().cpu(), inp[1][i].detach().cpu(),
+                                                      train_dataset.atomic_num_list))
+                    mols = [valid_mol(construct_mol(x_elem, adj_elem, train_dataset.atomic_num_list))
+                            for x_elem, adj_elem in zip(*graphs)]
+                    mols = [ori_mol] + mols
+
+                    legends = ['ori'] + [f'{d:.4f}' for d in list(D[i][first_sorted_id].detach().cpu().numpy())]
+
+                    psize = (200, 200)
+                    img = Draw.MolsToGridImage(mols, legends=legends,
+                                               molsPerRow=math.ceil(math.sqrt(D.shape[0])),
+                                               subImgSize=psize,
+                                               # useSVG=True
+                                               )
+                    img.save(f'{save_dir}/eval_graph_perm/{j:04}_{n:04}_{i:04}.png')
+
+            perm_dists = torch.cat(perm_dists, 0)
+            maxs = torch.max(perm_dists, 0)
+            mins = torch.min(perm_dists, 0)
+            means = torch.mean(perm_dists, 0)
+
+            print(f'{maxs}, {mins}, {means}.')
+            break
+
+
 def main(args):
     print(args)
     if args.seed is not None:
@@ -2528,6 +2603,8 @@ def main(args):
 
     save_dir = './save'
     create_folder(save_dir)
+
+    # evaluate_graph_permutation(model, train_dataset, val_dataset, save_dir, device)
 
     # generate flows
     std_noise = .1 if dataset_name in ['double_moon', 'single_moon', 'swissroll'] else None

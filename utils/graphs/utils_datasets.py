@@ -10,7 +10,7 @@ def transform_graph_permutation(x, adj):
     return features, adj
 
 
-def batch_graph_permutation(graph_li):
+def batch_graph_permutation(graph_li, return_sh_id=False):
     x = graph_li[0]
     adj = graph_li[1]
     node_list = [i for i in range(x.shape[1])]
@@ -18,4 +18,8 @@ def batch_graph_permutation(graph_li):
 
     features = x[:, node_list]
     adj = adj[:, :, node_list][:, :, :, node_list]
-    return features, adj
+
+    if return_sh_id:
+        return (features, adj), node_list
+    else:
+        return features, adj
