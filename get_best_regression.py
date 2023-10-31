@@ -20,7 +20,7 @@ from utils.testing import testing_arguments, save_modelhyperparams, retrieve_par
 
 
 def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_dataset, save_dir, device, with_train=False,
-                        reg_use_var=False, cus_load_func=None):
+                        reg_use_var=False, cus_load_func=None, batch_size=200):
     zridge_scores = []
 
     # Our approach
@@ -57,7 +57,6 @@ def evaluate_regression(t_model_params, train_dataset, eval_dataset, full_datase
         model = model.to(device)
         model.eval()
 
-        batch_size = 200
         loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
 
         Z = []

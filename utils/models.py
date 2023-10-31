@@ -812,13 +812,13 @@ class GlowModel(NF):
 
 
 def load_moflow_model(args_moflow, gaussian_params, learn_mean=True, device='cuda:0', reg_use_var=False, dataset=None,
-                      print=False):
+                      print=False, add_feature=None):
     b_hidden_ch = [int(d) for d in args_moflow.b_hidden_ch.strip(',').split(',')]
     a_hidden_gnn = [int(d) for d in args_moflow.a_hidden_gnn.strip(',').split(',')]
     a_hidden_lin = [int(d) for d in args_moflow.a_hidden_lin.strip(',').split(',')]
     mask_row_size_list = [int(d) for d in args_moflow.mask_row_size_list.strip(',').split(',')]
     mask_row_stride_list = [int(d) for d in args_moflow.mask_row_stride_list.strip(',').split(',')]
-    dset_params = dataset.get_dataset_params()
+    dset_params = dataset.get_dataset_params(add_feature=add_feature)
     model_params = MoFlowHyperparams(b_n_type=dset_params['b_n_type'],  # 4,
                                      b_n_flow=args_moflow.b_n_flow,
                                      b_n_block=args_moflow.b_n_block,
@@ -873,6 +873,7 @@ class CMoFlow(NF):
         bond_model = self.model.bond_model
         atom_model = self.model.atom_model
         tmp_dataset = dataset.duplicate()
+
         # tmp_dataset.X = tmp_dataset.X + np.random.randn(*tmp_dataset.X.shape) * std_noise
 
         # fig_limits = (tmp_dataset.X.min(), tmp_dataset.X.max())
@@ -950,7 +951,7 @@ class CMoFlow(NF):
 
                     z_all = concatenate_zs(flows)
 
-                    save_visu(z_all, i+i_atomflow)
+                    save_visu(z_all, i + i_atomflow)
 
                     tmp_dataset.X = list(zip(*z_all))
                     tmp_dataset.transform = None

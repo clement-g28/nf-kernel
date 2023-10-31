@@ -52,7 +52,7 @@ class BaseDataset(Dataset):
     def get_flattened_X(self):
         return self.X.reshape(self.X.shape[0], -1)
 
-    def get_n_dim(self):
+    def get_n_dim(self, add_feature=None):
         n_dim = self.X[0].shape[0]
         for sh in self.X[0].shape[1:]:
             n_dim *= sh
@@ -786,7 +786,7 @@ class GraphDataset(BaseDataset):
         self.dataset_name = dataset_name
         # self.label_type = np.int if self.dataset_name not in REGRESSION_DATASETS else np.float
 
-        (train_dataset, test_dataset), self.label_map = self.load_dataset(dataset_name, add_feature=add_feature)
+        (train_dataset, test_dataset), self.label_map = self.load_dataset(dataset_name)  # , add_feature=add_feature)
         if len(train_dataset) == 3:
             xs, adjs, y = train_dataset
         else:
@@ -953,18 +953,25 @@ class GraphDataset(BaseDataset):
         adj = adj.reshape(adj.shape[0], -1)
         return np.concatenate((x, adj), axis=1)
 
-    def calculate_dims(self):
+    def calculate_dims(self, add_feature=None):
         x, adj = self.X[0]
         n_x = x.shape[0]
-        for sh in x.shape[1:]:
-            n_x *= sh
+        for i in range(len(x.shape[1:])):
+            sh = x.shape[i + 1]
+            if i + 1 == len(x.shape[1:]):
+                if add_feature is not None:
+                    n_x *= (sh + add_feature)
+                elif self.add_feature is not None:
+                    n_x *= (sh + self.add_feature)
+                else:
+                    n_x *= sh
         n_adj = adj.shape[0]
         for sh in adj.shape[1:]:
             n_adj *= sh
         return n_x, n_adj
 
-    def get_n_dim(self):
-        n_x, n_adj = self.calculate_dims()
+    def get_n_dim(self, add_feature=None):
+        n_x, n_adj = self.calculate_dims(add_feature=add_feature)
         return n_x + n_adj
 
     def get_nx_graphs(self, edge_to_node=False, data=None, attributed_node=False):
@@ -1210,8 +1217,17 @@ class GraphDataset(BaseDataset):
     #     return mean_dist_neig
     #     # return label_mindist
 
-    def format_data(self, input, device):
+    def format_data(self, input, device, add_feature=None):
         for i in range(len(input)):
+            if i == 0:
+                if add_feature is not None:
+                    n_X = torch.zeros(input[i].shape[0], input[i].shape[1], input[i].shape[-1] + add_feature)
+                    n_X[:, :, :-add_feature] = input[i]
+                    input[i] = n_X
+                elif self.add_feature is not None:
+                    n_X = torch.zeros(input[i].shape[0], input[i].shape[1], input[i].shape[-1] + self.add_feature)
+                    n_X[:, :, :-self.add_feature] = input[i]
+                    input[i] = n_X
             input[i] = input[i].float().to(device)
         return input
 
@@ -1238,9 +1254,11 @@ class RegressionGraphDataset(GraphDataset):
     def __init__(self, dataset_name, transform=None, add_feature=None):
         super().__init__(dataset_name, transform=transform, add_feature=add_feature)
 
-    def get_dataset_params(self):
+    def get_dataset_params(self, add_feature=None):
         # atom_type_list = [key for key, val in self.label_map.items()]
-        atom_type_list = [i for i in range(self.X[0][0].shape[-1] - 1)]  # -1 because of virtual node
+        add_f = add_feature if add_feature is not None else self.add_feature if self.add_feature is not None else None
+        dim = self.X[0][0].shape[-1] - 1 if add_f is None else (self.X[0][0].shape[-1] + add_f) - 1
+        atom_type_list = [i for i in range(dim)]  # -1 because of virtual node
         if self.dataset_name == 'qm7':
             # atom_type_list = ['C', 'N', 'S', 'O']
             b_n_type = 4
@@ -1387,11 +1405,13 @@ class ClassificationGraphDataset(GraphDataset):
     def __init__(self, dataset_name, transform=None, add_feature=None):
         super().__init__(dataset_name, transform=transform, add_feature=add_feature)
 
-    def get_dataset_params(self):
+    def get_dataset_params(self, add_feature=None):
         # if self.label_map is not None:
         #     node_type_list = [key for key, val in self.label_map.items()]
         # else:
-        node_type_list = [i for i in range(self.X[0][0].shape[-1] - 1)]  # -1 because of virtual node
+        add_f = add_feature if add_feature is not None else self.add_feature if self.add_feature is not None else None
+        dim = self.X[0][0].shape[-1] - 1 if add_f is None else (self.X[0][0].shape[-1] + add_f) - 1
+        node_type_list = [i for i in range(dim)]  # -1 because of virtual node
         if self.dataset_name == 'toxcast':
             b_n_type = 4
             b_n_squeeze = 10

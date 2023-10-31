@@ -38,15 +38,31 @@ def main(args):
         set_seed(args.seed)
 
     dataset_name, model_type, folder_name = args.folder.split('/')[-3:]
+
+    import json
+
+    params_path = args.folder + '/params.json'
+    # Opening JSON file
+    with open(params_path) as json_file:
+        data = json.load(json_file)
+    var = data['var']
+    add_feature = data['add_feature']
+    batch_size = data['batch_size']
+    split_graph_dim = data['split_graph_dim']
+
+    # splits = folder_name.split(',')
+    # for split in splits:
+    #     if 'var' in split:
+    #         var = float(split.split('_')[0].split('var=')[-1])
+    #     elif 'add_feature' in split:
+    #         add_feature = int(split.split('add_feature=')[-1])
+    #     elif 'batch_size' in split:
+    #         batch_size = int(split.split('batch_size=')[-1])
+
     # DATASET #
-    dataset = load_dataset(args, dataset_name, model_type, to_evaluate=True, add_feature=args.add_feature)
+    dataset = load_dataset(args, dataset_name, model_type, to_evaluate=True, add_feature=add_feature)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    splits = folder_name.split(',')
-    for split in splits:
-        if 'var' in split:
-            var = float(split.split('_')[0].split('var=')[-1])
 
     # Retrieve parameters from name
     mean_of_eigval = var
@@ -87,8 +103,8 @@ def main(args):
         # initialize gaussian params
         eigval_list = [mean_of_eigval for i in range(dim_per_label)]
 
-        print('split graph dim should be set to set manually in evaluate opti, default to False...')
-        split_graph_dim = False
+        # print('split graph dim should be set to set manually in evaluate opti, default to False...')
+        # split_graph_dim = False
         if not dataset.is_regression_dataset():
             gaussian_params = initialize_class_gaussian_params(dataset, eigval_list, isotrope=True,
                                                                dim_per_label=dim_per_label, fixed_eigval=fixed_eigval,
@@ -116,10 +132,11 @@ def main(args):
     if args.eval_type == 'regression':
         best_i = evaluate_regression(t_model_params, train_dataset, val_dataset, full_dataset=dataset,
                                      save_dir=save_dir, device=device, with_train=True, reg_use_var=reg_use_var,
-                                     cus_load_func=loading_func)
+                                     cus_load_func=loading_func, batch_size=batch_size)
     elif args.eval_type == 'classification':
         best_i = evaluate_classification(t_model_params, train_dataset, val_dataset, full_dataset=dataset,
-                                         save_dir=save_dir, device=device, with_train=True, cus_load_func=loading_func)
+                                         save_dir=save_dir, device=device, with_train=True, cus_load_func=loading_func,
+                                         batch_size=batch_size)
 
 
 if __name__ == '__main__':
@@ -127,7 +144,7 @@ if __name__ == '__main__':
     parser.add_argument("--method", default=0, type=int, help='select between [0,1,2]')
     parser.add_argument("--eval_type", default='regression', type=str, choices=['regression', 'classification'],
                         help='select the evaluation type')
-    parser.add_argument("--add_feature", type=int, default=None)
+    # parser.add_argument("--add_feature", type=int, default=None)
     args = parser.parse_args()
     args.seed = 0
 

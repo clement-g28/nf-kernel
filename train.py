@@ -173,7 +173,7 @@ def train(args, model_single, add_path, train_dataset, val_dataset=None):
                 model.train()
 
             if epoch > args.save_at_epoch and epoch % args.save_each_epoch == 0:
-                torch.save(model.state_dict(), f"{save_dir}/model_{str(itr + 1).zfill(6)}.pt")
+                torch.save(model.state_dict(), f"{save_dir}/model_{str(epoch).zfill(6)}.pt")
 
 
 def main(args):

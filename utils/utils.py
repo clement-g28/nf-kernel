@@ -257,17 +257,17 @@ class AverageMeter(object):
 
 
 def initialize_class_gaussian_params(dataset, al_list, isotrope=False, dim_per_label=30, fixed_eigval=None,
-                                     split_graph_dim=False):
+                                     split_graph_dim=False, add_feature=None):
     uni = np.unique(dataset.true_labels)
     if isinstance(dataset, GraphDataset) and split_graph_dim:
-        n_x, n_adj = dataset.calculate_dims()
+        n_x, n_adj = dataset.calculate_dims(add_feature=add_feature)
         dim_per_label_x = math.floor(n_x / len(uni))
         dim_per_label_adj = math.floor(n_adj / len(uni))
         n_dim = n_x + n_adj
         al_list = al_list[:dim_per_label_x + dim_per_label_adj]
         dim_per_label = dim_per_label_x + dim_per_label_adj
     else:
-        n_dim = dataset.get_n_dim()
+        n_dim = dataset.get_n_dim(add_feature=add_feature)
     gaussian_params = []
     eigenvecs = np.zeros((n_dim, n_dim))
     np.fill_diagonal(eigenvecs, 1)
@@ -296,8 +296,9 @@ def initialize_class_gaussian_params(dataset, al_list, isotrope=False, dim_per_l
     return gaussian_params
 
 
-def initialize_regression_gaussian_params(dataset, al_list, isotrope=False, dim_per_label=30, fixed_eigval=None):
-    n_dim = dataset.get_n_dim()
+def initialize_regression_gaussian_params(dataset, al_list, isotrope=False, dim_per_label=30, fixed_eigval=None,
+                                          add_feature=None):
+    n_dim = dataset.get_n_dim(add_feature=add_feature)
     gaussian_params = []
     if isotrope:
         for i in range(2):
