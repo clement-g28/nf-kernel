@@ -33,6 +33,8 @@ from ray.tune import Stopper
 
 from utils.utils import load_dataset
 
+from utils.dataset import GraphDataset
+
 
 def nan_stopper(trial_id: str, result: Dict):
     metric_result = result.get('accuracy')
@@ -137,6 +139,48 @@ def init_model(var, noise, dataset, noise_x=None, add_feature=None, split_graph_
     return model_single
 
 
+def evaluate_model(val_loader, val_dataset, model, beta, config, device):
+    val_loss = 0.0
+    val_steps = 0
+    accuracy = 0
+    val_nll = 0
+    val_logp = 0
+    val_logdet = 0
+    val_dist = 0
+    for data in val_loader:
+        input, label = data
+
+        input = val_dataset.format_data(input, device, add_feature=config["add_feature"])
+        label = label.to(device)
+
+        log_p, distloss, logdet, z = model(input, label)
+
+        logdet = logdet.mean()
+
+        nll_loss, log_p, log_det = val_dataset.format_loss(log_p, logdet)
+        loss = nll_loss - beta * distloss
+        val_loss += loss.cpu().numpy()
+        val_steps += 1
+        val_nll += nll_loss.cpu().numpy()
+        val_logp += log_p.cpu().numpy()
+        val_logdet += log_det.cpu().numpy()
+        val_dist += distloss.cpu().numpy()
+
+        if dataset.is_regression_dataset():
+            # accuracy
+            means = model.means.detach().cpu().numpy()
+            np_z = z.detach().cpu().numpy()
+            np_label = label.detach().cpu().numpy()
+            proj, dot_val = project_between(np_z, means[0], means[1])
+            pred = dot_val.squeeze() * (model.label_max - model.label_min) + model.label_min
+            accuracy += np.power((pred - np_label), 2).mean()
+        else:
+            accuracy += val_loss
+            # accuracy += (val_logp - val_nll)
+
+    return val_loss, val_steps, accuracy, val_nll, val_logp, val_logdet, val_dist
+
+
 def train_opti(config):
     train_dataset = get_train_dataset()
     val_dataset = get_val_dataset()
@@ -160,6 +204,9 @@ def train_opti(config):
     train_loader = train_dataset.get_loader(args.batch_size, shuffle=True, drop_last=True, sampler=True)
     val_loader = get_val_dataset().get_loader(args.batch_size, shuffle=True, drop_last=True)
     loader_size = len(train_loader)
+
+    best_accuracy = math.inf
+    # best_accuracy = -math.inf
 
     for epoch in range(args.n_epoch):
         running_loss = 0.0
@@ -206,49 +253,76 @@ def train_opti(config):
         val_loss = 0.0
         val_steps = 0
         accuracy = 0
+        val_nll = 0
         val_logp = 0
         val_logdet = 0
         val_dist = 0
         model.eval()
 
         with torch.no_grad():
-            for data in val_loader:
-                input, label = data
+            if isinstance(train_dataset, GraphDataset):  # Permutations for Graphs
+                n_permutation = 10
+                for n in range(n_permutation):
+                    results = evaluate_model(val_loader, val_dataset, model, beta, config, device)
+                    # val_loss, val_steps, accuracy, val_nll, val_logp, val_logdet, val_dist
+                    val_loss += results[0]
+                    val_steps += results[1]
+                    accuracy += results[2]
+                    val_nll += results[3]
+                    val_logp += results[4]
+                    val_logdet += results[5]
+                    val_dist += results[6]
+            else:
+                val_loss, val_steps, accuracy, \
+                val_nll, val_logp, val_logdet, val_dist = evaluate_model(val_loader, val_dataset, model, beta, config,
+                                                                         device)
 
-                input = val_dataset.format_data(input, device, add_feature=config["add_feature"])
-                label = label.to(device)
-
-                log_p, distloss, logdet, z = model(input, label)
-
-                logdet = logdet.mean()
-
-                nll_loss, log_p, log_det = val_dataset.format_loss(log_p, logdet)
-                loss = nll_loss - beta * distloss
-                val_loss += loss.cpu().numpy()
-                val_steps += 1
-                val_logp += log_p.cpu().numpy()
-                val_logdet += log_det.cpu().numpy()
-                val_dist += distloss.cpu().numpy()
-
-                if dataset.is_regression_dataset():
-                    # accuracy
-                    means = model.means.detach().cpu().numpy()
-                    np_z = z.detach().cpu().numpy()
-                    np_label = label.detach().cpu().numpy()
-                    proj, dot_val = project_between(np_z, means[0], means[1])
-                    pred = dot_val.squeeze() * (model.label_max - model.label_min) + model.label_min
-                    accuracy += np.power((pred - np_label), 2).mean()
-                else:
-                    accuracy += val_loss
+            # for data in val_loader:
+            #     input, label = data
+            #
+            #     input = val_dataset.format_data(input, device, add_feature=config["add_feature"])
+            #     label = label.to(device)
+            #
+            #     log_p, distloss, logdet, z = model(input, label)
+            #
+            #     logdet = logdet.mean()
+            #
+            #     nll_loss, log_p, log_det = val_dataset.format_loss(log_p, logdet)
+            #     loss = nll_loss - beta * distloss
+            #     val_loss += loss.cpu().numpy()
+            #     val_steps += 1
+            #     val_nll += nll_loss.cpu().numpy()
+            #     val_logp += log_p.cpu().numpy()
+            #     val_logdet += log_det.cpu().numpy()
+            #     val_dist += distloss.cpu().numpy()
+            #
+            #     if dataset.is_regression_dataset():
+            #         # accuracy
+            #         means = model.means.detach().cpu().numpy()
+            #         np_z = z.detach().cpu().numpy()
+            #         np_label = label.detach().cpu().numpy()
+            #         proj, dot_val = project_between(np_z, means[0], means[1])
+            #         pred = dot_val.squeeze() * (model.label_max - model.label_min) + model.label_min
+            #         accuracy += np.power((pred - np_label), 2).mean()
+            #     else:
+            #         # accuracy += val_loss
+            #         accuracy += val_logp
 
         model.train()
-        if epoch > args.save_at_epoch and epoch % args.save_each_epoch == 0:
+        # if accuracy > best_accuracy and epoch > args.save_at_epoch:
+        if accuracy < best_accuracy and epoch > args.save_at_epoch:
+            best_accuracy = accuracy
             with tune.checkpoint_dir(epoch) as checkpoint_dir:
                 path = os.path.join(checkpoint_dir, "checkpoint")
                 torch.save((model.state_dict(), optimizer.state_dict()), path)
 
-        tune.report(loss=(val_loss / val_steps), accuracy=(accuracy / val_steps), logp=(val_logp / val_steps),
-                    logdet=(val_logdet / val_steps), distloss=(val_dist / val_steps))
+        # if epoch > args.save_at_epoch and epoch % args.save_each_epoch == 0:
+        #     with tune.checkpoint_dir(epoch) as checkpoint_dir:
+        #         path = os.path.join(checkpoint_dir, "checkpoint")
+        #         torch.save((model.state_dict(), optimizer.state_dict()), path)
+
+        tune.report(loss=(val_loss / val_steps), accuracy=(accuracy / val_steps), nll=(val_nll / val_steps),
+                    logp=(val_logp / val_steps), logdet=(val_logdet / val_steps), distloss=(val_dist / val_steps))
 
 
 if __name__ == "__main__":
@@ -332,7 +406,7 @@ if __name__ == "__main__":
     config = {
         "var": tune.uniform(1.1, 1.4),
         "beta": tune.randint(10, 200),
-        "noise": tune.uniform(0.2, 0.9),
+        "noise": tune.uniform(0.2, 0.5),
         # "noise_x": tune.uniform(0.05, 0.3),
         "noise_x": None,
         "lr": tune.loguniform(1e-4, 0.001),
@@ -343,12 +417,13 @@ if __name__ == "__main__":
     scheduler = ASHAScheduler(
         metric="accuracy",
         mode="min",
+        # mode="max",
         max_t=args.n_epoch,
         grace_period=1,
         reduction_factor=2)
     reporter = CLIReporter(
         parameter_columns=["var", "beta", "lr", "batch_size", "add_feature"],
-        metric_columns=["loss", "accuracy", "logp", "logdet", "distloss", "training_iteration"])
+        metric_columns=["loss", "nll", "logp", "logdet", "distloss", "training_iteration"])
 
     train_dataset_id = ray.put(train_dset)
     val_dataset_id = ray.put(val_dset)
