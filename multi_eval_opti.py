@@ -24,6 +24,12 @@ if __name__ == "__main__":
     models_folders = []
     for file in os.listdir(f"{args.folder}"):
         if os.path.isdir(f"{args.folder}/{file}") and "train_opti" in file:
-            args_copy = Namespace(**vars(args))
-            args_copy.folder = f"{args.folder}/{file}"
-            main(args_copy)
+            has_checkpoint = False
+            for file1 in os.listdir(f"{args.folder}/{file}"):
+                if os.path.isdir(f"{args.folder}/{file}/{file1}") and 'checkpoint' in file1:
+                    has_checkpoint = True
+                    break
+            if has_checkpoint:
+                args_copy = Namespace(**vars(args))
+                args_copy.folder = f"{args.folder}/{file}"
+                main(args_copy)
