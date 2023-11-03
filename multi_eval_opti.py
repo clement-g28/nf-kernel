@@ -1,9 +1,14 @@
-from evaluate_opti import main
-import glob
+from evaluate_opti import main as evaluate_model
+import torch
 import os
 from argparse import Namespace
 from utils.testing import learn_or_load_modelhyperparams, load_split_dataset, testing_arguments, \
     initialize_gaussian_params
+
+
+def process_eval(args):
+    evaluate_model(args)
+    torch.cuda.empty_cache()
 
 
 if __name__ == "__main__":
@@ -20,8 +25,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
     args.seed = 3
 
-    # os.chdir(args.folder)
-    models_folders = []
+    # evaluate
+    current_folder = os.getcwd()
+
+    arguments_test = []
     for file in os.listdir(f"{args.folder}"):
         if os.path.isdir(f"{args.folder}/{file}") and "train_opti" in file:
             has_checkpoint = False
@@ -32,4 +39,8 @@ if __name__ == "__main__":
             if has_checkpoint:
                 args_copy = Namespace(**vars(args))
                 args_copy.folder = f"{args.folder}/{file}"
-                main(args_copy)
+                arguments_test.append(args_copy)
+
+    for i in range(len(arguments_test)):
+        process_eval(arguments_test[i])
+        os.chdir(current_folder)
