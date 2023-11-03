@@ -288,6 +288,9 @@ def main(args):
             evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z,
                                           print_as_mol=print_as_mol, print_as_graph=print_as_graph)
 
+    del dataset
+    model_single.del_model_from_gpu()
+
 
 if __name__ == "__main__":
     choices = ['classification', 'projection', 'generation', 'regression']
