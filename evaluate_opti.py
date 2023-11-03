@@ -30,19 +30,44 @@ def main(args):
 
     dataset_name, model_type, folder_name = args.folder.split('/')[-3:]
 
+    is_last_chckpt = False
+    flow_path = f'{args.folder}/save/best_{args.model_to_use}_model.pth'
+    # assert os.path.exists(flow_path), f'snapshot path {flow_path} does not exists'
+    if not os.path.exists(flow_path):
+        import glob
+        # os.chdir(args.folder)
+        saves = []
+        for file in glob.glob(f"{args.folder}/checkpoint_*/checkpoint"):
+            saves.append(file)
+
+        saves.sort()
+        print(saves)
+        flow_path = saves[-1]
+        is_last_chckpt = True
+        print('selecting last saved checkpoint as model.')
+    # folder_name = args.folder.split('/')[-1]
+
+    # splits = folder_name.split(',')
+    # for split in splits:
+    #     if 'var' in split:
+    #         var = float(split.split('_')[0].split('var=')[-1])
+    #
+
+    import json
+
+    params_path = args.folder + '/params.json'
+    # Opening JSON file
+    with open(params_path) as json_file:
+        data = json.load(json_file)
+    var = data['var']
+    add_feature = data['add_feature']
+    batch_size = data['batch_size']
+    split_graph_dim = data['split_graph_dim']
+
     # DATASET #
-    dataset = load_dataset(args, dataset_name, model_type, to_evaluate=True, add_feature=args.add_feature)
+    dataset = load_dataset(args, dataset_name, model_type, to_evaluate=True, add_feature=add_feature)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    flow_path = f'{args.folder}/save/best_{args.model_to_use}_model.pth'
-    assert os.path.exists(flow_path), f'snapshot path {flow_path} does not exists'
-    folder_name = args.folder.split('/')[-1]
-
-    splits = folder_name.split(',')
-    for split in splits:
-        if 'var' in split:
-            var = float(split.split('_')[0].split('var=')[-1])
 
     # Retrieve parameters from name
     mean_of_eigval = var
@@ -73,8 +98,8 @@ def main(args):
     # initialize gaussian params
     eigval_list = [mean_of_eigval for i in range(dim_per_label)]
 
-    print('split graph dim should be set to set manually in evaluate opti, default to False...')
-    split_graph_dim = False
+    # print('split graph dim should be set to set manually in evaluate opti, default to False...')
+    # split_graph_dim = False
     if not dataset.is_regression_dataset():
         gaussian_params = initialize_class_gaussian_params(dataset, eigval_list, isotrope=False,
                                                            dim_per_label=dim_per_label, fixed_eigval=fixed_eigval,
@@ -110,7 +135,10 @@ def main(args):
     else:
         assert False, 'unknown model type!'
 
-    model_state = torch.load(flow_path, map_location=device)
+    if not is_last_chckpt:
+        model_state = torch.load(flow_path, map_location=device)
+    else:
+        model_state, optimizer_state = torch.load(flow_path, map_location=device)
     model_single.load_state_dict(model_state)
     model = model_single
 
@@ -122,6 +150,12 @@ def main(args):
     save_dir = './save'
     create_folder(save_dir)
 
+    # generate flows
+    std_noise = .1 if dataset_name in ['double_moon', 'single_moon', 'swissroll'] else None
+    # fig_limits = ((-23,23),(-4,4))
+    fig_limits = None
+    model.interpret_transformation(train_dataset, save_dir, device, std_noise=std_noise, fig_limits=fig_limits)
+
     eval_type = args.eval_type
     if eval_type == 'classification':
         dataset_name_eval = ['mnist', 'cifar10', 'double_moon', 'iris', 'bcancer'] + GRAPH_CLASSIFICATION_DATASETS
@@ -130,7 +164,7 @@ def main(args):
         _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
                                  only_Z=isinstance(dataset, GraphDataset))
         print_as_mol = True
-        print_as_graph = True
+        print_as_graph = False
         refresh_means = False
         print(f'(print_as_mol, print_as_graph, refresh_means) are set manually to '
               f'({print_as_mol},{print_as_graph},{refresh_means}).')
@@ -265,7 +299,7 @@ if __name__ == "__main__":
     parser.add_argument('--model_to_use', type=str, default='classification', choices=best_model_choices,
                         help='what best model to use for the evaluation')
     parser.add_argument("--method", default=0, type=int, help='select between [0,1,2]')
-    parser.add_argument("--add_feature", type=int, default=None)
+    # parser.add_argument("--add_feature", type=int, default=None)
     args = parser.parse_args()
     args.seed = 3
     main(args)

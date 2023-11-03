@@ -18,7 +18,7 @@ from torchvision import utils
 from utils.custom_glow import WrappedModel
 from utils.dataset import GraphDataset, ImDataset, GRAPH_CLASSIFICATION_DATASETS
 from utils.density import construct_covariance
-from utils.utils import format, organise_data
+from utils.utils import format, organise_data, predict_by_log_p_with_gaussian_params
 from utils.graphs.graph_utils import save_nx_graph, save_nx_graph_attr
 from utils.graphs.kernels import compute_wl_kernel, compute_sp_kernel, compute_mslap_kernel, compute_hadcode_kernel, \
     compute_propagation_kernel
@@ -546,23 +546,38 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
 
     # Compute results with our approach if not None
     if model is not None:
-
-        loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
-
+        model.eval()
         start = time.time()
         Z = []
         tlabels = []
-        model.eval()
-        with torch.no_grad():
-            for j, data in enumerate(loader):
-                inp, labels = data
-                inp = train_dataset.format_data(inp, device)
-                labels = labels.to(device)
-                log_p, distloss, logdet, out = model(inp, labels)
-                Z.append(out.detach().cpu().numpy())
-                tlabels.append(labels.detach().cpu().numpy())
-        Z = np.concatenate(Z, axis=0).reshape(len(train_dataset), -1)
+        if isinstance(train_dataset, GraphDataset):
+            n_permutation = 5
+            for n_perm in range(n_permutation):
+                train_dataset.permute_graphs_in_dataset()
+
+                loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+
+                with torch.no_grad():
+                    for j, data in enumerate(loader):
+                        inp, labels = data
+                        inp = train_dataset.format_data(inp, device)
+                        labels = labels.to(device)
+                        log_p, distloss, logdet, out = model(inp, labels)
+                        Z.append(out.detach().cpu().numpy())
+                        tlabels.append(labels.detach().cpu().numpy())
+        else:
+            loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+
+            with torch.no_grad():
+                for j, data in enumerate(loader):
+                    inp, labels = data
+                    inp = train_dataset.format_data(inp, device)
+                    labels = labels.to(device)
+                    log_p, distloss, logdet, out = model(inp, labels)
+                    Z.append(out.detach().cpu().numpy())
+                    tlabels.append(labels.detach().cpu().numpy())
         tlabels = np.concatenate(tlabels, axis=0)
+        Z = np.concatenate(Z, axis=0).reshape(tlabels.shape[0], -1)
         end = time.time()
         print(f"time to get Z_train from X_train: {str(end - start)}, batch size: {batch_size}")
 
@@ -586,7 +601,7 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
         print(f"time to fit linear svc in Z : {str(end - start)}")
 
     # KERNELS FIT
-    X_train = train_dataset.get_flattened_X()
+    X_train = train_dataset.get_flattened_X()  # TODO : add the permutations ?
     labels_train = train_dataset.true_labels
 
     start = time.time()
@@ -689,9 +704,10 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
             print(f"time to fit {krr_type} ridge : {str(end - start)}")
 
     if isinstance(train_dataset, GraphDataset):
-        n_permutation = 10
+        n_permutation = 20
         our_preds = []
         our_scores = []
+        # our_pred_scores = []
         our_scores_train = []
         svc_preds = []
         svc_scores = []
@@ -716,25 +732,31 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
                 start = time.time()
                 val_inZ = []
                 elabels = []
+                val_predict = []
                 with torch.no_grad():
                     for j, data in enumerate(val_loader):
                         inp, labels = data
                         inp = val_dataset.format_data(inp, device)
                         labels = labels.to(device)
                         log_p, distloss, logdet, out = model(inp, labels)
+                        # probs = predict_by_log_p_with_gaussian_params(out, model.means, model.gaussian_params)
+                        # val_predict.append(probs.detach().cpu().numpy())
                         val_inZ.append(out.detach().cpu().numpy())
                         elabels.append(labels.detach().cpu().numpy())
                 val_inZ = np.concatenate(val_inZ, axis=0).reshape(len(val_dataset), -1)
                 elabels = np.concatenate(elabels, axis=0)
+                # val_predict = np.concatenate(val_predict, axis=0)
                 end = time.time()
                 print(f"time to get Z_val from X_val : {str(end - start)}")
 
                 start = time.time()
                 zsvc_pred = zlinsvc.predict(val_inZ)
                 zsvc_score = classification_score(zsvc_pred, elabels)
+                # val_pred_scores = classification_score(val_predict, elabels)
                 # zsvc_score = zlinsvc.score(val_inZ, elabels)
                 our_preds.append(zsvc_pred)
                 our_scores.append(zsvc_score)
+                # our_pred_scores.append(val_pred_scores)
                 end = time.time()
                 print(f"time to predict with zlinSVC : {str(end - start)}")
 
@@ -838,6 +860,7 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
             lines += [score_str, '\n']
 
         mean_score = np.mean(our_scores)
+        # mean_pred_score = np.mean(our_pred_scores)
         std_score = np.std(our_scores)
         score_str = f'Our approach {our_scores} \n' \
                     f'Mean Scores: {mean_score} \n' \
@@ -1678,7 +1701,7 @@ def evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, p
         y_max = model.label_max
         samples = []
         # true_X = val_dataset.X
-        true_X = val_dataset.get_flattened_X()
+        true_X = val_dataset.get_flattened_X(with_added_features=True)
         for i, y in enumerate(val_dataset.true_labels):
             # mean, cov = model.get_regression_gaussian_sampling_parameters(y)
             alpha_y = (y - y_min) / (y_max - y_min)
@@ -1687,7 +1710,7 @@ def evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, p
     else:
         samples = []
         # true_X = val_dataset.X
-        true_X = val_dataset.get_flattened_X()
+        true_X = val_dataset.get_flattened_X(with_added_features=True)
         for i, y in enumerate(val_dataset.true_labels):
             mean = model_means[y]
             samples.append(np.expand_dims(mean, axis=0))
@@ -1712,8 +1735,9 @@ def evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, p
 
     # For graphs
     if isinstance(val_dataset, GraphDataset):
-        x_shape = val_dataset.X[0][0].shape
-        adj_shape = val_dataset.X[0][1].shape
+        # x_shape = val_dataset.X[0][0].shape
+        # adj_shape = val_dataset.X[0][1].shape
+        x_shape, adj_shape = val_dataset.get_input_shapes()
         x_sh = x_shape[0]
         for v in x_shape[1:]:
             x_sh *= v
@@ -1721,7 +1745,7 @@ def evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=True, p
         adj = all_res[:, x_sh:].reshape(all_res.shape[0], *adj_shape)
 
         # if feature has been added
-        if val_dataset.add_feature is not None:
+        if val_dataset.add_feature is not None and val_dataset.add_feature > 0:
             af = val_dataset.add_feature
             x = x[:, :, :-af]
 
@@ -1857,8 +1881,9 @@ def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_b
 
     # For graphs
     if isinstance(val_dataset, GraphDataset):
-        x_shape = val_dataset.X[0][0].shape
-        adj_shape = val_dataset.X[0][1].shape
+        # x_shape = val_dataset.X[0][0].shape
+        # adj_shape = val_dataset.X[0][1].shape
+        x_shape, adj_shape = val_dataset.get_input_shapes()
         x_sh = x_shape[0]
         for v in x_shape[1:]:
             x_sh *= v
@@ -1866,7 +1891,7 @@ def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_b
         adj = all_res[:, x_sh:].reshape(all_res.shape[0], *adj_shape)
 
         # if feature has been added
-        if val_dataset.add_feature is not None:
+        if val_dataset.add_feature is not None and val_dataset.add_feature > 0:
             af = val_dataset.add_feature
             x = x[:, :, :-af]
 
@@ -2163,8 +2188,9 @@ def evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample
 
     # for graphs
     if isinstance(val_dataset, GraphDataset):
-        x_shape = val_dataset.X[0][0].shape
-        adj_shape = val_dataset.X[0][1].shape
+        # x_shape = val_dataset.X[0][0].shape
+        # adj_shape = val_dataset.X[0][1].shape
+        x_shape, adj_shape = val_dataset.get_input_shapes()
 
         if print_as_graph:
             # define the colormap
@@ -2182,7 +2208,7 @@ def evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample
         atomic_num_list = val_dataset.atomic_num_list
 
         # if feature has been added
-        if val_dataset.add_feature is not None:
+        if val_dataset.add_feature is not None and val_dataset.add_feature > 0:
             af = val_dataset.add_feature
             x = x[:, :, :-af]
 
@@ -2472,7 +2498,7 @@ def evaluate_graph_permutation(model, train_dataset, val_dataset, save_dir, devi
                     cpt = 0
                     while i not in first_sorted_id:
                         cpt += 1
-                        first_sorted_id = sorted_id_row[:(10+cpt)]
+                        first_sorted_id = sorted_id_row[:(10 + cpt)]
                     graphs = tuple([v[first_sorted_id].detach().cpu() for v in inp_p])
 
                     ori_mol = valid_mol(construct_mol(inp[0][i].detach().cpu(), inp[1][i].detach().cpu(),

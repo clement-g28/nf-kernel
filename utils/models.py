@@ -117,7 +117,7 @@ class NF(nn.Module):
         torch.cuda.empty_cache()
 
     def init_means_to_points(self, dataset):
-        data = dataset.get_flattened_X()
+        data = dataset.get_flattened_X(with_added_features=True)
         n_means = []
         for i in range(self.means.shape[0]):
             n_means.append(torch.from_numpy(data[i]).double().unsqueeze(0))
@@ -864,7 +864,7 @@ class CMoFlow(NF):
 
     def interpret_transformation(self, dataset, save_dir, device, std_noise=.1, fig_limits=None):
         from sklearn.decomposition import PCA
-        self.eval()
+        self.model.eval()
         create_folder(f'{save_dir}/interpretation_transformation')
 
         batch_size = 20
@@ -910,7 +910,7 @@ class CMoFlow(NF):
                     flows = []
                     loader = tmp_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
                     for j, data in enumerate(loader):
-                        inputs = tmp_dataset.format_data(data[0], device)
+                        inputs = tmp_dataset.format_data(data[0], device, force_no_added_feature=i_atomflow > 0)
                         x, adj = inputs
                         adj_normalized = rescale_adj(adj).to(self.device)
 
@@ -935,7 +935,7 @@ class CMoFlow(NF):
                     flows = []
                     loader = tmp_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
                     for j, data in enumerate(loader):
-                        inputs = tmp_dataset.format_data(data[0], device)
+                        inputs = tmp_dataset.format_data(data[0], device, force_no_added_feature=True)
                         x, adj = inputs
 
                         adj = block._squeeze(adj)
@@ -1060,7 +1060,7 @@ class CMoFlow(NF):
                     input_atom = output_atom_flow
                     flow_atom = output_atom_flow.detach().cpu().numpy()
                     # if feature has been added
-                    if dataset.add_feature is not None:
+                    if dataset.add_feature is not None and dataset.add_feature > 0:
                         af = dataset.add_feature
                         flow_atom = flow_atom[:, :, :-af]
 

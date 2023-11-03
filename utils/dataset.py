@@ -816,6 +816,14 @@ class GraphDataset(BaseDataset):
         # if self.is_regression_dataset():
         #     self.label_mindist = self.init_labelmin()
 
+    def get_input_shapes(self):
+        x_shape = list(self.X[0][0].shape)
+        if self.add_feature is not None:
+            x_shape[-1] += self.add_feature
+        x_shape = tuple(x_shape)
+        adj_shape = self.X[0][1].shape
+        return x_shape, adj_shape
+
     def is_attributed_node_dataset(self):
         return self.dataset_name in ['Letter-med']
 
@@ -945,9 +953,13 @@ class GraphDataset(BaseDataset):
         for i in range(len(self.X)):
             self.X[i] = transform_graph_permutation(*self.X[i])
 
-    def get_flattened_X(self):
+    def get_flattened_X(self, with_added_features=False):
         x, adj = list(zip(*self.X))
         x = np.concatenate([np.expand_dims(v, axis=0) for v in x], axis=0)
+        if with_added_features and self.add_feature is not None and self.add_feature > 0:
+            n_X = np.zeros((x.shape[0], x.shape[1], x.shape[-1] + self.add_feature))
+            n_X[:, :, :-self.add_feature] = x
+            x = n_X
         x = x.reshape(x.shape[0], -1)
         adj = np.concatenate([np.expand_dims(v, axis=0) for v in adj], axis=0)
         adj = adj.reshape(adj.shape[0], -1)
@@ -1217,14 +1229,14 @@ class GraphDataset(BaseDataset):
     #     return mean_dist_neig
     #     # return label_mindist
 
-    def format_data(self, input, device, add_feature=None):
+    def format_data(self, input, device, add_feature=None, force_no_added_feature=False):
         for i in range(len(input)):
-            if i == 0:
-                if add_feature is not None:
+            if i == 0 and not force_no_added_feature:
+                if add_feature is not None and add_feature > 0:
                     n_X = torch.zeros(input[i].shape[0], input[i].shape[1], input[i].shape[-1] + add_feature)
                     n_X[:, :, :-add_feature] = input[i]
                     input[i] = n_X
-                elif self.add_feature is not None:
+                elif self.add_feature is not None and self.add_feature > 0:
                     n_X = torch.zeros(input[i].shape[0], input[i].shape[1], input[i].shape[-1] + self.add_feature)
                     n_X[:, :, :-self.add_feature] = input[i]
                     input[i] = n_X
@@ -1656,7 +1668,7 @@ class ClassificationGraphDataset(GraphDataset):
             else:
                 assert False, 'unknown dataset'
 
-            if add_feature is not None:
+            if add_feature is not None and add_feature > 0:
                 # TEST ADD ZERO FEATURES IN X
                 n_X = np.zeros((X.shape[0], X.shape[1], X.shape[-1] + add_feature))
                 n_X[:, :, :-add_feature] = X

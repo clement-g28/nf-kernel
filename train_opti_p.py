@@ -411,7 +411,7 @@ if __name__ == "__main__":
         "noise_x": None,
         "lr": tune.loguniform(1e-4, 0.001),
         "batch_size": tune.choice([10]),
-        "add_feature": tune.randint(0, 20),
+        "add_feature": 0, #tune.randint(0, 20),
         "split_graph_dim": True
     }
     scheduler = ASHAScheduler(

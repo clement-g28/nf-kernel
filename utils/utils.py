@@ -382,6 +382,40 @@ def calculate_log_p_with_gaussian_params(x, label, means, gaussian_params):
     return log_p
 
 
+def predict_by_log_p_with_gaussian_params(x, means, gaussian_params):
+    # log_ps = []
+    # for i, gaussian_param in enumerate(gaussian_params):
+    #     log_ps.append(multivariate_gaussian(x, mean=means[i], determinant=gaussian_param[1],
+    #                                         inverse_cov_mat_diag=gaussian_param[0]).unsqueeze(1))
+    #
+    # log_ps = torch.cat(log_ps, dim=1)
+    # one_hot_label = torch.nn.functional.one_hot(label, num_classes=log_ps.shape[1])
+    # log_p = torch.sum(log_ps * one_hot_label, dim=1)
+
+    # Change in calculation test
+    # for each label
+    log_ps = []
+    for label in range(means.shape[0]):
+        # np_label = label.clone().detach().cpu().numpy()
+        test = np.array(gaussian_params, dtype=object)[label]
+
+        determinant = torch.from_numpy(np.repeat(np.expand_dims(test[1].astype(np.float32),0),x.shape[0])).to(x.device)
+        diag_inv = torch.diag_embed(test[0].unsqueeze(0).repeat(x.shape[0],1)).to(torch.float32).to(x.device)
+        mean = means[label].to(torch.float32)
+
+        b_size = x.shape[0]
+        z_flat = x.reshape(b_size, -1)
+        k = z_flat.shape[1]
+        log_p = -0.5 * (k * math.log(2 * math.pi) + torch.diag(
+            (torch.diagonal((z_flat - mean) @ diag_inv, offset=0, dim1=0, dim2=1).transpose(1, 0)
+             .unsqueeze(0) @ torch.transpose(z_flat - mean, 1, 0))
+                .reshape(b_size, -1), 0)) - torch.log(determinant)
+
+        log_ps.append(log_p.unsqueeze(0))
+    result = torch.argmax(torch.cat(log_ps, 0), 0)
+    return result
+
+
 # def calculate_log_p_with_gaussian_params_regression(x, label, means, gaussian_params, label_min, label_max):
 #     log_ps = []
 #     for i, gaussian_param in enumerate(gaussian_params):
