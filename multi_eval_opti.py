@@ -11,15 +11,18 @@ import gc
 
 def process_eval(args):
     evaluate_model(args)
-    torch.cuda.empty_cache()
+    # torch.cuda.empty_cache()
 
-    # prints currently alive Tensors and Variables
-    for obj in gc.get_objects():
-        try:
-            if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
-                print(type(obj), obj.size())
-        except:
-            pass
+    gc.collect()
+    with torch.no_grad():
+        torch.cuda.empty_cache()
+    # # prints currently alive Tensors and Variables
+    # for obj in gc.get_objects():
+    #     try:
+    #         if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
+    #             print(type(obj), obj.size())
+    #     except:
+    #         pass
 
 
 if __name__ == "__main__":

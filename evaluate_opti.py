@@ -289,6 +289,8 @@ def main(args):
                                           print_as_mol=print_as_mol, print_as_graph=print_as_graph)
 
     del dataset
+    del val_dataset
+    del train_dataset
     model_single.del_model_from_gpu()
 
 

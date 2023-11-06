@@ -853,6 +853,15 @@ class CMoFlow(NF):
         super().__init__(model, gaussian_params, device, learn_mean, reg_use_var, dataset)
         self.device = device
 
+    def del_model_from_gpu(self):
+        self.means = nn.Parameter(self.means.detach().cpu())
+        self.gaussian_params = [(inv_cov.detach().cpu(), det) for inv_cov, det in self.gaussian_params]
+        self.model = self.model.cpu()
+        del self.means
+        del self.gaussian_params
+        del self.model
+        torch.cuda.empty_cache()
+
     def calc_last_z_shape(self, input_size):
         return (input_size,)
 
