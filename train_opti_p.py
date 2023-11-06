@@ -331,7 +331,7 @@ def train_opti(config):
                     logp=(val_logp / val_steps), logdet=(val_logdet / val_steps), distloss=(val_dist / val_steps))
 
 
-def evaluate_pred_model(train_dataset, val_dataset, model, batch_size, save_dir):
+def evaluate_pred_model(train_dataset, val_dataset, model, batch_size, save_dir, config):
     if isinstance(train_dataset, GraphDataset):
         train_dataset.permute_graphs_in_dataset()
         val_dataset.permute_graphs_in_dataset()
@@ -349,7 +349,7 @@ def evaluate_pred_model(train_dataset, val_dataset, model, batch_size, save_dir)
             with torch.no_grad():
                 for j, data in enumerate(loader):
                     inp, labels = data
-                    inp = train_dataset.format_data(inp, device)
+                    inp = train_dataset.format_data(inp, device, add_feature=config["add_feature"])
                     labels = labels.to(device)
                     log_p, distloss, logdet, out = model(inp, labels)
                     Z.append(out.detach().cpu().numpy())
@@ -360,7 +360,7 @@ def evaluate_pred_model(train_dataset, val_dataset, model, batch_size, save_dir)
         with torch.no_grad():
             for j, data in enumerate(loader):
                 inp, labels = data
-                inp = train_dataset.format_data(inp, device)
+                inp = train_dataset.format_data(inp, device, add_feature=config["add_feature"])
                 labels = labels.to(device)
                 log_p, distloss, logdet, out = model(inp, labels)
                 Z.append(out.detach().cpu().numpy())
@@ -393,7 +393,7 @@ def evaluate_pred_model(train_dataset, val_dataset, model, batch_size, save_dir)
             with torch.no_grad():
                 for j, data in enumerate(val_loader):
                     inp, labels = data
-                    inp = val_dataset.format_data(inp, device)
+                    inp = val_dataset.format_data(inp, device, add_feature=config["add_feature"])
                     labels = labels.to(device)
                     log_p, distloss, logdet, out = model(inp, labels)
                     val_inZ.append(out.detach().cpu().numpy())
@@ -426,7 +426,7 @@ def evaluate_pred_model(train_dataset, val_dataset, model, batch_size, save_dir)
         with torch.no_grad():
             for j, data in enumerate(val_loader):
                 inp, labels = data
-                inp = val_dataset.format_data(inp, device)
+                inp = val_dataset.format_data(inp, device, add_feature=config["add_feature"])
                 labels = labels.to(device)
                 log_p, distloss, logdet, out = model(inp, labels)
                 val_inZ.append(out.detach().cpu().numpy())
