@@ -151,18 +151,19 @@ def main(args):
     create_folder(save_dir)
 
     # generate flows
-    std_noise = .1 if dataset_name in ['double_moon', 'single_moon', 'swissroll'] else None
-    # fig_limits = ((-23,23),(-4,4))
-    fig_limits = None
-    model.interpret_transformation(train_dataset, save_dir, device, std_noise=std_noise, fig_limits=fig_limits)
+    # std_noise = .1 if dataset_name in ['double_moon', 'single_moon', 'swissroll'] else None
+    # # fig_limits = ((-23,23),(-4,4))
+    # fig_limits = None
+    # model.interpret_transformation(train_dataset, save_dir, device, std_noise=std_noise, fig_limits=fig_limits)
 
     eval_type = args.eval_type
     if eval_type == 'classification':
         dataset_name_eval = ['mnist', 'cifar10', 'double_moon', 'iris', 'bcancer'] + GRAPH_CLASSIFICATION_DATASETS
         assert dataset_name in dataset_name_eval, f'Classification can only be evaluated on {dataset_name_eval}'
-        predmodel = evaluate_classification(model, train_dataset, val_dataset, save_dir, device)
-        _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
-                                 only_Z=isinstance(dataset, GraphDataset))
+        # predmodel = evaluate_classification(model, train_dataset, val_dataset, save_dir, device)
+        evaluate_classification(model, train_dataset, val_dataset, save_dir, device)
+        # _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
+        #                          only_Z=isinstance(dataset, GraphDataset))
         # print_as_mol = True
         # print_as_graph = False
         # refresh_means = False
@@ -291,7 +292,7 @@ def main(args):
     del dataset
     del val_dataset
     del train_dataset
-    model_single.del_model_from_gpu()
+    model.del_model_from_gpu()
 
 
 if __name__ == "__main__":
