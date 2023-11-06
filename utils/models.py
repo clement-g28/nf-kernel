@@ -966,7 +966,6 @@ class CMoFlow(NF):
                     tmp_dataset.transform = None
 
         create_animation(dir=f'{save_dir}/interpretation_transformation', how_much_repeat=10)
-        tmp_dataset.cpu()
         del tmp_dataset
 
     def forward(self, input, label, pair_with_noise=False):
