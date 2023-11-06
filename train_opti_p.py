@@ -35,6 +35,9 @@ from utils.utils import load_dataset
 
 from utils.dataset import GraphDataset
 
+from evaluate import classification_score, learn_or_load_modelhyperparams
+from sklearn.svm import SVC
+
 
 def nan_stopper(trial_id: str, result: Dict):
     metric_result = result.get('accuracy')
@@ -316,6 +319,9 @@ def train_opti(config):
                 path = os.path.join(checkpoint_dir, "checkpoint")
                 torch.save((model.state_dict(), optimizer.state_dict()), path)
 
+                if epoch > 1:
+                    evaluate_pred_model(train_dataset, val_dataset, model, args.batch_size, checkpoint_dir)
+
         # if epoch > args.save_at_epoch and epoch % args.save_each_epoch == 0:
         #     with tune.checkpoint_dir(epoch) as checkpoint_dir:
         #         path = os.path.join(checkpoint_dir, "checkpoint")
@@ -323,6 +329,127 @@ def train_opti(config):
 
         tune.report(loss=(val_loss / val_steps), accuracy=(accuracy / val_steps), nll=(val_nll / val_steps),
                     logp=(val_logp / val_steps), logdet=(val_logdet / val_steps), distloss=(val_dist / val_steps))
+
+
+def evaluate_pred_model(train_dataset, val_dataset, model, batch_size, save_dir):
+    if isinstance(train_dataset, GraphDataset):
+        train_dataset.permute_graphs_in_dataset()
+        val_dataset.permute_graphs_in_dataset()
+
+    model.eval()
+    Z = []
+    tlabels = []
+    if isinstance(train_dataset, GraphDataset):
+        n_permutation = 5
+        for n_perm in range(n_permutation):
+            train_dataset.permute_graphs_in_dataset()
+
+            loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+
+            with torch.no_grad():
+                for j, data in enumerate(loader):
+                    inp, labels = data
+                    inp = train_dataset.format_data(inp, device)
+                    labels = labels.to(device)
+                    log_p, distloss, logdet, out = model(inp, labels)
+                    Z.append(out.detach().cpu().numpy())
+                    tlabels.append(labels.detach().cpu().numpy())
+    else:
+        loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+
+        with torch.no_grad():
+            for j, data in enumerate(loader):
+                inp, labels = data
+                inp = train_dataset.format_data(inp, device)
+                labels = labels.to(device)
+                log_p, distloss, logdet, out = model(inp, labels)
+                Z.append(out.detach().cpu().numpy())
+                tlabels.append(labels.detach().cpu().numpy())
+    tlabels = np.concatenate(tlabels, axis=0)
+    Z = np.concatenate(Z, axis=0).reshape(tlabels.shape[0], -1)
+
+    # Learn SVC
+    kernel_name = 'zlinear'
+    param_gridlin = [
+        {'SVC__kernel': ['linear'], 'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))}]
+    model_type = ('SVC', SVC())
+    scaler = False
+    zlinsvc = learn_or_load_modelhyperparams(Z, tlabels, kernel_name, param_gridlin, save_dir,
+                                             model_type=model_type, scaler=scaler, save=False)
+
+    print(zlinsvc)
+
+    if isinstance(train_dataset, GraphDataset):
+        n_permutation = 20
+        our_preds = []
+        our_scores = []
+
+        for n_perm in range(n_permutation):
+            val_dataset.permute_graphs_in_dataset()
+            # OUR APPROACH EVALUATION
+            val_loader = val_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+            val_inZ = []
+            elabels = []
+            with torch.no_grad():
+                for j, data in enumerate(val_loader):
+                    inp, labels = data
+                    inp = val_dataset.format_data(inp, device)
+                    labels = labels.to(device)
+                    log_p, distloss, logdet, out = model(inp, labels)
+                    val_inZ.append(out.detach().cpu().numpy())
+                    elabels.append(labels.detach().cpu().numpy())
+            val_inZ = np.concatenate(val_inZ, axis=0).reshape(len(val_dataset), -1)
+            elabels = np.concatenate(elabels, axis=0)
+
+            zsvc_pred = zlinsvc.predict(val_inZ)
+            zsvc_score = classification_score(zsvc_pred, elabels)
+            our_preds.append(zsvc_pred)
+            our_scores.append(zsvc_score)
+
+        # PRINT RESULTS
+        lines = []
+        print('Predictions scores :')
+
+        mean_score = np.mean(our_scores)
+        # mean_pred_score = np.mean(our_pred_scores)
+        std_score = np.std(our_scores)
+        score_str = f'Our approach {our_scores} \n' \
+                    f'Mean Scores: {mean_score} \n' \
+                    f'Std Scores: {std_score}'
+        print(score_str)
+        lines += [score_str, '\n']
+
+    else:
+        val_loader = val_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+        val_inZ = []
+        elabels = []
+        with torch.no_grad():
+            for j, data in enumerate(val_loader):
+                inp, labels = data
+                inp = val_dataset.format_data(inp, device)
+                labels = labels.to(device)
+                log_p, distloss, logdet, out = model(inp, labels)
+                val_inZ.append(out.detach().cpu().numpy())
+                elabels.append(labels.detach().cpu().numpy())
+        val_inZ = np.concatenate(val_inZ, axis=0).reshape(len(val_dataset), -1)
+        elabels = np.concatenate(elabels, axis=0)
+
+        zsvc_pred = zlinsvc.predict(val_inZ)
+        zsvc_score = classification_score(zsvc_pred, elabels)
+
+        lines = []
+        print('Predictions scores :')
+
+        score_str = f'Our approach: {zsvc_score}'
+        print(score_str)
+        lines += [score_str, '\n']
+
+    with open(f"{save_dir}/eval_res.txt", 'w') as f:
+        f.writelines(lines)
+
+    model.train()
+
+    return zlinsvc
 
 
 if __name__ == "__main__":
@@ -411,7 +538,7 @@ if __name__ == "__main__":
         "noise_x": None,
         "lr": tune.loguniform(1e-4, 0.001),
         "batch_size": tune.choice([10]),
-        "add_feature": 0, #tune.randint(0, 20),
+        "add_feature": tune.randint(0, 20),
         "split_graph_dim": True
     }
     scheduler = ASHAScheduler(
