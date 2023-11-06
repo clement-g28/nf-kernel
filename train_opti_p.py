@@ -320,7 +320,7 @@ def train_opti(config):
                 torch.save((model.state_dict(), optimizer.state_dict()), path)
 
                 if epoch > 1:
-                    evaluate_pred_model(train_dataset, val_dataset, model, args.batch_size, checkpoint_dir)
+                    evaluate_pred_model(train_dataset, val_dataset, model, args.batch_size, checkpoint_dir, config)
 
         # if epoch > args.save_at_epoch and epoch % args.save_each_epoch == 0:
         #     with tune.checkpoint_dir(epoch) as checkpoint_dir:
@@ -448,8 +448,6 @@ def evaluate_pred_model(train_dataset, val_dataset, model, batch_size, save_dir,
         f.writelines(lines)
 
     model.train()
-
-    return zlinsvc
 
 
 if __name__ == "__main__":
