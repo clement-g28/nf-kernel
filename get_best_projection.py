@@ -192,14 +192,7 @@ def main(args):
     train_dataset, val_dataset = load_split_dataset(dataset, train_idx_path, val_idx_path,
                                                     reselect_val_idx=args.reselect_val_idx)
 
-    n_dim = dataset.get_n_dim()
-
-    if not dim_per_label:
-        if not dataset.is_regression_dataset():
-            uni = np.unique(dataset.true_labels)
-            dim_per_label = math.floor(n_dim / len(uni))
-        else:
-            dim_per_label = n_dim
+    dim_per_label, n_dim = dataset.get_dim_per_label(return_total_dim=True)
 
     t_model_params = []
     for save_path in saves:

@@ -58,6 +58,20 @@ class BaseDataset(Dataset):
             n_dim *= sh
         return n_dim
 
+    def get_dim_per_label(self, return_total_dim=False):
+        n_dim = self.get_n_dim()
+
+        if not self.is_regression_dataset():
+            uni = np.unique(self.true_labels)
+            dim_per_label = math.floor(n_dim / len(uni))
+        else:
+            dim_per_label = n_dim
+
+        if return_total_dim:
+            return dim_per_label, n_dim
+        else:
+            return dim_per_label
+
     def get_loader(self, batch_size, shuffle=True, drop_last=True, pin_memory=True, sampler=False):
         if sampler:
             class_sample_count = np.histogram(self.true_labels)[0]

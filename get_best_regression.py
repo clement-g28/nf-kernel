@@ -346,14 +346,7 @@ def main(args):
     # print('Train dataset reduced in order to accelerate. (stratified)')
     # train_dataset.reduce_dataset_ratio(0.05, stratified=True)
 
-    n_dim = dataset.get_n_dim()
-
-    if not dim_per_label:
-        if not dataset.is_regression_dataset():
-            uni = np.unique(dataset.true_labels)
-            dim_per_label = math.floor(n_dim / len(uni))
-        else:
-            dim_per_label = n_dim
+    dim_per_label, n_dim = dataset.get_dim_per_label(return_total_dim=True)
 
     t_model_params = []
     for save_path in saves:

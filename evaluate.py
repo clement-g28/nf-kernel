@@ -1014,11 +1014,10 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
     return zlinsvc
 
 
-def generate_meanclasses(model, val_dataset, device, save_dir, debug=False):
+def generate_meanclasses(model, val_dataset, device, save_dir, debug=False, batch_size=20):
     model.eval()
     create_folder(f'{save_dir}/test_generation')
 
-    batch_size = 20
     loader = val_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
 
     Z = []
@@ -1060,7 +1059,7 @@ def generate_meanclasses(model, val_dataset, device, save_dir, debug=False):
 
 
 def evaluate_distances(model, train_dataset, val_dataset, gaussian_params, z_shape, how_much, kpca_types, device,
-                       save_dir='./save', proj_type='gp', noise_type='gaussian', eval_gaussian_std=.1):
+                       save_dir='./save', proj_type='gp', noise_type='gaussian', eval_gaussian_std=.1, batch_size=20):
     create_folder(f'{save_dir}/projections')
 
     train_dataset.ori_X = train_dataset.X
@@ -1080,7 +1079,6 @@ def evaluate_distances(model, train_dataset, val_dataset, gaussian_params, z_sha
     val_dataset_noised = val_dataset.duplicate()
     val_dataset_noised.X = val_noised
 
-    batch_size = 20
     loader = train_dataset_noised.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
 
     if proj_type in ['zpca', 'zpca_l']:
@@ -1213,13 +1211,13 @@ def evaluate_distances(model, train_dataset, val_dataset, gaussian_params, z_sha
     return distances_results
 
 
-def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fithyperparam=True, save_res=True):
+def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fithyperparam=True, save_res=True,
+                        batch_size=200):
     if isinstance(train_dataset, GraphDataset):
         train_dataset.permute_graphs_in_dataset()
         val_dataset.permute_graphs_in_dataset()
 
     zlinridge = None
-    batch_size = 200
     # Compute results with our approach if not None
     if model is not None:
         loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
@@ -1643,10 +1641,9 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
     return zlinridge
 
 
-def create_figures_XZ(model, train_dataset, save_path, device, std_noise=0.1, only_Z=False):
+def create_figures_XZ(model, train_dataset, save_path, device, std_noise=0.1, only_Z=False, batch_size=20):
     size_pt_fig = 5
 
-    batch_size = 20
     loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
 
     X = []
@@ -2299,10 +2296,9 @@ def evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample
                 format(images, nrow=nrow, save_path=f'{save_dir}/generated_interp_graphs', res_name=res_name)
 
 
-def create_figure_train_projections(model, train_dataset, std_noise, save_path, device, how_much=1):
+def create_figure_train_projections(model, train_dataset, std_noise, save_path, device, how_much=1, batch_size=20):
     size_pt_fig = 5
 
-    batch_size = 20
     loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
 
     X_noise = []
@@ -2452,7 +2448,7 @@ def create_figure_train_projections(model, train_dataset, std_noise, save_path, 
                         save_path=f'{save_path}/noisytrain_distance_gp')
 
 
-def evaluate_graph_permutation(model, train_dataset, val_dataset, save_dir, device):
+def evaluate_graph_permutation(model, train_dataset, val_dataset, save_dir, device, batch_size=200):
     from utils.graphs.utils_datasets import batch_graph_permutation
 
     assert isinstance(train_dataset, GraphDataset), 'Evaluation for graph datasets !'
@@ -2461,7 +2457,6 @@ def evaluate_graph_permutation(model, train_dataset, val_dataset, save_dir, devi
 
     create_folder(f'{save_dir}/eval_graph_perm')
 
-    batch_size = 200
     loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
 
     # define an instance of the PairwiseDistance
@@ -2527,6 +2522,160 @@ def evaluate_graph_permutation(model, train_dataset, val_dataset, save_dir, devi
             break
 
 
+def launch_evaluation(dataset_name, model, gaussian_params, train_dataset, val_dataset, save_dir, device, batch_size):
+    dim_per_label, n_dim = train_dataset.get_dim_per_label(return_total_dim=True)
+
+    # generate flows
+    # std_noise = .1 if dataset_name in ['double_moon', 'single_moon', 'swissroll'] else None
+    # # fig_limits = ((-23,23),(-4,4))
+    # fig_limits = None
+    # model.interpret_transformation(train_dataset, save_dir, device, std_noise=std_noise, fig_limits=fig_limits)
+
+    eval_type = args.eval_type
+    if eval_type == 'classification':
+        dataset_name_eval = ['mnist', 'cifar10', 'double_moon', 'iris', 'bcancer'] + GRAPH_CLASSIFICATION_DATASETS
+        assert dataset_name in dataset_name_eval, f'Classification can only be evaluated on {dataset_name_eval}'
+        # predmodel = evaluate_classification(model, train_dataset, val_dataset, save_dir, device, batch_size=batch_size)
+        evaluate_classification(model, train_dataset, val_dataset, save_dir, device, batch_size=batch_size)
+        # _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
+        #                          only_Z=isinstance(train_dataset, GraphDataset), batch_size=batch_size)
+        # print_as_mol = True
+        # print_as_graph = False
+        # refresh_means = False
+        # print(f'(print_as_mol, print_as_graph, refresh_means) are set manually to '
+        #       f'({print_as_mol},{print_as_graph},{refresh_means}).')
+        # computed_means = model.refresh_classification_mean_classes(Z, train_dataset.true_labels) if refresh_means \
+        #     else None
+        # evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=print_as_mol,
+        #                   print_as_graph=print_as_graph, eval_type=eval_type, means=computed_means, batch_size=batch_size)
+        # evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=12, print_as_mol=print_as_mol,
+        #                    print_as_graph=print_as_graph, eval_type=eval_type, predmodel=predmodel,
+        #                    means=computed_means, debug=True, batch_size=batch_size)
+        # if isinstance(val_dataset, GraphDataset):
+        #     evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=9, n_interpolation=30, Z=Z,
+        #                                   print_as_mol=print_as_mol, print_as_graph=print_as_graph, eval_type=eval_type,
+        #                                   label=None)
+    elif eval_type == 'generation':
+        dataset_name_eval = ['mnist', 'cifar10', 'olivetti_faces']
+        assert dataset_name in dataset_name_eval, f'Generation can only be evaluated on {dataset_name_eval}'
+        # GENERATION
+        create_folder(f'{save_dir}/test_generation')
+
+        img_size = train_dataset.in_size
+        z_shape = model.calc_last_z_shape(img_size)
+        from utils.training import AddGaussianNoise
+        from torchvision import transforms
+        val_dataset.transform = transforms.Compose(val_dataset.transform.transforms + [AddGaussianNoise(0., .2)])
+        print('Gaussian noise added to transforms...')
+        debug = True
+        # transformation_interpretation(model, val_dataset, device, save_dir, debug=False)
+        evaluate_image_interpolations(model, val_dataset, device, save_dir, n_sample=6, n_interpolation=10, label=None,
+                                      debug=debug)
+
+        # how_much = [1, 10, 30, 50, 78]
+        # how_much = [dim_per_label, n_dim]
+        # how_much = [1, dim_per_label]
+        how_much = list(np.linspace(1, dim_per_label, 6, dtype=np.int))
+        print(f'how_much is set manually to {how_much}.')
+        for n in how_much:
+            test_generation_on_eigvec(model, val_dataset, gaussian_params=gaussian_params, z_shape=z_shape,
+                                      how_much_dim=n, device=device, sample_per_label=49, save_dir=save_dir,
+                                      debug=debug)
+        generate_meanclasses(model, train_dataset, device, save_dir, debug=debug, batch_size=batch_size)
+    elif eval_type == 'projection':
+        img_size = train_dataset.in_size
+        z_shape = model.calc_last_z_shape(img_size)
+        # PROJECTIONS
+        proj_type = 'gp'
+        # batch_size = 20  # 100
+        eval_gaussian_std = .2  # .1
+        print(f'(proj_type, batch_size, eval_gaussian_std) are set manually to '
+              f'({proj_type},{batch_size},{eval_gaussian_std}).')
+        if dataset_name in ['mnist', 'cifar10', 'olivetti_faces']:
+            noise_types = ['gaussian', 'speckle', 'poisson', 's&p']
+            how_much = list(np.linspace(1, dim_per_label, 6, dtype=np.int))
+            # how_much = list(np.linspace(1, dim_per_label, 6, dtype=np.int)) + list(
+            #     np.linspace(int(dim_per_label + dim_per_label / 6),
+            #                 int(dim_per_label + dim_per_label / 6) + dim_per_label, 6, dtype=np.int))
+            # how_much = [1,
+            #             np.min(np.histogram(train_dataset.true_labels, bins=np.unique(train_dataset.true_labels))[0])]
+            print(f'how_much is set manually to {how_much}.')
+            for noise_type in noise_types:
+                compression_evaluation(model, train_dataset, val_dataset, gaussian_params=gaussian_params,
+                                       z_shape=z_shape, how_much=how_much, device=device, save_dir=save_dir,
+                                       proj_type=proj_type, noise_type=noise_type, eval_gaussian_std=eval_gaussian_std,
+                                       batch_size=batch_size)
+                evaluate_projection_1model(model, train_dataset, val_dataset, gaussian_params=gaussian_params,
+                                           z_shape=z_shape, how_much=dim_per_label, device=device, save_dir=save_dir,
+                                           proj_type=proj_type, noise_type=noise_type,
+                                           eval_gaussian_std=eval_gaussian_std,
+                                           batch_size=batch_size)
+        else:
+            # elif dataset_name in ['single_moon', 'double_moon']:
+            noise_type = 'gaussian'
+            std_noise = .1
+            n_principal_dim = np.count_nonzero(gaussian_params[0][-2] > 1)
+            create_figure_train_projections(model, train_dataset, std_noise=std_noise, save_path=save_dir,
+                                            device=device, how_much=n_principal_dim, batch_size=batch_size)
+            # evaluate distance n times to calculate the p-value
+            n_times = 20
+            kpca_types = ['linear', 'rbf', 'poly', 'sigmoid']
+            proj_type = 'zpca_l'
+            print(f'(n_times, kpca_types, proj_type) are set manually to '
+                  f'({n_times},{kpca_types},{proj_type}).')
+            distance_results = {ktype + '-PCA': [] for ktype in kpca_types}
+            distance_results['Our-' + proj_type] = []
+            distance_results['NoiseDist'] = []
+            for n in range(n_times):
+                res = evaluate_distances(model, train_dataset, val_dataset, gaussian_params=gaussian_params,
+                                         z_shape=z_shape, how_much=n_principal_dim,
+                                         kpca_types=kpca_types,
+                                         device=device, save_dir=save_dir, proj_type=proj_type, noise_type=noise_type,
+                                         eval_gaussian_std=std_noise, batch_size=batch_size)
+                for ktype in kpca_types:
+                    distance_results[ktype + '-PCA'].append(res[ktype + '-PCA'])
+                distance_results['Our-' + proj_type].append(res['Our-' + proj_type])
+                distance_results['NoiseDist'].append(res['NoiseDist'])
+            print(distance_results)
+            # p-value
+            mean_noisedist = np.mean(distance_results['NoiseDist'])
+            print('Mean noise dist: ' + str(mean_noisedist))
+            mean_score = np.mean(distance_results['Our-' + proj_type])
+            print('Mean score: ' + str(mean_score))
+            res_pvalue = evaluate_p_value(distance_results)
+            if res_pvalue is not None:
+                H, p = res_pvalue
+                score_str = 'Kruskal-Wallis H-test, H: ' + str(H) + ', p-value: ' + str(p)
+                print(score_str)
+
+                # by pairs
+                res_pvalue = evaluate_p_value(distance_results, by_pairs=True)
+                for k, v in res_pvalue.items():
+                    H, p = v
+                    score_str = 'Kruskal-Wallis H-test with ' + str(k) + ', H: ' + str(H) + ', p-value: ' + str(p)
+                    print(score_str)
+        # else:
+        #     dataset_name_eval = ['mnist', 'single_moon', 'double_moon']
+        #     assert dataset_name in dataset_name_eval, f'Projection can only be evaluated on {dataset_name_eval}'
+    elif eval_type == 'regression':
+        assert train_dataset.is_regression_dataset(), 'the dataset is not made for regression purposes'
+        predmodel = evaluate_regression(model, train_dataset, val_dataset, save_dir, device, batch_size=batch_size)
+        _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
+                                 only_Z=isinstance(train_dataset, GraphDataset), batch_size=batch_size)
+        print_as_mol = True
+        print_as_graph = False
+        print(f'(print_as_mol, print_as_graph) are set manually to '
+              f'({print_as_mol},{print_as_graph}).')
+        evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=print_as_mol,
+                          print_as_graph=print_as_graph, batch_size=batch_size)
+        evaluate_preimage2(model, val_dataset, device, save_dir, n_y=12, n_samples_by_y=1,
+                           print_as_mol=print_as_mol, print_as_graph=print_as_graph, predmodel=predmodel, debug=True,
+                           batch_size=batch_size)
+        if isinstance(val_dataset, GraphDataset):
+            evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z,
+                                          print_as_mol=print_as_mol, print_as_graph=print_as_graph)
+
+
 def main(args):
     print(args)
     if args.seed is not None:
@@ -2560,14 +2709,7 @@ def main(args):
     # print('Train dataset reduced in order to accelerate. (stratified)')
     # train_dataset.reduce_dataset_ratio(0.05, stratified=True)
 
-    n_dim = dataset.get_n_dim()
-
-    if not dim_per_label:
-        if not dataset.is_regression_dataset():
-            uni = np.unique(dataset.true_labels)
-            dim_per_label = math.floor(n_dim / len(uni))
-        else:
-            dim_per_label = n_dim
+    dim_per_label, n_dim = dataset.get_dim_per_label(return_total_dim=True)
 
     # initialize gaussian params
     gaussian_params = initialize_gaussian_params(args, dataset, fixed_eigval, uniform_eigval, gaussian_eigval,
@@ -2631,155 +2773,9 @@ def main(args):
     save_dir = './save'
     create_folder(save_dir)
 
-    # evaluate_graph_permutation(model, train_dataset, val_dataset, save_dir, device)
-
-    # generate flows
-    std_noise = .1 if dataset_name in ['double_moon', 'single_moon', 'swissroll'] else None
-    # fig_limits = ((-23,23),(-4,4))
-    fig_limits = None
-    model.interpret_transformation(train_dataset, save_dir, device, std_noise=std_noise, fig_limits=fig_limits)
-
-    eval_type = args.eval_type
-    if eval_type == 'classification':
-        dataset_name_eval = ['mnist', 'cifar10', 'double_moon', 'iris', 'bcancer'] + GRAPH_CLASSIFICATION_DATASETS
-        assert dataset_name in dataset_name_eval, f'Classification can only be evaluated on {dataset_name_eval}'
-        predmodel = evaluate_classification(model, train_dataset, val_dataset, save_dir, device)
-        _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
-                                 only_Z=isinstance(dataset, GraphDataset))
-        print_as_mol = True
-        print_as_graph = True
-        refresh_means = False
-        print(f'(print_as_mol, print_as_graph, refresh_means) are set manually to '
-              f'({print_as_mol},{print_as_graph},{refresh_means}).')
-        computed_means = model.refresh_classification_mean_classes(Z, train_dataset.true_labels) if refresh_means \
-            else None
-        # evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=print_as_mol,
-        #                   print_as_graph=print_as_graph, eval_type=eval_type, means=computed_means)
-        evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=12, print_as_mol=print_as_mol,
-                           print_as_graph=print_as_graph, eval_type=eval_type, predmodel=predmodel,
-                           means=computed_means, debug=True)
-        if isinstance(val_dataset, GraphDataset):
-            evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=9, n_interpolation=30, Z=Z,
-                                          print_as_mol=print_as_mol, print_as_graph=print_as_graph, eval_type=eval_type,
-                                          label=None)
-    elif eval_type == 'generation':
-        dataset_name_eval = ['mnist', 'cifar10', 'olivetti_faces']
-        assert dataset_name in dataset_name_eval, f'Generation can only be evaluated on {dataset_name_eval}'
-        # GENERATION
-        create_folder(f'{save_dir}/test_generation')
-
-        img_size = dataset.in_size
-        z_shape = model.calc_last_z_shape(img_size)
-        from utils.training import AddGaussianNoise
-        from torchvision import transforms
-        dataset.transform = transforms.Compose(dataset.transform.transforms + [AddGaussianNoise(0., .2)])
-        print('Gaussian noise added to transforms...')
-        debug = True
-        # transformation_interpretation(model, val_dataset, device, save_dir, debug=False)
-        evaluate_image_interpolations(model, dataset, device, save_dir, n_sample=6, n_interpolation=10, label=None,
-                                      debug=debug)
-
-        # how_much = [1, 10, 30, 50, 78]
-        # how_much = [dim_per_label, n_dim]
-        # how_much = [1, dim_per_label]
-        how_much = list(np.linspace(1, dim_per_label, 6, dtype=np.int))
-        print(f'how_much is set manually to {how_much}.')
-        for n in how_much:
-            test_generation_on_eigvec(model, val_dataset, gaussian_params=gaussian_params, z_shape=z_shape,
-                                      how_much_dim=n, device=device, sample_per_label=49, save_dir=save_dir,
-                                      debug=debug)
-        generate_meanclasses(model, train_dataset, device, save_dir, debug=debug)
-    elif eval_type == 'projection':
-        img_size = dataset.in_size
-        z_shape = model.calc_last_z_shape(img_size)
-        # PROJECTIONS
-        proj_type = 'gp'
-        batch_size = 20  # 100
-        eval_gaussian_std = .2  # .1
-        print(f'(proj_type, batch_size, eval_gaussian_std) are set manually to '
-              f'({proj_type},{batch_size},{eval_gaussian_std}).')
-        if dataset_name in ['mnist', 'cifar10', 'olivetti_faces']:
-            noise_types = ['gaussian', 'speckle', 'poisson', 's&p']
-            how_much = list(np.linspace(1, dim_per_label, 6, dtype=np.int))
-            # how_much = list(np.linspace(1, dim_per_label, 6, dtype=np.int)) + list(
-            #     np.linspace(int(dim_per_label + dim_per_label / 6),
-            #                 int(dim_per_label + dim_per_label / 6) + dim_per_label, 6, dtype=np.int))
-            # how_much = [1,
-            #             np.min(np.histogram(train_dataset.true_labels, bins=np.unique(train_dataset.true_labels))[0])]
-            print(f'how_much is set manually to {how_much}.')
-            for noise_type in noise_types:
-                compression_evaluation(model, train_dataset, val_dataset, gaussian_params=gaussian_params,
-                                       z_shape=z_shape, how_much=how_much, device=device, save_dir=save_dir,
-                                       proj_type=proj_type, noise_type=noise_type, eval_gaussian_std=eval_gaussian_std,
-                                       batch_size=batch_size)
-                evaluate_projection_1model(model, train_dataset, val_dataset, gaussian_params=gaussian_params,
-                                           z_shape=z_shape, how_much=dim_per_label, device=device, save_dir=save_dir,
-                                           proj_type=proj_type, noise_type=noise_type,
-                                           eval_gaussian_std=eval_gaussian_std,
-                                           batch_size=batch_size)
-        else:
-            # elif dataset_name in ['single_moon', 'double_moon']:
-            noise_type = 'gaussian'
-            std_noise = .1
-            n_principal_dim = np.count_nonzero(gaussian_params[0][-2] > 1)
-            create_figure_train_projections(model, train_dataset, std_noise=std_noise, save_path=save_dir,
-                                            device=device, how_much=n_principal_dim)
-            # evaluate distance n times to calculate the p-value
-            n_times = 20
-            kpca_types = ['linear', 'rbf', 'poly', 'sigmoid']
-            proj_type = 'zpca_l'
-            print(f'(n_times, kpca_types, proj_type) are set manually to '
-                  f'({n_times},{kpca_types},{proj_type}).')
-            distance_results = {ktype + '-PCA': [] for ktype in kpca_types}
-            distance_results['Our-' + proj_type] = []
-            distance_results['NoiseDist'] = []
-            for n in range(n_times):
-                res = evaluate_distances(model, train_dataset, val_dataset, gaussian_params=gaussian_params,
-                                         z_shape=z_shape, how_much=n_principal_dim,
-                                         kpca_types=kpca_types,
-                                         device=device, save_dir=save_dir, proj_type=proj_type, noise_type=noise_type,
-                                         eval_gaussian_std=std_noise)
-                for ktype in kpca_types:
-                    distance_results[ktype + '-PCA'].append(res[ktype + '-PCA'])
-                distance_results['Our-' + proj_type].append(res['Our-' + proj_type])
-                distance_results['NoiseDist'].append(res['NoiseDist'])
-            print(distance_results)
-            # p-value
-            mean_noisedist = np.mean(distance_results['NoiseDist'])
-            print('Mean noise dist: ' + str(mean_noisedist))
-            mean_score = np.mean(distance_results['Our-' + proj_type])
-            print('Mean score: ' + str(mean_score))
-            res_pvalue = evaluate_p_value(distance_results)
-            if res_pvalue is not None:
-                H, p = res_pvalue
-                score_str = 'Kruskal-Wallis H-test, H: ' + str(H) + ', p-value: ' + str(p)
-                print(score_str)
-
-                # by pairs
-                res_pvalue = evaluate_p_value(distance_results, by_pairs=True)
-                for k, v in res_pvalue.items():
-                    H, p = v
-                    score_str = 'Kruskal-Wallis H-test with ' + str(k) + ', H: ' + str(H) + ', p-value: ' + str(p)
-                    print(score_str)
-        # else:
-        #     dataset_name_eval = ['mnist', 'single_moon', 'double_moon']
-        #     assert dataset_name in dataset_name_eval, f'Projection can only be evaluated on {dataset_name_eval}'
-    elif eval_type == 'regression':
-        assert dataset.is_regression_dataset(), 'the dataset is not made for regression purposes'
-        predmodel = evaluate_regression(model, train_dataset, val_dataset, save_dir, device)
-        _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
-                                 only_Z=isinstance(dataset, GraphDataset))
-        print_as_mol = True
-        print_as_graph = False
-        print(f'(print_as_mol, print_as_graph) are set manually to '
-              f'({print_as_mol},{print_as_graph}).')
-        evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=print_as_mol,
-                          print_as_graph=print_as_graph)
-        evaluate_preimage2(model, val_dataset, device, save_dir, n_y=12, n_samples_by_y=1,
-                           print_as_mol=print_as_mol, print_as_graph=print_as_graph, predmodel=predmodel, debug=True)
-        if isinstance(val_dataset, GraphDataset):
-            evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z,
-                                          print_as_mol=print_as_mol, print_as_graph=print_as_graph)
+    # evaluate_graph_permutation(model, train_dataset, val_dataset, save_dir, device, batch_size=batch_size)
+    batch_size = args.batch_size
+    launch_evaluation(dataset_name, model, gaussian_params, train_dataset, val_dataset, save_dir, device, batch_size)
 
 
 if __name__ == "__main__":

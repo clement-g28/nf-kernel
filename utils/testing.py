@@ -29,6 +29,7 @@ def testing_arguments():
     parser.add_argument('--folder', type=str, default='./checkpoint')
     parser.add_argument('--reselect_val_idx', type=int, default=None,
                         help='Reselect a set of validation data from the entire dataset except data from training')
+    parser.add_argument("--batch_size", default=20, type=int, help="batch size")
     return parser
 
 
