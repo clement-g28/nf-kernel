@@ -545,7 +545,7 @@ if __name__ == "__main__":
         mode="min",
         # mode="max",
         max_t=args.n_epoch,
-        grace_period=1,
+        grace_period=10,
         reduction_factor=2)
     reporter = CLIReporter(
         parameter_columns=["var", "beta", "lr", "batch_size", "add_feature"],
@@ -557,7 +557,7 @@ if __name__ == "__main__":
         partial(train_opti),
         resources_per_trial={"cpu": 4, "gpu": 1},
         config=config,
-        num_samples=10,
+        num_samples=50,
         scheduler=scheduler,
         progress_reporter=reporter,
         stop=nan_stopper)
