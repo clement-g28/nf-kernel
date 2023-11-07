@@ -372,8 +372,9 @@ def evaluate_pred_model(train_dataset, val_dataset, model, batch_size, save_dir,
     kernel_name = 'zlinear'
     param_gridlin = [
         {'SVC__kernel': ['linear'], 'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))}]
-    model_type = ('SVC', SVC())
-    scaler = False
+    model_type = ('SVC', SVC(max_iter=10000))
+    # model_type = ('SVC', SVC())
+    scaler = True
     zlinsvc = learn_or_load_modelhyperparams(Z, tlabels, kernel_name, param_gridlin, save_dir,
                                              model_type=model_type, scaler=scaler, save=False)
 
