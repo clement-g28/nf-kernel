@@ -109,26 +109,22 @@ def init_model(var, noise, dataset, noise_x=None, add_feature=None, split_graph_
                                                                 dim_per_label=dim_per_label, fixed_eigval=fixed_eigval,
                                                                 add_feature=add_feature)
 
-    folder_path = f'{args.dataset}/{args.model}/'
     if args.model == 'cglow':
         args_cglow, _ = cglow_arguments().parse_known_args()
         n_channel = dataset.n_channel
         model_single = CGlow(n_channel, args_cglow.n_flow, args_cglow.n_block, affine=args_cglow.affine,
                              conv_lu=not args_cglow.no_lu,
                              gaussian_params=gaussian_params, device=device, learn_mean=not args.fix_mean)
-        folder_path += f'b{args_cglow.n_block}_f{args_cglow.n_flow}'
     elif args.model == 'seqflow':
         args_seqflow, _ = seqflow_arguments().parse_known_args()
         model_single = load_seqflow_model(dataset.in_size, args_seqflow.n_flow, gaussian_params=gaussian_params,
                                           learn_mean=not args.fix_mean, reg_use_var=args.reg_use_var,
                                           dataset=dataset)
-        folder_path += f'f{args_seqflow.n_flow}'
     elif args.model == 'ffjord':
         args_ffjord, _ = ffjord_arguments().parse_known_args()
         # args_ffjord.n_block = args.n_block
         model_single = load_ffjord_model(args_ffjord, dataset.in_size, gaussian_params=gaussian_params,
                                          learn_mean=not args.fix_mean, reg_use_var=args.reg_use_var, dataset=dataset)
-        folder_path += f'b{args_ffjord.n_block}'
     elif args.model == 'moflow':
         args_moflow, _ = moflow_arguments().parse_known_args()
         args_moflow.noise_scale = noise
@@ -320,7 +316,7 @@ def train_opti(config):
                 torch.save((model.state_dict(), optimizer.state_dict()), path)
 
                 if epoch > 1:
-                    evaluate_pred_model(train_dataset, val_dataset, model, args.batch_size, checkpoint_dir, config)
+                    evaluate_pred_model(train_dataset, val_dataset, model, checkpoint_dir, config)
 
         # if epoch > args.save_at_epoch and epoch % args.save_each_epoch == 0:
         #     with tune.checkpoint_dir(epoch) as checkpoint_dir:
@@ -331,36 +327,46 @@ def train_opti(config):
                     logp=(val_logp / val_steps), logdet=(val_logdet / val_steps), distloss=(val_dist / val_steps))
 
 
-def evaluate_pred_model(train_dataset, val_dataset, model, batch_size, save_dir, config):
-    if isinstance(train_dataset, GraphDataset):
-        train_dataset.permute_graphs_in_dataset()
+def evaluate_pred_model(train_dataset, val_dataset, model, save_dir, config):
+    batch_size = args.batch_size
+
+    # reduce train dataset size (fitting too long)
+    if args.reduce_test_dataset_size is not None:
+        t_dataset = train_dataset.duplicate()
+        print('Train dataset reduced in order to accelerate. (stratified)')
+        t_dataset.reduce_dataset_ratio(args.reduce_test_dataset_size, stratified=True)
+    else:
+        t_dataset = train_dataset
+
+    if isinstance(t_dataset, GraphDataset):
+        t_dataset.permute_graphs_in_dataset()
         val_dataset.permute_graphs_in_dataset()
 
     model.eval()
     Z = []
     tlabels = []
-    if isinstance(train_dataset, GraphDataset):
+    if isinstance(t_dataset, GraphDataset):
         n_permutation = 5
         for n_perm in range(n_permutation):
-            train_dataset.permute_graphs_in_dataset()
+            t_dataset.permute_graphs_in_dataset()
 
-            loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+            loader = t_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
 
             with torch.no_grad():
                 for j, data in enumerate(loader):
                     inp, labels = data
-                    inp = train_dataset.format_data(inp, device, add_feature=config["add_feature"])
+                    inp = t_dataset.format_data(inp, device, add_feature=config["add_feature"])
                     labels = labels.to(device)
                     log_p, distloss, logdet, out = model(inp, labels)
                     Z.append(out.detach().cpu().numpy())
                     tlabels.append(labels.detach().cpu().numpy())
     else:
-        loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+        loader = t_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
 
         with torch.no_grad():
             for j, data in enumerate(loader):
                 inp, labels = data
-                inp = train_dataset.format_data(inp, device, add_feature=config["add_feature"])
+                inp = t_dataset.format_data(inp, device, add_feature=config["add_feature"])
                 labels = labels.to(device)
                 log_p, distloss, logdet, out = model(inp, labels)
                 Z.append(out.detach().cpu().numpy())
@@ -380,7 +386,7 @@ def evaluate_pred_model(train_dataset, val_dataset, model, batch_size, save_dir,
 
     print(zlinsvc)
 
-    if isinstance(train_dataset, GraphDataset):
+    if isinstance(t_dataset, GraphDataset):
         n_permutation = 20
         our_preds = []
         our_scores = []
@@ -452,7 +458,11 @@ def evaluate_pred_model(train_dataset, val_dataset, model, batch_size, save_dir,
 
 
 if __name__ == "__main__":
-    args, _ = training_arguments().parse_known_args()
+    # args, _ = training_arguments().parse_known_args()
+    parser = training_arguments()
+    parser.add_argument('--reduce_test_dataset_size', type=float, default=None,
+                        help='reduce the train dataset size when the model is tested')
+    args, _ = parser.parse_known_args()
     print(args)
 
     # set_seed(0)
@@ -479,11 +489,9 @@ if __name__ == "__main__":
     else:
         transform = None
 
-    noise_str = ''
     if args.with_noise is not None:
         transform = [] if transform is None else transform
         transform += [AddGaussianNoise(0., args.with_noise)]
-        noise_str = '_noise' + str(args.with_noise).replace('.', '')
 
     if transform is not None:
         transform = transforms.Compose(transform)
@@ -561,18 +569,6 @@ if __name__ == "__main__":
         scheduler=scheduler,
         progress_reporter=reporter,
         stop=nan_stopper)
-
-    # config_test = {
-    #     "var": 1.1,
-    #     "beta": 200,
-    #     "noise": 0.2,
-    #     # "noise_x": tune.uniform(0.05, 0.3),
-    #     "noise_x": None,
-    #     "lr": 1e-4,
-    #     "batch_size": 10,
-    #     "add_feature": 10
-    # }
-    # train_opti(config_test)
 
     best_trial = result.get_best_trial("accuracy", "min", "last")
     print("Best trial config: {}".format(best_trial.config))
