@@ -176,12 +176,13 @@ def train_opti(config):
     train_dataset = get_train_dataset()
     val_dataset = get_val_dataset()
 
-    with tune.get_trial_dir() as trail_dir:
-        path = os.path.join(trail_dir, "train_idx")
-        train_dset.save_split(path)
-        if val_dset is not None:
-            path = os.path.join(trail_dir, "val_idx")
-            val_dset.save_split(path)
+    trail_dir = tune.get_trial_dir()
+    # with tune.get_trial_dir() as trail_dir:
+    path = os.path.join(trail_dir, "train_idx")
+    train_dset.save_split(path)
+    if val_dset is not None:
+        path = os.path.join(trail_dir, "val_idx")
+        val_dset.save_split(path)
 
     # Init model
     model = init_model(config["var"], config["noise"], train_dataset, config["noise_x"], config["add_feature"],
