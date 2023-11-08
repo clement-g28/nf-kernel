@@ -532,10 +532,10 @@ if __name__ == "__main__":
     config = {
         "var": tune.uniform(1.1, 1.4),
         "beta": tune.randint(10, 200),
-        "noise": tune.uniform(0.2, 0.5),
+        "noise": tune.uniform(0.1, 0.5),
         # "noise_x": tune.uniform(0.05, 0.3),
         "noise_x": None,
-        "lr": tune.loguniform(1e-4, 0.001),
+        "lr": tune.loguniform(1e-4, 0.0004),
         "batch_size": tune.choice([10]),
         "add_feature": tune.randint(0, 20),
         "split_graph_dim": True
