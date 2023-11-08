@@ -61,6 +61,8 @@ if __name__ == '__main__':
                     best_scores['Mean'] = scores['Mean']
                     best_scores['Std'] = scores['Std']
                     best_scores['i'] = i_chpt
+        if len(best_scores) == 0:
+            best_scores = {'Mean': None, 'Std': None, 'i': None}
 
         if len(names) == 0:
             names = ['Batch size', 'LR', 'Noise', 'Noise_x', 'Split_Graph_Dim', 'Beta', 'Var', 'Add_Feature',
