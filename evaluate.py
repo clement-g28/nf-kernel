@@ -588,7 +588,7 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
             param_gridlin = [
                 {'SVC__kernel': ['linear'], 'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))}]
             # param_gridlin = [{'SVC__kernel': ['linear'], 'SVC__C': np.array([1])}]
-            model_type = ('SVC', SVC(max_iter=10000))
+            model_type = ('SVC', SVC(max_iter=100000))
             # model_type = ('SVC', SVC())
             scaler = True
             zlinsvc = learn_or_load_modelhyperparams(Z, tlabels, kernel_name, param_gridlin, save_dir,
@@ -2522,7 +2522,8 @@ def evaluate_graph_permutation(model, train_dataset, val_dataset, save_dir, devi
             break
 
 
-def launch_evaluation(dataset_name, model, gaussian_params, train_dataset, val_dataset, save_dir, device, batch_size):
+def launch_evaluation(eval_type, dataset_name, model, gaussian_params, train_dataset, val_dataset, save_dir, device,
+                      batch_size):
     dim_per_label, n_dim = train_dataset.get_dim_per_label(return_total_dim=True)
 
     # generate flows
@@ -2531,7 +2532,6 @@ def launch_evaluation(dataset_name, model, gaussian_params, train_dataset, val_d
     # fig_limits = None
     # model.interpret_transformation(train_dataset, save_dir, device, std_noise=std_noise, fig_limits=fig_limits)
 
-    eval_type = args.eval_type
     if eval_type == 'classification':
         dataset_name_eval = ['mnist', 'cifar10', 'double_moon', 'iris', 'bcancer'] + GRAPH_CLASSIFICATION_DATASETS
         assert dataset_name in dataset_name_eval, f'Classification can only be evaluated on {dataset_name_eval}'
@@ -2775,7 +2775,9 @@ def main(args):
 
     # evaluate_graph_permutation(model, train_dataset, val_dataset, save_dir, device, batch_size=batch_size)
     batch_size = args.batch_size
-    launch_evaluation(dataset_name, model, gaussian_params, train_dataset, val_dataset, save_dir, device, batch_size)
+    eval_type = args.eval_type
+    launch_evaluation(eval_type, dataset_name, model, gaussian_params, train_dataset, val_dataset, save_dir, device,
+                      batch_size)
 
 
 if __name__ == "__main__":

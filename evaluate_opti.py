@@ -112,7 +112,9 @@ def main(args):
 
     from evaluate import launch_evaluation
 
-    launch_evaluation(dataset_name, model, gaussian_params, train_dataset, val_dataset, save_dir, device, batch_size)
+    eval_type = args.eval_type
+    launch_evaluation(eval_type, dataset_name, model, gaussian_params, train_dataset, val_dataset, save_dir, device,
+                      batch_size)
 
     del dataset
     del val_dataset
