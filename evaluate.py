@@ -2,6 +2,7 @@ import math
 import os
 import random
 import time
+import glob
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -2683,21 +2684,32 @@ def main(args):
 
     dataset_name, model_type, folder_name = args.folder.split('/')[-3:]
 
+    # Retrieve parameters from name
+    # n_block, n_flow, mean_of_eigval, dim_per_label, label, fixed_eigval, uniform_eigval, gaussian_eigval, \
+    # reg_use_var, split_graph_dim = \
+    config = retrieve_params_from_name(folder_name, model_type)
+
     # DATASET #
-    dataset = load_dataset(args, dataset_name, model_type, to_evaluate=True, add_feature=args.add_feature)
+    dataset = load_dataset(args, dataset_name, model_type, to_evaluate=True, add_feature=config['add_feature'])
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     flow_path = f'{args.folder}/save/best_{args.model_to_use}_model.pth'
-    assert os.path.exists(flow_path), f'snapshot path {flow_path} does not exists'
-    folder_name = args.folder.split('/')[-1]
+    # assert os.path.exists(flow_path), f'snapshot path {flow_path} does not exists'
+    if not os.path.exists(flow_path):
+        # os.chdir(args.folder)
+        saves = []
+        for file in glob.glob(f"{args.folder}/checkpoint_*/checkpoint"):
+            saves.append(file)
 
-    # Retrieve parameters from name
-    n_block, n_flow, mean_of_eigval, dim_per_label, label, fixed_eigval, uniform_eigval, gaussian_eigval, \
-    reg_use_var, split_graph_dim = retrieve_params_from_name(folder_name)
+        saves.sort()
+        print(saves)
+        flow_path = saves[-1]
+        # is_last_chckpt = True
+        print('selecting last saved checkpoint as model.')
 
-    if label is not None:
-        dataset.reduce_dataset('one_class', label=label)
+    if config['label'] is not None:
+        dataset.reduce_dataset('one_class', label=config['label'])
 
     # Load the splits of the dataset used in the training phase
     train_idx_path = f'{args.folder}/train_idx.npy'
@@ -2709,37 +2721,54 @@ def main(args):
     # print('Train dataset reduced in order to accelerate. (stratified)')
     # train_dataset.reduce_dataset_ratio(0.05, stratified=True)
 
-    dim_per_label, n_dim = dataset.get_dim_per_label(return_total_dim=True)
+    # dim_per_label, n_dim = dataset.get_dim_per_label(return_total_dim=True)
+    n_dim = dataset.get_n_dim()
+    dim_per_label = config['dim_per_label']
 
     # initialize gaussian params
-    gaussian_params = initialize_gaussian_params(args, dataset, fixed_eigval, uniform_eigval, gaussian_eigval,
-                                                 mean_of_eigval, dim_per_label, 'isotrope' in folder_name,
-                                                 split_graph_dim)
+    var_type = 'uniform'
+    if config['uniform_eigval']:
+        var_type = 'uniform'
+    elif config['gaussian_eigval'] is not None:
+        var_type = 'gaussian'
+    elif config['fixed_eigval'] is not None:
+        var_type = 'manual'
+    else:
+        assert 'Unknown var_type !'
+    gaussian_params = initialize_gaussian_params(args, dataset, var_type, config['mean_of_eigval'],
+                                                 dim_per_label, 'isotrope' in folder_name,
+                                                 config['split_graph_dim'], fixed_eigval=config['fixed_eigval'],
+                                                 gaussian_eigval=config['gaussian_eigval'],
+                                                 add_feature=config['add_feature'])
 
     if model_type == 'cglow':
         args_cglow, _ = cglow_arguments().parse_known_args()
-        args_cglow.n_flow = n_flow
+        args_cglow.n_flow = config['n_flow']
         n_channel = dataset.n_channel
         model_single = load_cglow_model(args_cglow, n_channel, gaussian_params=gaussian_params,
                                         learn_mean='lmean' in folder_name, device=device)
     elif model_type == 'seqflow':
-        model_single = load_seqflow_model(n_dim, n_flow, gaussian_params=gaussian_params,
-                                          learn_mean='lmean' in folder_name, reg_use_var=reg_use_var, dataset=dataset)
+        model_single = load_seqflow_model(n_dim, config['n_flow'], gaussian_params=gaussian_params,
+                                          learn_mean='lmean' in folder_name, reg_use_var=config['reg_use_var'], dataset=dataset)
 
     elif model_type == 'ffjord':
         args_ffjord, _ = ffjord_arguments().parse_known_args()
-        args_ffjord.n_block = n_block
+        args_ffjord.n_block = config['n_block']
         model_single = load_ffjord_model(args_ffjord, n_dim, gaussian_params=gaussian_params,
-                                         learn_mean='lmean' in folder_name, reg_use_var=reg_use_var, dataset=dataset)
+                                         learn_mean='lmean' in folder_name, reg_use_var=config['reg_use_var'], dataset=dataset)
     elif model_type == 'moflow':
         args_moflow, _ = moflow_arguments().parse_known_args()
+        args_moflow.a_n_block = config['a_n_block']
+        args_moflow.a_n_flow = config['a_n_flow']
+        args_moflow.b_n_block = config['b_n_block']
+        args_moflow.b_n_flow = config['b_n_flow']
         model_single = load_moflow_model(args_moflow,
                                          gaussian_params=gaussian_params,
-                                         learn_mean='lmean' in folder_name, reg_use_var=reg_use_var,
+                                         learn_mean='lmean' in folder_name, reg_use_var=config['reg_use_var'],
                                          dataset=dataset)
     else:
         assert False, 'unknown model type!'
-    model_single = WrappedModel(model_single)
+    # model_single = WrappedModel(model_single)
     model_single.load_state_dict(torch.load(flow_path, map_location=device))
     # Convert old FFJORD model params
     # params = torch.load(flow_path, map_location=device)
@@ -2764,7 +2793,8 @@ def main(args):
     #     else:
     #         n_params[k] = v
     # model_single.load_state_dict(n_params)
-    model = model_single.module
+    # model = model_single.module
+    model = model_single
     model = model.to(device)
     model.eval()
 
@@ -2790,7 +2820,6 @@ if __name__ == "__main__":
     parser.add_argument('--model_to_use', type=str, default='classification', choices=best_model_choices,
                         help='what best model to use for the evaluation')
     parser.add_argument("--method", default=0, type=int, help='select between [0,1,2]')
-    parser.add_argument("--add_feature", type=int, default=None)
     args = parser.parse_args()
     args.seed = 2
     main(args)

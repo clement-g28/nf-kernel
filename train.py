@@ -19,7 +19,7 @@ from utils.utils import write_dict_to_tensorboard, set_seed, create_folder, Aver
 
 from utils.utils import load_dataset
 from utils.dataset import GraphDataset
-from utils.testing import project_between
+from utils.testing import project_between, initialize_gaussian_params
 
 from evaluate import classification_score, learn_or_load_modelhyperparams
 from sklearn.svm import SVC
@@ -183,7 +183,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 #                 torch.save(model.state_dict(), f"{save_dir}/model_{str(epoch).zfill(6)}.pt")
 
 
-def init_model(args, var, noise, dataset, noise_x=None, add_feature=None, split_graph_dim=False):
+def prepare_model(args, var, noise, dataset, noise_x=None, add_feature=None, split_graph_dim=False):
     n_dim = dataset.get_n_dim(add_feature=add_feature)
 
     # initialize gaussian params
@@ -200,43 +200,12 @@ def init_model(args, var, noise, dataset, noise_x=None, add_feature=None, split_
             dim_per_label = args.dim_per_label
 
     fixed_eigval = None
+    gaussian_eigval = None
     var_type = var[0]  # 'manual', 'uniform' or 'gaussian'
     var_params = var[1]
-    if var_type != 'manual':
-        if var_type == 'uniform':
-            eigval_list = [var_params for i in range(dim_per_label)]
-        elif var_type == 'gaussian':
-            g_param = list(map(float, args.gaussian_eigval.strip('[]').split(',')))
-            assert len(g_param) == 2, 'gaussian_eigval should be composed of 2 float the mean and the std'
-            import scipy.stats as st
-
-            dist = st.norm(loc=g_param[0], scale=g_param[1])
-            border = 1.6
-            # step = border * 2 / dim_per_label
-            x = np.linspace(-border, border, dim_per_label)
-            # if (dim_per_label % 2) != 0 else np.concatenate(
-            # (np.linspace(-border, g_param[0], int(dim_per_label / 2))[:-1], [g_param[0]],
-            #  np.linspace(step, border, int(dim_per_label / 2))))
-            eigval_list = dist.pdf(x)
-            mean_eigval = var_params
-            a = mean_eigval * dim_per_label / eigval_list.sum()
-            eigval_list = a * eigval_list
-            eigval_list[np.where(eigval_list < 1)] = 1
-        else:
-            assert False, 'No distribution selected; use uniform_eigval or gaussian_eigval arguments'
-    else:
-        fixed_eigval = list(map(float, args.set_eigval_manually.strip('[]').split(',')))
-        eigval_list = None
-
-    if not dataset.is_regression_dataset():
-        gaussian_params = initialize_class_gaussian_params(dataset, eigval_list, isotrope=args.isotrope_gaussian,
-                                                           dim_per_label=dim_per_label, fixed_eigval=fixed_eigval,
-                                                           split_graph_dim=split_graph_dim,
-                                                           add_feature=add_feature)
-    else:
-        gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list, isotrope=args.isotrope_gaussian,
-                                                                dim_per_label=dim_per_label, fixed_eigval=fixed_eigval,
-                                                                add_feature=add_feature)
+    gaussian_params = initialize_gaussian_params(args, dataset, var_type, var_params, dim_per_label,
+                                                 args.isotrope_gaussian, split_graph_dim, fixed_eigval,
+                                                 gaussian_eigval, add_feature)
 
     if args.model == 'cglow':
         args_cglow, _ = cglow_arguments().parse_known_args()
@@ -245,13 +214,13 @@ def init_model(args, var, noise, dataset, noise_x=None, add_feature=None, split_
                                         learn_mean=not args.fix_mean, device=device)
     elif args.model == 'seqflow':
         args_seqflow, _ = seqflow_arguments().parse_known_args()
-        model_single = load_seqflow_model(dataset.in_size, args_seqflow.n_flow, gaussian_params=gaussian_params,
+        model_single = load_seqflow_model(n_dim, args_seqflow.n_flow, gaussian_params=gaussian_params,
                                           learn_mean=not args.fix_mean, reg_use_var=args.reg_use_var,
                                           dataset=dataset)
     elif args.model == 'ffjord':
         args_ffjord, _ = ffjord_arguments().parse_known_args()
         # args_ffjord.n_block = args.n_block
-        model_single = load_ffjord_model(args_ffjord, dataset.in_size, gaussian_params=gaussian_params,
+        model_single = load_ffjord_model(args_ffjord, n_dim, gaussian_params=gaussian_params,
                                          learn_mean=not args.fix_mean, reg_use_var=args.reg_use_var, dataset=dataset)
     elif args.model == 'moflow':
         args_moflow, _ = moflow_arguments().parse_known_args()
@@ -320,8 +289,8 @@ def train(args, config, train_dataset, val_dataset, save_dir, is_raytuning):
         writer = SummaryWriter(save_dir)
 
     # Init model
-    model = init_model(args, (config["var_type"], config["var"]), config["noise"], train_dataset, config["noise_x"],
-                       config["add_feature"], config["split_graph_dim"])
+    model = prepare_model(args, (config["var_type"], config["var"]), config["noise"], train_dataset, config["noise_x"],
+                          config["add_feature"], config["split_graph_dim"])
 
     device = "cpu"
     if torch.cuda.is_available():
@@ -711,7 +680,7 @@ def main(args):
 
     device = 'cuda:0'
 
-    dim_per_label = dataset.get_dim_per_label()
+    dim_per_label = dataset.get_dim_per_label(add_feature=args.add_feature)
     # n_dim = dataset.get_n_dim()
     #
     # # initialize gaussian params
@@ -825,8 +794,10 @@ def main(args):
 
     lmean_str = f'_lmean{args.beta}' if not args.fix_mean else ''
     isotrope_str = '_isotrope' if args.isotrope_gaussian else ''
+    add_feature_str = f'_addfeature{args.add_feature}' if args.add_feature is not None else ''
     folder_path += f'_nfkernel{lmean_str}{isotrope_str}{eigval_str}{noise_str}' \
-                   f'{redclass_str}{redlabel_str}_dimperlab{dim_per_label}{reg_use_var_str}{split_graph_dim_str}'
+                   f'{redclass_str}{redlabel_str}_dimperlab{dim_per_label}{reg_use_var_str}' \
+                   f'{split_graph_dim_str}{add_feature_str}'
 
     if args.add_in_name_folder is not None:
         folder_path += f'_{args.add_in_name_folder}'

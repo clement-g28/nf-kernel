@@ -58,8 +58,8 @@ class BaseDataset(Dataset):
             n_dim *= sh
         return n_dim
 
-    def get_dim_per_label(self, return_total_dim=False):
-        n_dim = self.get_n_dim()
+    def get_dim_per_label(self, add_feature=None, return_total_dim=False):
+        n_dim = self.get_n_dim(add_feature)
 
         if not self.is_regression_dataset():
             uni = np.unique(self.true_labels)

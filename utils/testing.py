@@ -175,43 +175,67 @@ def save_fig(X, reconstructed_X, labels, label_max, save_path, limits=None, size
     plt.close()
 
 
-def retrieve_params_from_name(folder_name):
+def retrieve_params_from_name(folder_name, model_type):
     # Retrieve parameters from name
     splits = folder_name.split('_')
-    label = None
-    uniform_eigval = False
-    mean_of_eigval = None
-    gaussian_eigval = None
-    dim_per_label = None
-    fixed_eigval = None
-    n_block = 2  # base value
-    n_flow = 32  # base value
-    reg_use_var = False
-    split_graph_dim = False
 
-    for split in splits:
+    # base value
+    config = {'label': None,
+              'uniform_eigval': False,
+              'mean_of_eigval': None,
+              'gaussian_eigval': None,
+              'dim_per_label': None,
+              'fixed_eigval': None,
+              'n_block': 2,
+              'n_flow': 32,
+              'a_n_block': 1,
+              'a_n_flow': 27,
+              'b_n_block': 1,
+              'b_n_flow': 10,
+              'reg_use_var': False,
+              'split_graph_dim': False,
+              'add_feature': None}
+
+    for i, split in enumerate(splits):
         b = re.search("^b\d{1,2}$", split)
         f = re.search("^f\d{1,3}", split)
-        if b is not None:
-            n_block = int(b.string.replace('b', ''))
-        elif f is not None:
-            n_flow = int(f.string.replace('f', ''))
-        elif 'label' in split:
+        if model_type != 'moflow':
+            if b is not None:
+                config['n_block'] = int(b.string.replace('b', ''))
+            elif f is not None:
+                config['n_flow'] = int(f.string.replace('f', ''))
+        else:
+            if b is not None:
+                model_part = splits[i - 1]
+                if model_part == 'A':
+                    config['a_n_block'] = int(b.string.replace('b', ''))
+                elif model_part == 'B':
+                    config['b_n_block'] = int(b.string.replace('b', ''))
+            elif f is not None:
+                model_part = splits[i - 2]
+                if model_part == 'A':
+                    config['a_n_flow'] = int(f.string.replace('f', ''))
+                elif model_part == 'B':
+                    config['b_n_flow'] = int(f.string.replace('f', ''))
+        if 'label' in split:
             label_split = split
             label = int(label_split.replace("label", ""))
+            config['label'] = label
             print(f'Flow trained with reduces dataset to one label: {label}')
         elif 'manualeigval' in split:
             manualeigval_split = split
             fixed_eigval = list(map(float, manualeigval_split.replace("manualeigval", "").split('-')))
+            config['fixed_eigval'] = fixed_eigval
             print(f'Flow trained with fixed eigenvalues: {fixed_eigval}')
         elif 'eigvaluniform' in split:
-            uniform_eigval = True
+            config['uniform_eigval'] = True
             uniform_split = split
             mean_of_eigval = uniform_split.replace("eigvaluniform", "")
             if 'e' not in mean_of_eigval:
                 mean_of_eigval = float(mean_of_eigval.replace("-", "."))
             else:
                 mean_of_eigval = float(mean_of_eigval)
+            config['mean_of_eigval'] = mean_of_eigval
             print(f'Flow trained with uniform eigenvalues: {mean_of_eigval}')
         elif 'eigvalgaussian' in split:
             gaussian_split = split
@@ -220,78 +244,129 @@ def retrieve_params_from_name(folder_name):
             mean_of_eigval = float(mean_of_eigval.replace("-", "."))
             std_value = float(str(in_split[-1]).replace('-', '.'))
             gaussian_eigval = [mean_of_eigval, std_value]
+            config['gaussian_eigval'] = gaussian_eigval
             print(f'Flow trained with gaussian eigenvalues params: {mean_of_eigval},{gaussian_eigval}')
         elif 'dimperlab' in split:
             dpl_split = split
             dim_per_label = int(dpl_split.replace("dimperlab", ""))
+            config['dim_per_label'] = dim_per_label
             print(f'Flow trained with dimperlab: {dim_per_label}')
         elif 'usevar' in split:
             reg_use_var = True
+            config['reg_use_var'] = reg_use_var
             print(f'Flow trained using variance.')
         elif 'splitgraphdim' in split:
             split_graph_dim = True
+            config['split_graph_dim'] = split_graph_dim
             print(f'Flow trained using variance.')
+        elif 'addfeature' in split:
+            addf_split = split
+            add_feature = int(addf_split.replace("addfeature", ""))
+            config['add_feature'] = add_feature
+            print(f'Flow trained with add_feature: {add_feature}.')
 
-    return n_block, n_flow, mean_of_eigval, dim_per_label, label, fixed_eigval, uniform_eigval, gaussian_eigval, reg_use_var, split_graph_dim
+    return config
 
 
-def initialize_gaussian_params(args, dataset, fixed_eigval, uniform_eigval, gaussian_eigval, mean_of_eigval,
-                               dim_per_label, isotrope, split_graph_dim):
-    # initialize gaussian params
-    if fixed_eigval is None:
-        if uniform_eigval:
+# def initialize_gaussian_params(args, dataset, fixed_eigval, uniform_eigval, gaussian_eigval, mean_of_eigval,
+#                                dim_per_label, isotrope, split_graph_dim):
+# # initialize gaussian params
+# if fixed_eigval is None:
+#     if uniform_eigval:
+#         eigval_list = [mean_of_eigval for i in range(dim_per_label)]
+#     elif gaussian_eigval is not None:
+#         import scipy.stats as st
+#
+#         dist = st.norm(loc=gaussian_eigval[0], scale=gaussian_eigval[1])
+#         border = 1.6
+#         # step = border * 2 / dim_per_label
+#         x = np.linspace(-border, border, dim_per_label)
+#         # if (dim_per_label % 2) != 0 else np.concatenate(
+#         # (np.linspace(-border, g_param[0], int(dim_per_label / 2))[:-1], [g_param[0]],
+#         #  np.linspace(step, border, int(dim_per_label / 2))))
+#         eigval_list = dist.pdf(x)
+#         mean_eigval = mean_of_eigval
+#         a = mean_eigval * dim_per_label / eigval_list.sum()
+#         eigval_list = a * eigval_list
+#         eigval_list[np.where(eigval_list < 1)] = 1
+#     else:
+#         assert False, 'Unknown distribution !'
+# else:
+#     eigval_list = None
+#
+# if not dataset.is_regression_dataset():
+#     gaussian_params = initialize_class_gaussian_params(dataset, eigval_list, isotrope=isotrope,
+#                                                        dim_per_label=dim_per_label, fixed_eigval=fixed_eigval,
+#                                                        split_graph_dim=split_graph_dim)
+# else:
+#     # if args.method == 0:
+#     gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list,
+#                                                             isotrope=isotrope,
+#                                                             dim_per_label=dim_per_label,
+#                                                             fixed_eigval=fixed_eigval)
+#     # elif args.method == 1:
+#     #     gaussian_params = initialize_tmp_regression_gaussian_params(dataset, eigval_list)
+#     # elif args.method == 2:
+#     #     gaussian_params = initialize_tmp_regression_gaussian_params(dataset, eigval_list, ones=True)
+#     # else:
+#     #     assert False, 'no method selected'
+
+def initialize_gaussian_params(args, dataset, var_type, mean_of_eigval, dim_per_label, isotrope, split_graph_dim,
+                               fixed_eigval=None, gaussian_eigval=None, add_feature=None):
+    if var_type != 'manual':
+        if var_type == 'uniform':
             eigval_list = [mean_of_eigval for i in range(dim_per_label)]
-        elif gaussian_eigval is not None:
+        elif var_type == 'gaussian':
+            g_param = list(map(float, gaussian_eigval.strip('[]').split(',')))
+            assert len(g_param) == 2, 'gaussian_eigval should be composed of 2 float the mean and the std'
             import scipy.stats as st
 
-            dist = st.norm(loc=gaussian_eigval[0], scale=gaussian_eigval[1])
+            dist = st.norm(loc=g_param[0], scale=g_param[1])
             border = 1.6
             # step = border * 2 / dim_per_label
             x = np.linspace(-border, border, dim_per_label)
-                # if (dim_per_label % 2) != 0 else np.concatenate(
-                # (np.linspace(-border, g_param[0], int(dim_per_label / 2))[:-1], [g_param[0]],
-                #  np.linspace(step, border, int(dim_per_label / 2))))
+            # if (dim_per_label % 2) != 0 else np.concatenate(
+            # (np.linspace(-border, g_param[0], int(dim_per_label / 2))[:-1], [g_param[0]],
+            #  np.linspace(step, border, int(dim_per_label / 2))))
             eigval_list = dist.pdf(x)
             mean_eigval = mean_of_eigval
             a = mean_eigval * dim_per_label / eigval_list.sum()
             eigval_list = a * eigval_list
             eigval_list[np.where(eigval_list < 1)] = 1
         else:
-            assert False, 'Unknown distribution !'
+            assert False, 'No distribution selected; use uniform_eigval or gaussian_eigval arguments'
     else:
+        fixed_eigval = list(map(float, args.set_eigval_manually.strip('[]').split(',')))
         eigval_list = None
 
     if not dataset.is_regression_dataset():
         gaussian_params = initialize_class_gaussian_params(dataset, eigval_list, isotrope=isotrope,
                                                            dim_per_label=dim_per_label, fixed_eigval=fixed_eigval,
-                                                           split_graph_dim=split_graph_dim)
+                                                           split_graph_dim=split_graph_dim,
+                                                           add_feature=add_feature)
     else:
-        # if args.method == 0:
-        gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list,
-                                                                isotrope=isotrope,
-                                                                dim_per_label=dim_per_label,
-                                                                fixed_eigval=fixed_eigval)
-        # elif args.method == 1:
-        #     gaussian_params = initialize_tmp_regression_gaussian_params(dataset, eigval_list)
-        # elif args.method == 2:
-        #     gaussian_params = initialize_tmp_regression_gaussian_params(dataset, eigval_list, ones=True)
-        # else:
-        #     assert False, 'no method selected'
+        gaussian_params = initialize_regression_gaussian_params(dataset, eigval_list, isotrope=isotrope,
+                                                                dim_per_label=dim_per_label, fixed_eigval=fixed_eigval,
+                                                                add_feature=add_feature)
     return gaussian_params
 
 
-def prepare_model_loading_params(model_loading_params, dataset, model_type):
+def prepare_model_loading_params(model_loading_params, config, dataset, model_type):
     if model_type == 'cglow':
         args_cglow, _ = cglow_arguments().parse_known_args()
-        args_cglow.n_flow = model_loading_params['n_flow']
+        args_cglow.n_flow = config['n_flow']
         model_loading_params['cglow_args'] = args_cglow
         model_loading_params['n_channel'] = dataset.n_channel
     if model_type == 'ffjord':
         args_ffjord, _ = ffjord_arguments().parse_known_args()
-        args_ffjord.n_block = model_loading_params['n_block']
+        args_ffjord.n_block = config['n_block']
         model_loading_params['ffjord_args'] = args_ffjord
     elif model_type == 'moflow':
         args_moflow, _ = moflow_arguments().parse_known_args()
+        args_moflow.a_n_block = config['a_n_block']
+        args_moflow.a_n_flow = config['a_n_flow']
+        args_moflow.b_n_block = config['b_n_block']
+        args_moflow.b_n_flow = config['b_n_flow']
         model_loading_params['moflow_args'] = args_moflow
     return model_loading_params
 

@@ -9,6 +9,8 @@ from utils.models import load_seqflow_model, load_ffjord_model, load_moflow_mode
 from utils.testing import load_split_dataset, testing_arguments, initialize_gaussian_params
 from utils.training import ffjord_arguments, cglow_arguments, moflow_arguments, seqflow_arguments
 
+from get_best_opti import retrieve_config
+
 
 def main(args):
     print(args)
@@ -16,6 +18,12 @@ def main(args):
         set_seed(args.seed)
 
     dataset_name, model_type, folder_name = args.folder.split('/')[-3:]
+
+    params_path = args.folder + '/params.json'
+    config, batch_size = retrieve_config(params_path)
+
+    # DATASET #
+    dataset = load_dataset(args, dataset_name, model_type, to_evaluate=True, add_feature=config['add_feature'])
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -34,18 +42,6 @@ def main(args):
         is_last_chckpt = True
         print('selecting last saved checkpoint as model.')
 
-    params_path = args.folder + '/params.json'
-    # Opening JSON file
-    with open(params_path) as json_file:
-        data = json.load(json_file)
-    mean_of_eigval = data['var']
-    add_feature = data['add_feature']
-    batch_size = data['batch_size']
-    split_graph_dim = data['split_graph_dim']
-
-    # DATASET #
-    dataset = load_dataset(args, dataset_name, model_type, to_evaluate=True, add_feature=add_feature)
-
     # Load the splits of the dataset used in the training phase
     train_idx_path = f'{args.folder}/train_idx.npy'
     val_idx_path = f'{args.folder}/val_idx.npy'
@@ -57,19 +53,19 @@ def main(args):
     # train_dataset.reduce_dataset_ratio(0.1, stratified=True)
     # val_dataset.reduce_regression_dataset(0.1, stratified=True)
 
-    dim_per_label, n_dim = dataset.get_dim_per_label(return_total_dim=True)
+    n_dim, dim_per_label = dataset.get_dim_per_label(return_total_dim=True)
+    config['dim_per_label'] = dim_per_label
 
     # initialize gaussian params
-    fixed_eigval = None
-    reg_use_var = False
-    uniform_eigval = True
-    gaussian_eigval = None
-    gaussian_params = initialize_gaussian_params(args, dataset, fixed_eigval, uniform_eigval, gaussian_eigval,
-                                                 mean_of_eigval, dim_per_label, dataset.is_regression_dataset(),
-                                                 split_graph_dim)
+    gaussian_params = initialize_gaussian_params(args, dataset, config['var_type'], config['mean_of_eigval'],
+                                                 config['dim_per_label'], args.isotrope_gaussian,
+                                                 config['split_graph_dim'], fixed_eigval=config['fixed_eigval'],
+                                                 gaussian_eigval=config['gaussian_eigval'],
+                                                 add_feature=config['add_feature'])
 
     # n_flow or n_block should be specified in arguments as there are not saved during training
     learn_mean = True
+    reg_use_var = False
     if model_type == 'cglow':
         args_cglow, _ = cglow_arguments().parse_known_args()
         # args_cglow.n_flow = n_flow
@@ -80,7 +76,6 @@ def main(args):
         args_seqflow, _ = seqflow_arguments().parse_known_args()
         model_single = load_seqflow_model(n_dim, args_seqflow.n_flow, gaussian_params=gaussian_params,
                                           learn_mean=learn_mean, reg_use_var=reg_use_var, dataset=dataset)
-
     elif model_type == 'ffjord':
         args_ffjord, _ = ffjord_arguments().parse_known_args()
         # args_ffjord.n_block = n_block
@@ -91,7 +86,7 @@ def main(args):
         model_single = load_moflow_model(args_moflow,
                                          gaussian_params=gaussian_params,
                                          learn_mean=learn_mean, reg_use_var=reg_use_var,
-                                         dataset=dataset)
+                                         dataset=dataset, add_feature=config['add_feature'])
     else:
         assert False, 'unknown model type!'
 
