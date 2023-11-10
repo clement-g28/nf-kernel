@@ -104,10 +104,10 @@ QM7:
 python train.py --dataset qm7 --model moflow --n_flow 32 --n_block 1 --batch_size 100 --lr 0.0004 --noise_scale 0.5674 --use_tb --validation 0.1 --uniform_eigval --beta 157 --mean_of_eigval 0.2140 --n_epoch 1000 --save_each_epoch 1 --isotrope_gaussian
 ```
 
-QM9:
+<!--QM9:
 ```
 python train.py --dataset qm9 --model moflow --n_flow 32 --n_block 1 --batch_size 100 --lr 0.0006 --noise_scale 0.8251 --use_tb --validation 0.1 --uniform_eigval --beta 133 --mean_of_eigval 0.5040 --n_epoch 1000 --save_each_epoch 1 --isotrope_gaussian
-```
+```-->
 
 ESOL:
 ```
@@ -121,6 +121,19 @@ python train.py --dataset freesolv --model moflow --n_flow 32 --n_block 1 --batc
 
 ## Find Models
 
+If you have disabled evaluation or reduced the size of the evaluation dataset during training, you can compare the 
+different checkpoints with each other by calling the get_best_model script:
+```
+python get_best_model.py --eval_type {evaluation_type} --folder ./checkpoint/{dataset}/{model_type}/{model_name}
+```
+The previous command has to be used by replacing {dataset},{model_type} and {model_name} by your parameters and 
+{evaluation_type} by the evaluation type which can be 'classification', 'regression', or 'projection'.
+For example:
+```
+python get_best_model.py --eval_type classification --folder ./checkpoint/bcancer/seqflow/f32_nfkernel_lmean1_eigvaluniform10_noise01_dimperlab15
+```
+
+<!--
 ### Classification
 
 Once models have been trained, in order to choose the best model to classify, the following command has to be used by replacing {dataset},{model_type} and {model_name} by your parameters :
@@ -152,6 +165,7 @@ For example:
 ```
 python get_best_regression.py --folder ./checkpoint/swissroll/ffjord/b1_nfkernel_lmean50.0_isotrope_eigvaluniform10_noise01_dimperlab2
 ```
+-->
 
 ## Evaluate Models
 
