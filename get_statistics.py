@@ -5,6 +5,15 @@ import argparse
 import numpy as np
 import json
 
+
+def compare_classification_score(score1, score2):
+    return score1 > score2
+
+
+def compare_regression_score(score1, score2):
+    return score1 < score2
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Statistics")
 
@@ -12,6 +21,13 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     current_folder = os.getcwd()
+
+    dataset_name, model_type, folder_name = args.folder.split('/')[-3:]
+    from utils.dataset import GRAPH_CLASSIFICATION_DATASETS, GRAPH_REGRESSION_DATASETS, SIMPLE_REGRESSION_DATASETS
+
+    score_comparer = compare_regression_score if dataset_name in GRAPH_REGRESSION_DATASETS or\
+                                                 dataset_name in SIMPLE_REGRESSION_DATASETS \
+        else compare_classification_score
 
     folder_paths = []
     for file in os.listdir(f"{args.folder}"):
@@ -57,7 +73,7 @@ if __name__ == '__main__':
                                 scores[splits[0]] = score
             if has_score:
                 all_scores[i_chpt] = scores
-                if len(best_scores) == 0 or (scores['Mean'] > best_scores['Mean']):
+                if len(best_scores) == 0 or score_comparer(scores['Mean'], best_scores['Mean']):
                     best_scores['Mean'] = scores['Mean']
                     best_scores['Std'] = scores['Std']
                     best_scores['i'] = i_chpt
