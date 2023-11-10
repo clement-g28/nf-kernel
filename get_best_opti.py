@@ -126,7 +126,7 @@ def main(args):
         learn_mean = True
         model_loading_params = {'model': model_type, 'n_dim': n_dim, 'gaussian_params': gaussian_params,
                                 'device': device, 'loading_path': save_path, 'learn_mean': learn_mean}
-        t_model_params.append(prepare_model_loading_params(model_loading_params, dataset, model_type))
+        t_model_params.append(prepare_model_loading_params(model_loading_params, config, dataset, model_type))
 
     save_dir = './save'
     create_folder(save_dir)
@@ -138,8 +138,9 @@ def main(args):
 
     if args.eval_type == 'regression':
         best_i = evaluate_regression(t_model_params, train_dataset, val_dataset, full_dataset=dataset,
-                                     save_dir=save_dir, device=device, with_train=True, reg_use_var=reg_use_var,
-                                     cus_load_func=loading_func, batch_size=batch_size)
+                                     save_dir=save_dir, device=device, with_train=True,
+                                     reg_use_var=config['reg_use_var'], cus_load_func=loading_func,
+                                     batch_size=batch_size)
     elif args.eval_type == 'classification':
         best_i = evaluate_classification(t_model_params, train_dataset, val_dataset, full_dataset=dataset,
                                          save_dir=save_dir, device=device, with_train=True, cus_load_func=loading_func,

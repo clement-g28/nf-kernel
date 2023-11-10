@@ -175,32 +175,46 @@ def seqflow_arguments():
     return parser
 
 
-def training_arguments():
-    parser = argparse.ArgumentParser(description="CGlow trainer")
+def training_arguments(optimize_training=False):
+    parser = argparse.ArgumentParser(description="Training arguments")
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--dataset", type=str, default='mnist', help="Dataset to use")  # rangen eval dataset ok
     # parser.add_argument("--dataset", type=str, default='mnist',
     #                     choices=SIMPLE_DATASETS + SIMPLE_REGRESSION_DATASETS + IMAGE_DATASETS +
     #                             GRAPH_REGRESSION_DATASETS + GRAPH_CLASSIFICATION_DATASETS,
     #                     help="Dataset to use")
-    parser.add_argument("--batch_size", default=16, type=int, help="batch size")
-    parser.add_argument("--n_epoch", default=1000, type=int, help="number of epoch")
+
     parser.add_argument("--model", type=str, default='cglow', choices=SIMPLE_MODELS + IMAGE_MODELS + GRAPH_MODELS,
                         help="Model to use")
-
+    parser.add_argument("--n_epoch", default=1000, type=int, help="number of epoch")
     parser.add_argument("--n_bits", default=5, type=int, help="number of bits used only with image dataset")
-    parser.add_argument("--lr", default=1e-4, type=float, help="learning rate")
+    if not optimize_training:
+        parser.add_argument("--batch_size", default=16, type=int, help="batch size")
+        parser.add_argument("--lr", default=1e-4, type=float, help="learning rate")
 
-    parser.add_argument("--use_tb", action="store_true", help="use tensorboard to save losses")
+        parser.add_argument("--beta", default=1, type=float, help="distance loss weight")
+        parser.add_argument("--uniform_eigval", action="store_true",
+                            help='value of uniform eigenvalues associated to the dim-per-label eigenvectors')
+        parser.add_argument("--gaussian_eigval", default=None, type=str,
+                            help='parameters of the gaussian distribution from which we sample eigenvalues')
+        parser.add_argument("--mean_of_eigval", default=10, type=float, help='mean value of eigenvalues')
+        parser.add_argument("--set_eigval_manually", default=None, type=str,
+                            help='set the eigenvalues manually, it should be in the form of list of n_dim value e.g [50,0.003]')
+        parser.add_argument("--add_feature", type=int, default=None)
+
+        # split class dimensions between features of x and adj while using graph dataset
+        parser.add_argument("--split_graph_dim", action="store_true",
+                            help='split class dimensions between features of x and adj while using graph dataset')
+
+        parser.add_argument("--use_tb", action="store_true", help="use tensorboard to save losses")
+        parser.add_argument("--add_in_name_folder", type=str, default=None, help='add in folder name the str')
+
     parser.add_argument("--save_at_epoch", default=0, type=int, help='start saving after the epoch')
     parser.add_argument("--save_each_epoch", default=20, type=int, help='save every n epoch')
     parser.add_argument("--sample_every", default=100, type=int, help='sample and generate every n iterations')
-    parser.add_argument("--write_train_loss_every", default=100, type=int,
-                        help='write training loss in tb every n iterations')
 
     parser.add_argument("--fix_mean", action="store_true", help="don\'t learn means")
     parser.add_argument("--with_noise", type=float, default=None, help="add noise to input as learning")
-    parser.add_argument("--beta", default=1, type=float, help="distance loss weight")
 
     # Dataset arguments
     parser.add_argument("--validation", default=0.02, type=float, help="validation rate")
@@ -212,31 +226,18 @@ def training_arguments():
 
     # Eigenvalues Parameters
     parser.add_argument("--isotrope_gaussian", action="store_true", help="use univariate gaussians")
-    parser.add_argument("--uniform_eigval", action="store_true",
-                        help='value of uniform eigenvalues associated to the dim-per-label eigenvectors')
-    parser.add_argument("--gaussian_eigval", default=None, type=str,
-                        help='parameters of the gaussian distribution from which we sample eigenvalues')
-    parser.add_argument("--mean_of_eigval", default=10, type=float, help='mean value of eigenvalues')
-    parser.add_argument("--set_eigval_manually", default=None, type=str,
-                        help='set the eigenvalues manually, it should be in the form of list of n_dim value e.g [50,0.003]')
 
     parser.add_argument("--dim_per_label", default=None, type=int, help='number of dimension to use for one class')
 
     parser.add_argument("--reg_use_var", action="store_true",
                         help='use variance computed wrt distance and label min dist during training')
     # METHOD SELECTION ARG
-    parser.add_argument("--method", default=0, type=int, help='select between [0,1,2]')
+    parser.add_argument("--method", default=0, type=int, help='select between [0,1,2]')  # TODO : to remove
+    parser.add_argument("--write_train_loss_every", default=100, type=int,
+                        help='write training loss in tb every n iterations')  # TODO : to remove
 
     parser.add_argument("--restart", action="store_true",
                         help='restart from the restart.pth model')
-
-    # split class dimensions between features of x and adj while using graph dataset
-    parser.add_argument("--split_graph_dim", action="store_true",
-                        help='split class dimensions between features of x and adj while using graph dataset')
-
-    parser.add_argument("--add_in_name_folder", type=str, default=None, help='add in folder name the str')
-
-    parser.add_argument("--add_feature", type=int, default=None)
 
     parser.add_argument('--reduce_test_dataset_size', type=float, default=None,
                         help='reduce the train dataset size when the model is tested')

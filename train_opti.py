@@ -3,6 +3,7 @@ import math
 import torch
 from torch import nn, optim
 from torchvision import transforms
+from datetime import datetime
 
 from utils.custom_glow import CGlow
 from utils.models import load_seqflow_model, load_cglow_model, load_ffjord_model, load_moflow_model
@@ -84,9 +85,55 @@ def train_opti(config):
     train(args, config, train_dataset, val_dataset, trial_dir, is_raytuning=True)
 
 
+def set_config_given_args(config, args):
+    # given parameters are fixed
+    if args.mean_of_eigval is not None:
+        config['var'] = args.mean_of_eigval
+    if args.beta is not None:
+        config['beta'] = args.beta
+    if args.noise is not None:
+        config['noise'] = args.noise
+    if args.noise_x is not None:
+        config['noise_x'] = args.noise_x
+    if args.lr is not None:
+        config['lr'] = args.lr
+    if args.batch_size is not None:
+        config['batch_size'] = args.batch_size
+    if args.add_feature is not None:
+        config['add_feature'] = args.add_feature
+    if args.split_graph_dim is not None:
+        config['split_graph_dim'] = args.split_graph_dim
+
+    return config
+
+
 if __name__ == "__main__":
     # args, _ = training_arguments().parse_known_args()
-    parser = training_arguments()
+    parser = training_arguments(optimize_training=True)
+    parser.add_argument("--n_trials", default=50, type=int, help="number of trials to make")
+
+    parser.add_argument("--batch_size", default=None, type=int, help="batch size")
+    parser.add_argument("--lr", default=None, type=float, help="learning rate")
+    parser.add_argument("--beta", default=None, type=float, help="distance loss weight")
+    # parser.add_argument("--uniform_eigval", default=None, type=bool,
+    #                     help='value of uniform eigenvalues associated to the dim-per-label eigenvectors')
+    # parser.add_argument("--gaussian_eigval", default=None, type=str,
+    #                     help='parameters of the gaussian distribution from which we sample eigenvalues')
+    parser.add_argument("--mean_of_eigval", default=None, type=float, help='mean value of eigenvalues')
+    # parser.add_argument("--set_eigval_manually", default=None, type=str,
+    #                     help='set the eigenvalues manually, it should be in the form of list of n_dim value '
+    #                          'e.g [50,0.003]')
+    parser.add_argument("--add_feature", type=int, default=None)
+
+    # split class dimensions between features of x and adj while using graph dataset
+    parser.add_argument("--split_graph_dim", default=None, type=bool,
+                        help='split class dimensions between features of x and adj while using graph dataset')
+
+    # moflow
+    parser.add_argument('--noise_scale', type=float, default=None, help='x + torch.rand(x.shape) * noise_scale')
+    parser.add_argument('--noise_scale_x', type=float, default=None, help='use this argument to precise another noise '
+                                                                          'scale to apply on x, while noise_scale is '
+                                                                          'applied to adj')
     args, _ = parser.parse_known_args()
     print(args)
 
@@ -149,8 +196,6 @@ if __name__ == "__main__":
 
     device = 'cuda:0'
 
-    from datetime import datetime
-
     date = datetime.now().strftime("%d_%m_%Y_%H_%M_%S")
 
     folder_path = f'./checkpoint/{args.dataset}/{args.model}/ray_idx/{date}'
@@ -199,6 +244,8 @@ if __name__ == "__main__":
         "split_graph_dim": True
     }
 
+    config = set_config_given_args(config, args)
+
     scheduler = ASHAScheduler(
         metric="accuracy",
         mode="min",
@@ -216,7 +263,7 @@ if __name__ == "__main__":
         partial(train_opti),
         resources_per_trial={"cpu": 4, "gpu": 0.5},
         config=config,
-        num_samples=50,
+        num_samples=args.n_trials,
         scheduler=scheduler,
         progress_reporter=reporter,
         stop=nan_stopper)
