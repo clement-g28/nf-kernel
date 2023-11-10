@@ -91,10 +91,10 @@ def set_config_given_args(config, args):
         config['var'] = args.mean_of_eigval
     if args.beta is not None:
         config['beta'] = args.beta
-    if args.noise is not None:
-        config['noise'] = args.noise
+    if args.noise_scale is not None:
+        config['noise'] = args.noise_scale
     if args.noise_x is not None:
-        config['noise_x'] = args.noise_x
+        config['noise_scale_x'] = args.noise_scale_x
     if args.lr is not None:
         config['lr'] = args.lr
     if args.batch_size is not None:
