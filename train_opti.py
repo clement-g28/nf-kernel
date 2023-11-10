@@ -93,7 +93,7 @@ def set_config_given_args(config, args):
         config['beta'] = args.beta
     if args.noise_scale is not None:
         config['noise'] = args.noise_scale
-    if args.noise_x is not None:
+    if args.noise_scale_x is not None:
         config['noise_scale_x'] = args.noise_scale_x
     if args.lr is not None:
         config['lr'] = args.lr
