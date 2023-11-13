@@ -25,7 +25,7 @@ if __name__ == '__main__':
     dataset_name, model_type, folder_name = args.folder.split('/')[-3:]
     from utils.dataset import GRAPH_CLASSIFICATION_DATASETS, GRAPH_REGRESSION_DATASETS, SIMPLE_REGRESSION_DATASETS
 
-    score_comparer = compare_regression_score if dataset_name in GRAPH_REGRESSION_DATASETS or\
+    score_comparer = compare_regression_score if dataset_name in GRAPH_REGRESSION_DATASETS or \
                                                  dataset_name in SIMPLE_REGRESSION_DATASETS \
         else compare_classification_score
 
@@ -43,6 +43,7 @@ if __name__ == '__main__':
     names = []
     all_results = []
     for folder_path, checkpoint_paths in folder_paths:
+        model_name = folder_path.split('/')[-1]
         params_path = folder_path + '/params.json'
         with open(params_path) as json_file:
             data = json.load(json_file)
@@ -81,9 +82,10 @@ if __name__ == '__main__':
             best_scores = {'Mean': None, 'Std': None, 'i': None}
 
         if len(names) == 0:
-            names = ['Batch size', 'LR', 'Noise', 'Noise_x', 'Split_Graph_Dim', 'Beta', 'Var', 'Add_Feature',
+            names = ['Name', 'Batch size', 'LR', 'Noise', 'Noise_x', 'Split_Graph_Dim', 'Beta', 'Var', 'Add_Feature',
                      *best_scores.keys()]
         all_results.append(
-            [batch_size, lr, noise, noise_x, split_graph_dim, beta, var, add_feature, *best_scores.values()])
+            [model_name, batch_size, lr, noise, noise_x, split_graph_dim, beta, var, add_feature,
+             *best_scores.values()])
     df = pd.DataFrame(np.array(all_results), columns=names)
     df.to_csv(f'{args.folder}/stats.csv', index=False)
