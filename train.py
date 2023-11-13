@@ -305,8 +305,8 @@ def train(args, config, train_dataset, val_dataset, save_dir, is_raytuning):
     beta = config["beta"]
 
     # TEST with weighted sampler
-    train_loader = train_dataset.get_loader(args.batch_size, shuffle=True, drop_last=False, sampler=True)
-    val_loader = val_dataset.get_loader(args.batch_size, shuffle=True, drop_last=False)
+    train_loader = train_dataset.get_loader(config['batch_size'], shuffle=True, drop_last=False, sampler=True)
+    val_loader = val_dataset.get_loader(config['batch_size'], shuffle=True, drop_last=False)
     # loader_size = len(train_loader)
 
     best_accuracy = math.inf
