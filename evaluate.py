@@ -538,8 +538,10 @@ def evaluate_p_value(predictions, by_pairs=False):
         return None
 
 
-def evaluate_classification(model, train_dataset, val_dataset, save_dir, device, fithyperparam=True, batch_size=10):
+def evaluate_classification(model, train_dataset, val_dataset, save_dir, device, fithyperparam=True, batch_size=10,
+                            n_permutation_test=None):
     if isinstance(train_dataset, GraphDataset):
+        n_permutation_test = 5 if n_permutation_test is None else n_permutation_test
         train_dataset.permute_graphs_in_dataset()
         val_dataset.permute_graphs_in_dataset()
 
@@ -552,7 +554,7 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
         Z = []
         tlabels = []
         if isinstance(train_dataset, GraphDataset):
-            n_permutation = 5
+            n_permutation = n_permutation_test
             for n_perm in range(n_permutation):
                 train_dataset.permute_graphs_in_dataset()
 
@@ -1213,8 +1215,9 @@ def evaluate_distances(model, train_dataset, val_dataset, gaussian_params, z_sha
 
 
 def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fithyperparam=True, save_res=True,
-                        batch_size=200):
+                        batch_size=200, n_permutation_test=None):
     if isinstance(train_dataset, GraphDataset):
+        n_permutation_test = 5 if n_permutation_test is None else n_permutation_test  # 5 as base value
         train_dataset.permute_graphs_in_dataset()
         val_dataset.permute_graphs_in_dataset()
 
@@ -1227,7 +1230,7 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
         Z = []
         tlabels = []
         if isinstance(train_dataset, GraphDataset):
-            n_permutation = 5
+            n_permutation = n_permutation_test
             for n_perm in range(n_permutation):
                 train_dataset.permute_graphs_in_dataset()
 
@@ -2542,7 +2545,7 @@ def evaluate_graph_permutation(model, train_dataset, val_dataset, save_dir, devi
 
 
 def launch_evaluation(eval_type, dataset_name, model, gaussian_params, train_dataset, val_dataset, save_dir, device,
-                      batch_size):
+                      batch_size, n_permutation_test=None):
     dim_per_label, n_dim = train_dataset.get_dim_per_label(return_total_dim=True)
 
     # generate flows
@@ -2555,7 +2558,8 @@ def launch_evaluation(eval_type, dataset_name, model, gaussian_params, train_dat
         dataset_name_eval = ['mnist', 'cifar10', 'double_moon', 'iris', 'bcancer'] + GRAPH_CLASSIFICATION_DATASETS
         assert dataset_name in dataset_name_eval, f'Classification can only be evaluated on {dataset_name_eval}'
         # predmodel = evaluate_classification(model, train_dataset, val_dataset, save_dir, device, batch_size=batch_size)
-        evaluate_classification(model, train_dataset, val_dataset, save_dir, device, batch_size=batch_size)
+        evaluate_classification(model, train_dataset, val_dataset, save_dir, device, batch_size=batch_size,
+                                n_permutation_test=n_permutation_test)
         # _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
         #                          only_Z=isinstance(train_dataset, GraphDataset), batch_size=batch_size)
         # print_as_mol = True
@@ -2678,7 +2682,8 @@ def launch_evaluation(eval_type, dataset_name, model, gaussian_params, train_dat
         #     assert dataset_name in dataset_name_eval, f'Projection can only be evaluated on {dataset_name_eval}'
     elif eval_type == 'regression':
         assert train_dataset.is_regression_dataset(), 'the dataset is not made for regression purposes'
-        predmodel = evaluate_regression(model, train_dataset, val_dataset, save_dir, device, batch_size=batch_size)
+        predmodel = evaluate_regression(model, train_dataset, val_dataset, save_dir, device, batch_size=batch_size,
+                                        n_permutation_test=n_permutation_test)
         _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
                                  only_Z=isinstance(train_dataset, GraphDataset), batch_size=batch_size)
         print_as_mol = True
@@ -2827,7 +2832,7 @@ def main(args):
     batch_size = args.batch_size
     eval_type = args.eval_type
     launch_evaluation(eval_type, dataset_name, model, gaussian_params, train_dataset, val_dataset, save_dir, device,
-                      batch_size)
+                      batch_size, n_permutation_test=args.n_permutation_test)
 
 
 if __name__ == "__main__":

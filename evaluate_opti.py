@@ -109,7 +109,7 @@ def main(args):
 
     eval_type = args.eval_type
     launch_evaluation(eval_type, dataset_name, model, gaussian_params, train_dataset, val_dataset, save_dir, device,
-                      batch_size)
+                      batch_size, args.n_permutation_test)
 
     del dataset
     del val_dataset
