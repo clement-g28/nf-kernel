@@ -58,7 +58,7 @@ def main(args):
 
     # initialize gaussian params
     gaussian_params = initialize_gaussian_params(args, dataset, config['var_type'], config['mean_of_eigval'],
-                                                 config['dim_per_label'], args.isotrope_gaussian,
+                                                 config['dim_per_label'], dataset.is_regression_dataset(),
                                                  config['split_graph_dim'], fixed_eigval=config['fixed_eigval'],
                                                  gaussian_eigval=config['gaussian_eigval'],
                                                  add_feature=config['add_feature'])
