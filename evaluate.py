@@ -1219,24 +1219,41 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
         val_dataset.permute_graphs_in_dataset()
 
     zlinridge = None
+
     # Compute results with our approach if not None
     if model is not None:
-        loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
-
+        model.eval()
         start = time.time()
         Z = []
         tlabels = []
-        model.eval()
-        with torch.no_grad():
-            for j, data in enumerate(loader):
-                inp, labels = data
-                inp = train_dataset.format_data(inp, device)
-                labels = labels.to(device)
-                log_p, distloss, logdet, out = model(inp, labels)
-                Z.append(out.detach().cpu().numpy())
-                tlabels.append(labels.detach().cpu().numpy())
-        Z = np.concatenate(Z, axis=0).reshape(len(train_dataset), -1)
+        if isinstance(train_dataset, GraphDataset):
+            n_permutation = 5
+            for n_perm in range(n_permutation):
+                train_dataset.permute_graphs_in_dataset()
+
+                loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+
+                with torch.no_grad():
+                    for j, data in enumerate(loader):
+                        inp, labels = data
+                        inp = train_dataset.format_data(inp, device)
+                        labels = labels.to(device)
+                        log_p, distloss, logdet, out = model(inp, labels)
+                        Z.append(out.detach().cpu().numpy())
+                        tlabels.append(labels.detach().cpu().numpy())
+        else:
+            loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+
+            with torch.no_grad():
+                for j, data in enumerate(loader):
+                    inp, labels = data
+                    inp = train_dataset.format_data(inp, device)
+                    labels = labels.to(device)
+                    log_p, distloss, logdet, out = model(inp, labels)
+                    Z.append(out.detach().cpu().numpy())
+                    tlabels.append(labels.detach().cpu().numpy())
         tlabels = np.concatenate(tlabels, axis=0)
+        Z = np.concatenate(Z, axis=0).reshape(tlabels.shape[0], -1)
         end = time.time()
         print(f"time to get Z_train from X_train: {str(end - start)}, batch size: {batch_size}")
 
@@ -1250,7 +1267,8 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
             # param_gridlin = [{'Ridge__kernel': [kernel_name], 'Ridge__alpha': np.logspace(-5, 2, 11)}]
             param_gridlin = [{'Ridge__alpha': np.concatenate((np.logspace(-5, 2, 11), np.array([1])))}]
             zlinridge = learn_or_load_modelhyperparams(Z, tlabels, kernel_name, param_gridlin, save_dir,
-                                                       model_type=('Ridge', Ridge()), scaler=False, save=False)
+                                                       model_type=('Ridge', Ridge(max_iter=100000)), scaler=False,
+                                                       save=False)
         else:
             # linridge = make_pipeline(StandardScaler(), KernelRidge(kernel=kernel_name))
             zlinridge = make_pipeline(StandardScaler(), Ridge(alpha=1.0))
@@ -2749,13 +2767,15 @@ def main(args):
                                         learn_mean='lmean' in folder_name, device=device)
     elif model_type == 'seqflow':
         model_single = load_seqflow_model(n_dim, config['n_flow'], gaussian_params=gaussian_params,
-                                          learn_mean='lmean' in folder_name, reg_use_var=config['reg_use_var'], dataset=dataset)
+                                          learn_mean='lmean' in folder_name, reg_use_var=config['reg_use_var'],
+                                          dataset=dataset)
 
     elif model_type == 'ffjord':
         args_ffjord, _ = ffjord_arguments().parse_known_args()
         args_ffjord.n_block = config['n_block']
         model_single = load_ffjord_model(args_ffjord, n_dim, gaussian_params=gaussian_params,
-                                         learn_mean='lmean' in folder_name, reg_use_var=config['reg_use_var'], dataset=dataset)
+                                         learn_mean='lmean' in folder_name, reg_use_var=config['reg_use_var'],
+                                         dataset=dataset)
     elif model_type == 'moflow':
         args_moflow, _ = moflow_arguments().parse_known_args()
         args_moflow.a_n_block = config['a_n_block']
