@@ -25,7 +25,7 @@ SIMPLE_DATASETS = ['single_moon', 'double_moon', 'iris', 'bcancer']
 IMAGE_DATASETS = ['mnist', 'cifar10', 'olivetti_faces']
 SIMPLE_REGRESSION_DATASETS = ['swissroll', 'diabetes', 'waterquality', 'aquatoxi', 'fishtoxi', 'trafficflow']
 GRAPH_REGRESSION_DATASETS = ['qm7', 'qm9', 'freesolv', 'esol', 'lipo', 'fishtoxi']
-GRAPH_CLASSIFICATION_DATASETS = ['toxcast', 'AIDS', 'Letter-med', 'MUTAG', 'COIL-DEL', 'BZR']
+GRAPH_CLASSIFICATION_DATASETS = ['toxcast', 'AIDS', 'Letter-med', 'MUTAG', 'COIL-DEL', 'BZR', 'BACE']
 
 
 # abstract base kernel dataset class
@@ -805,12 +805,16 @@ class GraphDataset(BaseDataset):
             xs, adjs, y = train_dataset
         else:
             xs, adjs, self.smiles, y = train_dataset
-        y = np.array(y).squeeze()
+
+        y = np.array(y).squeeze() if self.is_regression_dataset() else np.array(y).astype(np.int).squeeze()
+
         if test_dataset is not None:
             if len(train_dataset) == 3:
                 xs_test, adjs_test, y_test = test_dataset
             else:
                 xs_test, adjs_test, self.smiles_test, y_test = test_dataset
+            y_test = np.array(y_test).squeeze() if self.is_regression_dataset() else np.array(y_test).astype(
+                np.int).squeeze()
             test_dataset = (list(zip(xs_test, adjs_test)), np.array(y_test).squeeze())
 
         self.transform = transform_graph_permutation if transform == 'permutation' else None
@@ -1320,6 +1324,12 @@ class RegressionGraphDataset(GraphDataset):
             b_n_squeeze = 11
             a_n_node = 22
             a_n_type = len(atom_type_list) + 1  # 5
+        elif self.dataset_name == 'lipo':
+            b_n_type = 4
+            # b_n_squeeze = 1
+            b_n_squeeze = 5
+            a_n_node = 35
+            a_n_type = len(atom_type_list) + 1
         else:
             assert False, 'unknown dataset'
         result = {'atom_type_list': atom_type_list, 'b_n_type': b_n_type, 'b_n_squeeze': b_n_squeeze,
@@ -1395,26 +1405,26 @@ class RegressionGraphDataset(GraphDataset):
             else:
                 assert False, 'unknown dataset'
 
-        if add_feature is not None:
-            if len(results[0]) == 3:
-                ((X, A, Y), (X_test, A_test, Y_test)) = results
-            else:
-                ((X, A, smiles, Y), (X_test, A_test, smiles_test, Y_test)) = results
-            X = np.concatenate([np.expand_dims(x, 0) for x in X], 0)
-            # TEST ADD ZERO FEATURES IN X
-            n_X = np.zeros((X.shape[0], X.shape[1], X.shape[-1] + add_feature))
-            n_X[:, :, :-add_feature] = X
-            X = n_X
-
-            X_test = np.concatenate([np.expand_dims(x, 0) for x in X_test], 0)
-            n_X = np.zeros((X_test.shape[0], X_test.shape[1], X_test.shape[-1] + add_feature))
-            n_X[:, :, :-add_feature] = X_test
-            X_test = n_X
-
-            if len(results[0]) == 3:
-                results = ((X, A, Y), (X_test, A_test, Y_test))
-            else:
-                results = ((X, A, smiles, Y), (X_test, A_test, smiles_test, Y_test))
+        # if add_feature is not None:
+        #     if len(results[0]) == 3:
+        #         ((X, A, Y), (X_test, A_test, Y_test)) = results
+        #     else:
+        #         ((X, A, smiles, Y), (X_test, A_test, smiles_test, Y_test)) = results
+        #     X = np.concatenate([np.expand_dims(x, 0) for x in X], 0)
+        #     # TEST ADD ZERO FEATURES IN X
+        #     n_X = np.zeros((X.shape[0], X.shape[1], X.shape[-1] + add_feature))
+        #     n_X[:, :, :-add_feature] = X
+        #     X = n_X
+        #
+        #     X_test = np.concatenate([np.expand_dims(x, 0) for x in X_test], 0)
+        #     n_X = np.zeros((X_test.shape[0], X_test.shape[1], X_test.shape[-1] + add_feature))
+        #     n_X[:, :, :-add_feature] = X_test
+        #     X_test = n_X
+        #
+        #     if len(results[0]) == 3:
+        #         results = ((X, A, Y), (X_test, A_test, Y_test))
+        #     else:
+        #         results = ((X, A, smiles, Y), (X_test, A_test, smiles_test, Y_test))
 
         return results, label_map
 
@@ -1473,6 +1483,12 @@ class ClassificationGraphDataset(GraphDataset):
             b_n_type = 3
             b_n_squeeze = 30
             a_n_node = 60
+            a_n_type = len(node_type_list) + 1  # 5
+        elif self.dataset_name == 'BACE':
+            # b_n_type = 5
+            b_n_type = 4
+            b_n_squeeze = 5
+            a_n_node = 50
             a_n_type = len(node_type_list) + 1  # 5
         else:
             assert False, 'unknown dataset'
@@ -1559,140 +1575,148 @@ class ClassificationGraphDataset(GraphDataset):
     @staticmethod
     def load_dataset(name, add_feature=None):
         path = './datasets'
-        test_dataset = None
 
-        full_name = f'{name}_p{add_feature}f' if add_feature is not None else name
+        if name in ['toxcast', 'BACE']:
+            results, label_map = get_molecular_dataset_mp(name=name, data_path=path, return_smiles=False)
 
-        exist_dataset = os.path.exists(f'{path}/{full_name}_X.npy') if path is not None else False
-        # dset = TUDataset(path, name='DBLP_v1', use_node_attr=False, use_edge_attr=True)
+            ((X, A, Y), test_dataset) = results
 
-        # from gklearn.utils.graph_files import load_gxl
-        # import glob
-        # path = f'{path}/Letter/Letter/MED'
-        # files = sorted(glob.glob(f"{path}/*.gxl"))
-        # graphs = []
-        # for i, file in enumerate(files):
-        #     graph = load_gxl(file)
-        #     graphs.append(graph)
-        #
-        #     save_path = f'{path}/test_{i}'
-        #
-        #     G = graph[0]
-        #     e0 = [(u, v) for (u, v, d) in G.edges(data=True)]
-        #
-        #     nodes = [i for i, n in enumerate(G.nodes)]
-        #     nodes_pos = {}
-        #     for i, n in enumerate(G.nodes):
-        #         x = G.nodes[i]['x']
-        #         y = G.nodes[i]['y']
-        #         nodes_pos[i] = (float(x), float(y))
-        #
-        #     options_node = {
-        #         "node_color": "skyblue",
-        #     }
-        #     options_edge = {
-        #         "edge_color": [0 for _ in range(len(e0))],
-        #         "width": 4,
-        #         "edge_cmap": plt.cm.Blues_r,
-        #     }
-        #     # nodes
-        #     nx.draw_networkx_nodes(G, nodes_pos, nodelist=nodes, **options_node)
-        #
-        #     # edges
-        #     nx.draw_networkx_edges(G, nodes_pos, edgelist=e0, **options_edge)
-        #
-        #     plt.axis("off")
-        #     plt.tight_layout()
-        #     plt.savefig(fname=f'{save_path}.png', format='png', dpi=30)
-        #     plt.close()
-
-        if exist_dataset:
-            if name in ['AIDS', 'Letter-med', 'MUTAG', 'COIL-DEL', 'BZR']:
-                X = np.load(f'{path}/{full_name}_X.npy')
-                A = np.load(f'{path}/{full_name}_A.npy')
-                Y = np.load(f'{path}/{full_name}_Y.npy')
-                dataset = (X, A, Y)
-                results = (dataset, test_dataset)
-                if name == 'AIDS':
-                    ordered_labels = ['C', 'O', 'N', 'Cl', 'F', 'S', 'Se', 'P', 'Na', 'I', 'Co', 'Br', 'Li', 'Si', 'Mg',
-                                      'Cu',
-                                      'As', 'B', 'Pt', 'Ru', 'K', 'Pd', 'Au', 'Te', 'W', 'Rh', 'Zn', 'Bi', 'Pb', 'Ge',
-                                      'Sb',
-                                      'Sn', 'Ga', 'Hg', 'Ho', 'Tl', 'Ni', 'Tb']
-                    label_map = {label: i + 1 for i, label in enumerate(ordered_labels)}
-                elif name == 'MUTAG':
-                    ordered_labels = ['C', 'N', 'O', 'F', 'I', 'Cl', 'Br']
-                    label_map = {label: i + 1 for i, label in enumerate(ordered_labels)}
-                else:
-                    label_map = None
-            else:
-                assert False, 'unknown dataset'
+            # TO TEST DATASETS
+            # tasks, (train_dataset, valid_dataset, test_dataset), transformers = dc.molnet.load_toxcast(featurizer='Raw')
+            # n_atoms = []
+            # label_map = {}
+            # for mol in train_dataset.X:
+            #     n_atoms.append(mol.GetNumAtoms())
+            #     for atom in mol.GetAtoms():
+            #         if atom.GetSymbol() not in label_map:
+            #             label_map[atom.GetSymbol()] = len(label_map) + 1
+            # hist = np.histogram(n_atoms, bins=range(0, max(n_atoms) + 1))
         else:
-            if name in ['toxcast']:
-                results, label_map = get_molecular_dataset_mp(name=name, data_path=path)
-                ((X, A, Y), test_dataset) = results
+            test_dataset = None
 
-                # TO TEST DATASETS
-                # tasks, (train_dataset, valid_dataset, test_dataset), transformers = dc.molnet.load_toxcast(featurizer='Raw')
-                # n_atoms = []
-                # label_map = {}
-                # for mol in train_dataset.X:
-                #     n_atoms.append(mol.GetNumAtoms())
-                #     for atom in mol.GetAtoms():
-                #         if atom.GetSymbol() not in label_map:
-                #             label_map[atom.GetSymbol()] = len(label_map) + 1
-                # hist = np.histogram(n_atoms, bins=range(0, max(n_atoms) + 1))
-            elif name in ['AIDS', 'Letter-med', 'MUTAG', 'COIL-DEL', 'BZR']:
-                # node_features = name in ['Letter-med', 'COIL-DEL']  # features if not node labels (e.g Letter-med (x,y))
-                node_features = name in ['Letter-med', 'COIL-DEL']  # features if not node labels (e.g Letter-med (x,y))
-                dset = TUDataset(path, name=name, use_node_attr=node_features, use_edge_attr=True)
-                # TEST with virtual node
-                # node_features = False if name in ['Letter-med'] else node_features
-                filter_n_nodes = ClassificationGraphDataset.get_filter_size(name)
-                X, A, Y = ClassificationGraphDataset.convert_tud_dataset(dset, node_features,
-                                                                         filter_n_nodes=filter_n_nodes)
+            full_name = f'{name}_p{add_feature}f' if add_feature is not None else name
 
-                if name == 'AIDS':
-                    ordered_labels = ['C', 'O', 'N', 'Cl', 'F', 'S', 'Se', 'P', 'Na', 'I', 'Co', 'Br', 'Li', 'Si', 'Mg',
-                                      'Cu', 'As', 'B', 'Pt', 'Ru', 'K', 'Pd', 'Au', 'Te', 'W', 'Rh', 'Zn', 'Bi', 'Pb',
-                                      'Ge', 'Sb', 'Sn', 'Ga', 'Hg', 'Ho', 'Tl', 'Ni', 'Tb']
-                    label_map = {label: i + 1 for i, label in enumerate(ordered_labels)}
-                elif name == 'MUTAG':
-                    ordered_labels = ['C', 'N', 'O', 'F', 'I', 'Cl', 'Br']
-                    label_map = {label: i + 1 for i, label in enumerate(ordered_labels)}
-                    X, A = ClassificationGraphDataset.clear_aromatic_molecule_bonds_from_dataset(X, A, label_map)
+            exist_dataset = os.path.exists(f'{path}/{full_name}_X.npy') if path is not None else False
+            # dset = TUDataset(path, name='DBLP_v1', use_node_attr=False, use_edge_attr=True)
+
+            # from gklearn.utils.graph_files import load_gxl
+            # import glob
+            # path = f'{path}/Letter/Letter/MED'
+            # files = sorted(glob.glob(f"{path}/*.gxl"))
+            # graphs = []
+            # for i, file in enumerate(files):
+            #     graph = load_gxl(file)
+            #     graphs.append(graph)
+            #
+            #     save_path = f'{path}/test_{i}'
+            #
+            #     G = graph[0]
+            #     e0 = [(u, v) for (u, v, d) in G.edges(data=True)]
+            #
+            #     nodes = [i for i, n in enumerate(G.nodes)]
+            #     nodes_pos = {}
+            #     for i, n in enumerate(G.nodes):
+            #         x = G.nodes[i]['x']
+            #         y = G.nodes[i]['y']
+            #         nodes_pos[i] = (float(x), float(y))
+            #
+            #     options_node = {
+            #         "node_color": "skyblue",
+            #     }
+            #     options_edge = {
+            #         "edge_color": [0 for _ in range(len(e0))],
+            #         "width": 4,
+            #         "edge_cmap": plt.cm.Blues_r,
+            #     }
+            #     # nodes
+            #     nx.draw_networkx_nodes(G, nodes_pos, nodelist=nodes, **options_node)
+            #
+            #     # edges
+            #     nx.draw_networkx_edges(G, nodes_pos, edgelist=e0, **options_edge)
+            #
+            #     plt.axis("off")
+            #     plt.tight_layout()
+            #     plt.savefig(fname=f'{save_path}.png', format='png', dpi=30)
+            #     plt.close()
+
+            if exist_dataset:
+                if name in ['AIDS', 'Letter-med', 'MUTAG', 'COIL-DEL', 'BZR']:
+                    X = np.load(f'{path}/{full_name}_X.npy')
+                    A = np.load(f'{path}/{full_name}_A.npy')
+                    Y = np.load(f'{path}/{full_name}_Y.npy')
+                    dataset = (X, A, Y)
+                    results = (dataset, test_dataset)
+                    if name == 'AIDS':
+                        ordered_labels = ['C', 'O', 'N', 'Cl', 'F', 'S', 'Se', 'P', 'Na', 'I', 'Co', 'Br', 'Li', 'Si',
+                                          'Mg',
+                                          'Cu',
+                                          'As', 'B', 'Pt', 'Ru', 'K', 'Pd', 'Au', 'Te', 'W', 'Rh', 'Zn', 'Bi', 'Pb',
+                                          'Ge',
+                                          'Sb',
+                                          'Sn', 'Ga', 'Hg', 'Ho', 'Tl', 'Ni', 'Tb']
+                        label_map = {label: i + 1 for i, label in enumerate(ordered_labels)}
+                    elif name == 'MUTAG':
+                        ordered_labels = ['C', 'N', 'O', 'F', 'I', 'Cl', 'Br']
+                        label_map = {label: i + 1 for i, label in enumerate(ordered_labels)}
+                    else:
+                        label_map = None
                 else:
-                    label_map = None
-
-                if 'Letter' in name:
-                    # remove 0 adj and graph with unlinked node
-                    bad_graphs = []
-                    for i, adj_mat in enumerate(A):
-                        if adj_mat[:-1].sum() == 0:
-                            bad_graphs.append(i)
-                        else:
-                            for j, feat in enumerate(X[i]):
-                                if feat.sum() != 0 and adj_mat[:-1, j].sum() == 0:
-                                    bad_graphs.append(i)
-                                    break
-
-                    X = np.delete(X, bad_graphs, axis=0)
-                    A = np.delete(A, bad_graphs, axis=0)
-                    Y = np.delete(Y, bad_graphs, axis=0)
+                    assert False, 'unknown dataset'
             else:
-                assert False, 'unknown dataset'
+                if name in ['AIDS', 'Letter-med', 'MUTAG', 'COIL-DEL', 'BZR']:
+                    # node_features = name in ['Letter-med', 'COIL-DEL']  # features if not node labels (e.g Letter-med (x,y))
+                    node_features = name in ['Letter-med',
+                                             'COIL-DEL']  # features if not node labels (e.g Letter-med (x,y))
+                    dset = TUDataset(path, name=name, use_node_attr=node_features, use_edge_attr=True)
+                    # TEST with virtual node
+                    # node_features = False if name in ['Letter-med'] else node_features
+                    filter_n_nodes = ClassificationGraphDataset.get_filter_size(name)
+                    X, A, Y = ClassificationGraphDataset.convert_tud_dataset(dset, node_features,
+                                                                             filter_n_nodes=filter_n_nodes)
 
-            if add_feature is not None and add_feature > 0:
-                # TEST ADD ZERO FEATURES IN X
-                n_X = np.zeros((X.shape[0], X.shape[1], X.shape[-1] + add_feature))
-                n_X[:, :, :-add_feature] = X
-                X = n_X
+                    if name == 'AIDS':
+                        ordered_labels = ['C', 'O', 'N', 'Cl', 'F', 'S', 'Se', 'P', 'Na', 'I', 'Co', 'Br', 'Li', 'Si',
+                                          'Mg',
+                                          'Cu', 'As', 'B', 'Pt', 'Ru', 'K', 'Pd', 'Au', 'Te', 'W', 'Rh', 'Zn', 'Bi',
+                                          'Pb',
+                                          'Ge', 'Sb', 'Sn', 'Ga', 'Hg', 'Ho', 'Tl', 'Ni', 'Tb']
+                        label_map = {label: i + 1 for i, label in enumerate(ordered_labels)}
+                    elif name == 'MUTAG':
+                        ordered_labels = ['C', 'N', 'O', 'F', 'I', 'Cl', 'Br']
+                        label_map = {label: i + 1 for i, label in enumerate(ordered_labels)}
+                        X, A = ClassificationGraphDataset.clear_aromatic_molecule_bonds_from_dataset(X, A, label_map)
+                    else:
+                        label_map = None
 
-            results = ((X, A, Y), test_dataset)
+                    if 'Letter' in name:
+                        # remove 0 adj and graph with unlinked node
+                        bad_graphs = []
+                        for i, adj_mat in enumerate(A):
+                            if adj_mat[:-1].sum() == 0:
+                                bad_graphs.append(i)
+                            else:
+                                for j, feat in enumerate(X[i]):
+                                    if feat.sum() != 0 and adj_mat[:-1, j].sum() == 0:
+                                        bad_graphs.append(i)
+                                        break
 
-            np.save(f'{path}/{full_name}_X.npy', X)
-            np.save(f'{path}/{full_name}_A.npy', A)
-            np.save(f'{path}/{full_name}_Y.npy', Y)
+                        X = np.delete(X, bad_graphs, axis=0)
+                        A = np.delete(A, bad_graphs, axis=0)
+                        Y = np.delete(Y, bad_graphs, axis=0)
+                else:
+                    assert False, 'unknown dataset'
+
+                # if add_feature is not None and add_feature > 0:
+                #     # TEST ADD ZERO FEATURES IN X
+                #     n_X = np.zeros((X.shape[0], X.shape[1], X.shape[-1] + add_feature))
+                #     n_X[:, :, :-add_feature] = X
+                #     X = n_X
+
+                results = ((X, A, Y), test_dataset)
+
+                np.save(f'{path}/{full_name}_X.npy', X)
+                np.save(f'{path}/{full_name}_A.npy', A)
+                np.save(f'{path}/{full_name}_Y.npy', Y)
 
         return results, label_map
 

@@ -56,6 +56,8 @@ def get_atoms_adj_from_mol(mol, max_num_nodes, label_map, categorical_adj=False,
             if categorical_adj:
                 adj[atom_idx, neig_idx] = bond_types[bond_type]
             else:
+                if neig_idx >= adj.shape[-1] or atom_idx >= adj.shape[-1]:
+                    print('wtf')
                 adj[bond_types[bond_type]][atom_idx, neig_idx] = 1
                 adj[bond_types[bond_type]][neig_idx, atom_idx] = 1
                 # remove from the no-bond channel
@@ -130,9 +132,11 @@ def filter_datasets_with_n_atoms(datasets, filter_n_atom, filter_mol_with_H=True
     res_mols = [[], [], []]
     res_ys = [[], [], []]
     max_n_atom = 0
+    mols_n_atom = []
     for k, (dset_mols, ys) in enumerate(datasets):
         for i, mol in enumerate(dset_mols):
             n_atom = mol.GetNumAtoms()
+            mols_n_atom.append(n_atom)
             if n_atom <= filter_n_atom:
                 if n_atom > max_n_atom:
                     max_n_atom = n_atom
@@ -182,8 +186,6 @@ def get_molecular_dataset_mp(name='qm7', data_path=None, categorical_values=Fals
                                                                                                 data_dir=data_path,
                                                                                                 save_dir=data_path)
         dupe_filter = True
-        label_map = {'C': 1, 'O': 2, 'N': 3, 'F': 4}
-        max_num_nodes = 9
 
         train_y = train_dataset.y
         val_y = valid_dataset.y
@@ -191,6 +193,14 @@ def get_molecular_dataset_mp(name='qm7', data_path=None, categorical_values=Fals
         train_mols = train_dataset.X
         val_mols = valid_dataset.X
         test_mols = test_dataset.X
+
+        filter_n_atom = 35
+        res_mols, res_ys, label_map, max_num_nodes = filter_datasets_with_n_atoms(
+            datasets=[(train_mols, train_y), (test_mols, test_y), (val_mols, val_y)],
+            filter_n_atom=filter_n_atom)
+
+        train_mols, test_mols, val_mols = res_mols
+        train_y, test_y, val_y = res_ys
     elif 'freesolv' in name:
         tasks, (train_dataset, valid_dataset, test_dataset), transformers = dc.molnet.load_freesolv(featurizer='Raw',
                                                                                                     data_dir=data_path,
@@ -205,7 +215,7 @@ def get_molecular_dataset_mp(name='qm7', data_path=None, categorical_values=Fals
         test_mols = test_dataset.X
 
         # filter_n_atom = 200 # no filtering
-        filter_n_atom = 22 # no filtering
+        filter_n_atom = 22  # no filtering
         res_mols, res_ys, label_map, max_num_nodes = filter_datasets_with_n_atoms(
             datasets=[(train_mols, train_y), (test_mols, test_y), (val_mols, val_y)],
             filter_n_atom=filter_n_atom)
@@ -258,9 +268,27 @@ def get_molecular_dataset_mp(name='qm7', data_path=None, categorical_values=Fals
             filter_n_atom=filter_n_atom)
 
         train_mols, test_mols, val_mols = res_mols
+    elif 'BACE' in name:
+        tasks, (train_dataset, valid_dataset, test_dataset), transformers = dc.molnet.load_bace_classification(
+            featurizer='Raw', data_dir=data_path, save_dir=data_path)
+        dupe_filter = True
+
+        train_y = train_dataset.y
+        val_y = valid_dataset.y
+        test_y = test_dataset.y
+        train_mols = train_dataset.X
+        val_mols = valid_dataset.X
+        test_mols = test_dataset.X
+
+        filter_n_atom = 50
+        res_mols, res_ys, label_map, max_num_nodes = filter_datasets_with_n_atoms(
+            datasets=[(train_mols, train_y), (test_mols, test_y), (val_mols, val_y)],
+            filter_n_atom=filter_n_atom)
+
+        train_mols, test_mols, val_mols = res_mols
+        train_y, test_y, val_y = res_ys
     else:
         assert False, 'unknown dataset'
-    return_smiles = True
     # all_mol = np.concatenate((train_dataset.X, valid_dataset.X, test_dataset.X), axis=0)
     # all_y = np.concatenate((train_dataset.y, valid_dataset.y, test_dataset.y), axis=0).astype(np.float)
 
@@ -286,7 +314,8 @@ def process_mols(name, train_data, test_data, max_num_nodes, lmap, dupe_filter, 
         # pool.close()
         # returns = list(itertools.chain.from_iterable(returns))
 
-        returns = multiprocessing_func((list(zip(mols, y)), 0, max_num_nodes, lmap, name, categorical_values, return_smiles))
+        returns = multiprocessing_func(
+            (list(zip(mols, y)), 0, max_num_nodes, lmap, name, categorical_values, return_smiles))
 
         returns = list(filter(None, returns))
 
