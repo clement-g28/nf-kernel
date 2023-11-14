@@ -683,7 +683,7 @@ def main(args):
     train_idx_path = f'./train_idx.npy'
     val_idx_path = f'./val_idx.npy'
     train_dataset, val_dataset = load_split_dataset(dataset, train_idx_path, val_idx_path,
-                                                    reselect_val_idx=args.reselect_val_idx)
+                                                    reselect_val_idx=args.reselect_val_idx, split_type='val')
 
     # reduce train dataset size (fitting too long)
     if args.reduce_test_dataset_size is not None:

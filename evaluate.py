@@ -2736,9 +2736,9 @@ def main(args):
 
     # Load the splits of the dataset used in the training phase
     train_idx_path = f'{args.folder}/train_idx.npy'
-    val_idx_path = f'{args.folder}/val_idx.npy'
-    train_dataset, val_dataset = load_split_dataset(dataset, train_idx_path, val_idx_path,
-                                                    reselect_val_idx=args.reselect_val_idx)
+    test_idx_path = f'{args.folder}/test_idx.npy'
+    train_dataset, test_dataset = load_split_dataset(dataset, train_idx_path, test_idx_path,
+                                                     reselect_val_idx=args.reselect_val_idx, split_type='test')
 
     # reduce train dataset size (fitting too long)
     if args.reduce_test_dataset_size is not None:
@@ -2833,7 +2833,7 @@ def main(args):
     # evaluate_graph_permutation(model, train_dataset, val_dataset, save_dir, device, batch_size=batch_size)
     batch_size = args.batch_size
     eval_type = args.eval_type
-    launch_evaluation(eval_type, dataset_name, model, gaussian_params, train_dataset, val_dataset, save_dir, device,
+    launch_evaluation(eval_type, dataset_name, model, gaussian_params, train_dataset, test_dataset, save_dir, device,
                       batch_size, n_permutation_test=args.n_permutation_test)
 
 

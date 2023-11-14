@@ -283,6 +283,9 @@ def train(args, config, train_dataset, val_dataset, test_dataset, save_dir, is_r
     if val_dataset is not None:
         path = os.path.join(save_dir, "val_idx")
         val_dataset.save_split(path)
+    if test_dataset is not None:
+        path = os.path.join(save_dir, "test_idx")
+        test_dataset.save_split(path)
 
     if not is_raytuning and args.use_tb:
         from torch.utils.tensorboard import SummaryWriter

@@ -401,7 +401,7 @@ def load_model_from_params(model_loading_params, dataset):
     return model_single
 
 
-def load_split_dataset(dataset, train_idx_path, val_idx_path, reselect_val_idx=None):
+def load_split_dataset(dataset, train_idx_path, val_idx_path, reselect_val_idx=None, split_type=None):
     if os.path.exists(train_idx_path):
         print('Loading train idx...')
         train_dataset = dataset.duplicate()
@@ -425,5 +425,5 @@ def load_split_dataset(dataset, train_idx_path, val_idx_path, reselect_val_idx=N
         val_dataset.load_split(val_idx_path)
     else:
         print('No val idx found, searching for test dataset...')
-        train_dataset, val_dataset = dataset.split_dataset(0)
+        train_dataset, val_dataset = dataset.split_dataset(0, split_type=split_type)
     return train_dataset, val_dataset
