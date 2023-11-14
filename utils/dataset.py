@@ -30,7 +30,7 @@ GRAPH_CLASSIFICATION_DATASETS = ['toxcast', 'AIDS', 'Letter-med', 'MUTAG', 'COIL
 
 # abstract base kernel dataset class
 class BaseDataset(Dataset):
-    def __init__(self, X, true_labels, test_dataset=None, add_feature=None):
+    def __init__(self, X, true_labels, val_dataset=None, test_dataset=None, add_feature=None):
         self.ori_X = X
         self.ori_true_labels = true_labels
         self.X = X
@@ -40,6 +40,7 @@ class BaseDataset(Dataset):
 
         self.reduce_type = 'all'
 
+        self.val_dataset = val_dataset
         self.test_dataset = test_dataset
 
         self.in_size = -1
@@ -49,13 +50,31 @@ class BaseDataset(Dataset):
     def __len__(self):
         return len(self.X)
 
-    def get_flattened_X(self):
-        return self.X.reshape(self.X.shape[0], -1)
+    def get_flattened_X(self, with_added_features=False):
+        x = self.X.reshape(self.X.shape[0], -1)
+        if with_added_features and self.add_feature is not None and self.add_feature > 0:
+            x_shape = [sh for sh in x.shape]
+            x_shape[-1] = x_shape[-1] + self.add_feature
+            n_X = np.zeros(tuple(x_shape))
+            n_X[:, :-self.add_feature] = x
+            x = n_X
+        return x
 
     def get_n_dim(self, add_feature=None):
-        n_dim = self.X[0].shape[0]
-        for sh in self.X[0].shape[1:]:
-            n_dim *= sh
+        x = self.X[0]
+        n_dim = x.shape[0]
+        for i in range(len(x.shape[1:])):
+            sh = x.shape[i + 1]
+            if i + 1 == len(x.shape[1:]):
+                if add_feature is not None:
+                    n_dim *= (sh + add_feature)
+                elif self.add_feature is not None:
+                    n_dim *= (sh + self.add_feature)
+                else:
+                    n_dim *= sh
+            else:
+                n_dim *= sh
+
         return n_dim
 
     def get_dim_per_label(self, add_feature=None, return_total_dim=False):
@@ -154,17 +173,28 @@ class BaseDataset(Dataset):
         self.X = n_X
         self.true_labels = n_true_labels
 
-    def split_dataset(self, validation, stratified=False):
-        val_dataset = copy.deepcopy(self)
-        train_dataset = copy.deepcopy(self)
-        if self.test_dataset is not None:
+    def split_dataset(self, ratio, stratified=False, split_type=None):
+        # split_type -> select between (None, 'val', 'test')
+        part2_dataset = copy.deepcopy(self)
+        part1_dataset = copy.deepcopy(self)
+        if split_type == 'test' and self.test_dataset is not None:
             print('Test dataset known, split using the test dataset...')
-            val_dataset.X = self.test_dataset[0]
-            val_dataset.true_labels = self.test_dataset[1]
-            val_dataset.test_dataset = None
-            val_dataset.idx = None
+            part2_dataset.X = self.test_dataset[0]
+            part2_dataset.true_labels = self.test_dataset[1]
+            part2_dataset.val_dataset = None
+            part2_dataset.test_dataset = None
+            part2_dataset.idx = None
 
-            train_dataset.test_dataset = None
+            part1_dataset.test_dataset = None
+        elif split_type == 'val' and self.val_dataset is not None:
+            print('Val dataset known, split using the val dataset...')
+            part2_dataset.X = self.val_dataset[0]
+            part2_dataset.true_labels = self.val_dataset[1]
+            part2_dataset.val_dataset = None
+            part2_dataset.test_dataset = None
+            part2_dataset.idx = None
+
+            part1_dataset.val_dataset = None
         else:
             if stratified:
                 if self.is_regression_dataset():
@@ -176,30 +206,30 @@ class BaseDataset(Dataset):
                 done = 0
                 val_idx = []
                 for i in range(len(class_sample_count)):
-                    nb_idx = math.floor(class_sample_count[i] * validation)
+                    nb_idx = math.floor(class_sample_count[i] * ratio)
                     if nb_idx == 0 and class_sample_count[i] > 1:
                         nb_idx = 1
                     val_idx += random.sample(list(idxs[done:done + class_sample_count[i]]), k=nb_idx)
                     done += class_sample_count[i]
 
             else:
-                val_idx = random.sample(range(0, self.X.shape[0]), k=math.floor(self.X.shape[0] * validation))
+                val_idx = random.sample(range(0, self.X.shape[0]), k=math.floor(self.X.shape[0] * ratio))
 
-            val_dataset.X = self.X[val_idx]
+            part2_dataset.X = self.X[val_idx]
             train_idx = [idx for idx in range(self.X.shape[0]) if idx not in val_idx]
-            train_dataset.X = self.X[train_idx]
-            val_dataset.true_labels = self.true_labels[val_idx]
+            part1_dataset.X = self.X[train_idx]
+            part2_dataset.true_labels = self.true_labels[val_idx]
 
-            train_dataset.true_labels = self.true_labels[train_idx]
+            part1_dataset.true_labels = self.true_labels[train_idx]
 
             if self.idx is None:
-                val_dataset.idx = val_idx
-                train_dataset.idx = train_idx
+                part2_dataset.idx = val_idx
+                part1_dataset.idx = train_idx
             else:
-                val_dataset.idx = self.idx[val_idx]
-                train_dataset.idx = self.idx[train_idx]
+                part2_dataset.idx = self.idx[val_idx]
+                part1_dataset.idx = self.idx[train_idx]
 
-        return train_dataset, val_dataset
+        return part1_dataset, part2_dataset
 
     def reduce_dataset_ratio(self, ratio, stratified=True):
         if stratified:
@@ -256,8 +286,9 @@ class SimpleDataset(BaseDataset):
         self.label_type = np.int if self.dataset_name not in SIMPLE_REGRESSION_DATASETS else np.float
         # self.label_type = np.int
         self.transform = transform
-        ori_X, ori_true_labels, test_dataset = self.load_dataset(dataset_name, add_feature=add_feature)
-        super().__init__(ori_X, ori_true_labels, test_dataset, add_feature=add_feature)
+        # ori_X, ori_true_labels, test_dataset = self.load_dataset(dataset_name, add_feature=add_feature)
+        ori_X, ori_true_labels, val_dataset, test_dataset = self.load_dataset(dataset_name)
+        super().__init__(ori_X, ori_true_labels, val_dataset, test_dataset, add_feature=add_feature)
 
         self.in_size = ori_X.shape[-1]
 
@@ -300,9 +331,11 @@ class SimpleDataset(BaseDataset):
         return self.reduce_dataset(reduce_type, label, how_many, reduce_from_ori)
 
     @staticmethod
-    def load_dataset(name, add_feature=None):
+    # def load_dataset(name, add_feature=None):
+    def load_dataset(name):
         path = './datasets'
         exist_dataset = os.path.exists(f'{path}/{name}_data.npy') if path is not None else False
+        val_dataset = None
         test_dataset = None
         fulldata = True
         name_c = name
@@ -313,7 +346,7 @@ class SimpleDataset(BaseDataset):
             n_data = int(n_train_data / 0.9)
             X = np.random.random((n_data, n_features))
             labels = (np.random.random(n_data) * 2).astype(np.int)
-            return X, labels, test_dataset
+            return X, labels, val_dataset, test_dataset
 
         if fulldata and name in ['aquatoxi', 'fishtoxi']:
             name_c = f'{name}_fulldata'
@@ -525,23 +558,34 @@ class SimpleDataset(BaseDataset):
             np.save(f'{path}/{name}_data.npy', X)
             np.save(f'{path}/{name}_labels.npy', labels)
 
-        if add_feature is not None:
-            # TEST ADD ZERO FEATURES IN X
-            n_X = np.zeros((X.shape[0], X.shape[-1] + add_feature))
-            n_X[:, :-add_feature] = X
-            X = n_X
+        # if add_feature is not None:
+        #     # TEST ADD ZERO FEATURES IN X
+        #     n_X = np.zeros((X.shape[0], X.shape[-1] + add_feature))
+        #     n_X[:, :-add_feature] = X
+        #     X = n_X
+        #
+        #     if test_dataset is not None:
+        #         X_test = test_dataset[0]
+        #         n_X = np.zeros((X_test.shape[0], X_test.shape[-1] + add_feature))
+        #         n_X[:, :-add_feature] = X_test
+        #         X_test = n_X
+        #         test_dataset = (X_test, test_dataset[1])
 
-            if test_dataset is not None:
-                X_test = test_dataset[0]
-                n_X = np.zeros((X_test.shape[0], X_test.shape[-1] + add_feature))
-                n_X[:, :-add_feature] = X_test
-                X_test = n_X
-                test_dataset = (X_test, test_dataset[1])
+        return X, labels, val_dataset, test_dataset
 
-        return X, labels, test_dataset
-
-    def format_data(self, input, device):
-        return input.float().to(device)
+    def format_data(self, input, device, add_feature=None, force_no_added_feature=False):
+        x_shape = input.shape
+        if not force_no_added_feature:
+            if add_feature is not None and add_feature > 0:
+                n_X = torch.zeros(x_shape[0], x_shape[-1] + add_feature)
+                n_X[:, :-add_feature] = input
+                input = n_X
+            elif self.add_feature is not None and self.add_feature > 0:
+                n_X = torch.zeros(x_shape[0], x_shape[-1] + self.add_feature)
+                n_X[:, :-self.add_feature] = input
+                input = n_X
+        input = input.float().to(device)
+        return input
 
     def format_loss(self, log_p, logdet):
         loss = logdet + log_p
@@ -557,9 +601,9 @@ class SimpleDataset(BaseDataset):
 
 
 class ImDataset(BaseDataset):
-    def __init__(self, dataset_name, transform=None, noise_transform=None, n_bits=5):
+    def __init__(self, dataset_name, transform=None, noise_transform=None, n_bits=5, add_feature=None):
         self.dataset_name = dataset_name
-        train_dataset, test_dataset = ImDataset.load_dataset(dataset_name, transform)
+        train_dataset, val_dataset, test_dataset = ImDataset.load_dataset(dataset_name, transform)
         self.transform = train_dataset.transform
         if self.transform is not None:
             for tr in self.transform.transforms:
@@ -570,31 +614,26 @@ class ImDataset(BaseDataset):
         if not hasattr(self, 'norm_mean'):
             self.rescale = self.rescale_val_to_im_without_norm
 
-        if test_dataset is not None:
+        def get_X_y_from_dset(dataset):
             if isinstance(train_dataset.data, np.ndarray):
-                ori_X = train_dataset.data
-                test_ori_X = test_dataset.data
+                X = train_dataset.data
             else:
-                ori_X = train_dataset.data.numpy()
-                test_ori_X = test_dataset.data.numpy()
+                X = train_dataset.data.numpy()
             if isinstance(train_dataset.targets, np.ndarray):
-                ori_true_labels = train_dataset.targets
-                test_true_labels = test_dataset.targets
+                true_labels = train_dataset.targets
             else:
-                ori_true_labels = np.array(train_dataset.targets)
-                test_true_labels = np.array(test_dataset.targets)
-            test_dataset = (test_ori_X, test_true_labels)
-        else:
-            if isinstance(train_dataset.data, np.ndarray):
-                ori_X = train_dataset.data
-            else:
-                ori_X = train_dataset.data.numpy()
-            if isinstance(train_dataset.targets, np.ndarray):
-                ori_true_labels = train_dataset.targets
-            else:
-                ori_true_labels = np.array(train_dataset.targets)
+                true_labels = np.array(train_dataset.targets)
+            return X, true_labels
 
-        super().__init__(ori_X, ori_true_labels, test_dataset)
+        ori_X, ori_true_labels = get_X_y_from_dset(train_dataset)
+        if test_dataset is not None:
+            test_ori_X, test_true_labels = get_X_y_from_dset(test_dataset)
+            test_dataset = (test_ori_X, test_true_labels)
+        if val_dataset is not None:
+            val_ori_X, val_true_labels = get_X_y_from_dset(val_dataset)
+            val_dataset = (val_ori_X, val_true_labels)
+
+        super().__init__(ori_X, ori_true_labels, val_dataset, test_dataset, add_feature)
         print('Z and K are not initialized in constructor')
 
         # test with denoise loss
@@ -644,7 +683,7 @@ class ImDataset(BaseDataset):
         else:
             return img, target
 
-    def format_data(self, input, device):
+    def format_data(self, input, device, add_feature=None, force_no_added_feature=False):
         input = input * 255
 
         if self.n_bits < 8:
@@ -652,6 +691,17 @@ class ImDataset(BaseDataset):
 
         input = input / self.n_bins - 0.5
         input = input + torch.rand_like(input) / self.n_bins
+
+        x_shape = input.shape
+        if not force_no_added_feature:
+            if add_feature is not None and add_feature > 0:
+                n_X = torch.zeros(x_shape[0], x_shape[1], x_shape[-1] + add_feature)
+                n_X[:, :, :-add_feature] = input
+                input = n_X
+            elif self.add_feature is not None and self.add_feature > 0:
+                n_X = torch.zeros(x_shape[0], x_shape[1], x_shape[-1] + self.add_feature)
+                n_X[:, :, :-self.add_feature] = input
+                input = n_X
         input = input.to(device)
         return input
 
@@ -678,6 +728,7 @@ class ImDataset(BaseDataset):
     @staticmethod
     def load_dataset(name, transform=None):
         test_dataset = None
+        val_dataset = None
 
         class WrappedDataset:
             def __init__(self, X, labels, transform):
@@ -697,7 +748,7 @@ class ImDataset(BaseDataset):
             X = np.random.random((n_data, 1, n_features_dim, n_features_dim))
             labels = (np.random.random(n_data) * 2).astype(np.int)
             train_dataset = WrappedDataset(X, labels, transform)
-            return train_dataset, test_dataset
+            return train_dataset, val_dataset, test_dataset
 
         if name == 'mnist':
             if transform is None:
@@ -761,7 +812,7 @@ class ImDataset(BaseDataset):
         else:
             assert False, 'unknown dataset'
 
-        return train_dataset, test_dataset
+        return train_dataset, val_dataset, test_dataset
 
     def is_regression_dataset(self):
         return self.dataset_name in SIMPLE_REGRESSION_DATASETS
@@ -800,7 +851,8 @@ class GraphDataset(BaseDataset):
         self.dataset_name = dataset_name
         # self.label_type = np.int if self.dataset_name not in REGRESSION_DATASETS else np.float
 
-        (train_dataset, test_dataset), self.label_map = self.load_dataset(dataset_name)  # , add_feature=add_feature)
+        (train_dataset, val_dataset, test_dataset), self.label_map = self.load_dataset(
+            dataset_name)  # , add_feature=add_feature)
         if len(train_dataset) == 3:
             xs, adjs, y = train_dataset
         else:
@@ -808,14 +860,18 @@ class GraphDataset(BaseDataset):
 
         y = np.array(y).squeeze() if self.is_regression_dataset() else np.array(y).astype(np.int).squeeze()
 
-        if test_dataset is not None:
-            if len(train_dataset) == 3:
-                xs_test, adjs_test, y_test = test_dataset
+        def format_dset(dataset):
+            if len(dataset) == 3:
+                xs, adjs, y = dataset
             else:
-                xs_test, adjs_test, self.smiles_test, y_test = test_dataset
-            y_test = np.array(y_test).squeeze() if self.is_regression_dataset() else np.array(y_test).astype(
-                np.int).squeeze()
-            test_dataset = (list(zip(xs_test, adjs_test)), np.array(y_test).squeeze())
+                xs, adjs, smiles, y = dataset
+            y = np.array(y).squeeze() if self.is_regression_dataset() else np.array(y).astype(np.int).squeeze()
+            return list(zip(xs, adjs)), np.array(y).squeeze()
+
+        if test_dataset is not None:
+            test_dataset = format_dset(test_dataset)
+        if val_dataset is not None:
+            val_dataset = format_dset(val_dataset)
 
         self.transform = transform_graph_permutation if transform == 'permutation' else None
         if self.label_map is not None:
@@ -828,7 +884,7 @@ class GraphDataset(BaseDataset):
         # Graphs for tests
         self.define_networkx_labels()
 
-        super().__init__(graphs, y, test_dataset, add_feature=add_feature)
+        super().__init__(graphs, y, val_dataset, test_dataset, add_feature=add_feature)
         # self.Gn = self.init_graphs_mp()
 
         # if self.is_regression_dataset():
@@ -858,17 +914,28 @@ class GraphDataset(BaseDataset):
         raise NotImplementedError
 
     # overwrite
-    def split_dataset(self, validation, stratified=False):
-        val_dataset = copy.deepcopy(self)
-        train_dataset = copy.deepcopy(self)
-        if self.test_dataset is not None:
+    def split_dataset(self, ratio, stratified=False, split_type=None):
+        # split_type -> select between (None, 'val', 'test')
+        part2_dataset = copy.deepcopy(self)
+        part1_dataset = copy.deepcopy(self)
+        if split_type == 'test' and self.test_dataset is not None:
             print('Test dataset known, split using the test dataset...')
-            val_dataset.X = self.test_dataset[0]
-            val_dataset.true_labels = self.test_dataset[1]
-            val_dataset.test_dataset = None
-            val_dataset.idx = None
+            part2_dataset.X = self.test_dataset[0]
+            part2_dataset.true_labels = self.test_dataset[1]
+            part2_dataset.val_dataset = None
+            part2_dataset.test_dataset = None
+            part2_dataset.idx = None
 
-            train_dataset.test_dataset = None
+            part1_dataset.test_dataset = None
+        elif split_type == 'val' and self.val_dataset is not None:
+            print('Val dataset known, split using the val dataset...')
+            part2_dataset.X = self.val_dataset[0]
+            part2_dataset.true_labels = self.val_dataset[1]
+            part2_dataset.val_dataset = None
+            part2_dataset.test_dataset = None
+            part2_dataset.idx = None
+
+            part1_dataset.val_dataset = None
         else:
             if stratified:
                 if self.is_regression_dataset():
@@ -880,13 +947,13 @@ class GraphDataset(BaseDataset):
                 done = 0
                 val_idx = []
                 for i in range(len(class_sample_count)):
-                    nb_idx = math.floor(class_sample_count[i] * validation)
+                    nb_idx = math.floor(class_sample_count[i] * ratio)
                     if nb_idx == 0 and class_sample_count[i] > 1:
                         nb_idx = 1
                     val_idx += random.sample(list(idxs[done:done + class_sample_count[i]]), k=nb_idx)
                     done += class_sample_count[i]
             else:
-                val_idx = random.sample(range(0, len(self.X)), k=math.floor(len(self.X) * validation))
+                val_idx = random.sample(range(0, len(self.X)), k=math.floor(len(self.X) * ratio))
 
             train_idx = [idx for idx in range(len(self.X)) if idx not in val_idx]
             x, adj = list(zip(*self.X))
@@ -897,25 +964,25 @@ class GraphDataset(BaseDataset):
             val_X = []
             for i in range(len(val_idx)):
                 val_X.append((val_x[i], val_adj[i]))
-            val_dataset.X = val_X
+            part2_dataset.X = val_X
             train_x = x[train_idx]
             train_adj = adj[train_idx]
             train_X = []
             for i in range(len(train_idx)):
                 train_X.append((train_x[i], train_adj[i]))
-            train_dataset.X = train_X
+            part1_dataset.X = train_X
 
-            val_dataset.true_labels = self.true_labels[val_idx]
-            train_dataset.true_labels = self.true_labels[train_idx]
+            part2_dataset.true_labels = self.true_labels[val_idx]
+            part1_dataset.true_labels = self.true_labels[train_idx]
 
             if self.idx is None:
-                val_dataset.idx = val_idx
-                train_dataset.idx = train_idx
+                part2_dataset.idx = val_idx
+                part1_dataset.idx = train_idx
             else:
-                val_dataset.idx = self.idx[val_idx]
-                train_dataset.idx = self.idx[train_idx]
+                part2_dataset.idx = self.idx[val_idx]
+                part1_dataset.idx = self.idx[train_idx]
 
-        return train_dataset, val_dataset
+        return part1_dataset, part2_dataset
 
     # overwrite
     def reduce_dataset_ratio(self, ratio, stratified=True):
@@ -995,6 +1062,8 @@ class GraphDataset(BaseDataset):
                     n_x *= (sh + self.add_feature)
                 else:
                     n_x *= sh
+            else:
+                n_x *= sh
         n_adj = adj.shape[0]
         for sh in adj.shape[1:]:
             n_adj *= sh
@@ -1269,11 +1338,12 @@ class GraphDataset(BaseDataset):
     def rescale(x):
         return x
 
-    def get_dataset_params(self):
+    def get_dataset_params(self, add_feature=None):
         raise NotImplementedError
 
     @staticmethod
-    def load_dataset(name, add_feature=None):
+    # def load_dataset(name, add_feature=None):
+    def load_dataset(name):
         raise NotImplementedError
 
     def is_regression_dataset(self):
@@ -1337,7 +1407,8 @@ class RegressionGraphDataset(GraphDataset):
         return result
 
     @staticmethod
-    def load_dataset(name, add_feature=None):
+    # def load_dataset(name, add_feature=None):
+    def load_dataset(name):
         path = './datasets'
 
         if name in ['qm7', 'qm9', 'freesolv', 'esol', 'lipo']:
@@ -1394,10 +1465,12 @@ class RegressionGraphDataset(GraphDataset):
                         if symbol not in label_map:
                             label_map[symbol] = len(label_map) + 1
 
-                results, label_map = process_mols(name, (mols, n_labels), (mols_test, n_y_test), max(n_atoms),
-                                                  label_map,
+                datas = ((mols, n_labels), (mols_test, n_y_test))
+                results, label_map = process_mols(name, datas, max(n_atoms), label_map,
                                                   dupe_filter=False, categorical_values=False,
                                                   return_smiles=False)
+
+                results = (results[0], None, results[1])  # no val dataset
 
                 # test_dataset = (X_test, y_test)
                 # np.save(f'{path}/{name}_testdata.npy', X_test)
@@ -1573,13 +1646,16 @@ class ClassificationGraphDataset(GraphDataset):
         return n_X, n_A
 
     @staticmethod
-    def load_dataset(name, add_feature=None):
+    # def load_dataset(name, add_feature=None):
+    def load_dataset(name):
         path = './datasets'
+        test_dataset = None
+        val_dataset = None
 
         if name in ['toxcast', 'BACE']:
             results, label_map = get_molecular_dataset_mp(name=name, data_path=path, return_smiles=False)
 
-            ((X, A, Y), test_dataset) = results
+            # ((X, A, Y), val_dataset, test_dataset) = results
 
             # TO TEST DATASETS
             # tasks, (train_dataset, valid_dataset, test_dataset), transformers = dc.molnet.load_toxcast(featurizer='Raw')
@@ -1592,9 +1668,8 @@ class ClassificationGraphDataset(GraphDataset):
             #             label_map[atom.GetSymbol()] = len(label_map) + 1
             # hist = np.histogram(n_atoms, bins=range(0, max(n_atoms) + 1))
         else:
-            test_dataset = None
-
-            full_name = f'{name}_p{add_feature}f' if add_feature is not None else name
+            # full_name = f'{name}_p{add_feature}f' if add_feature is not None else name
+            full_name = name
 
             exist_dataset = os.path.exists(f'{path}/{full_name}_X.npy') if path is not None else False
             # dset = TUDataset(path, name='DBLP_v1', use_node_attr=False, use_edge_attr=True)
@@ -1645,15 +1720,11 @@ class ClassificationGraphDataset(GraphDataset):
                     A = np.load(f'{path}/{full_name}_A.npy')
                     Y = np.load(f'{path}/{full_name}_Y.npy')
                     dataset = (X, A, Y)
-                    results = (dataset, test_dataset)
+                    results = (dataset, val_dataset, test_dataset)
                     if name == 'AIDS':
                         ordered_labels = ['C', 'O', 'N', 'Cl', 'F', 'S', 'Se', 'P', 'Na', 'I', 'Co', 'Br', 'Li', 'Si',
-                                          'Mg',
-                                          'Cu',
-                                          'As', 'B', 'Pt', 'Ru', 'K', 'Pd', 'Au', 'Te', 'W', 'Rh', 'Zn', 'Bi', 'Pb',
-                                          'Ge',
-                                          'Sb',
-                                          'Sn', 'Ga', 'Hg', 'Ho', 'Tl', 'Ni', 'Tb']
+                                          'Mg', 'Cu', 'As', 'B', 'Pt', 'Ru', 'K', 'Pd', 'Au', 'Te', 'W', 'Rh', 'Zn',
+                                          'Bi', 'Pb', 'Ge', 'Sb', 'Sn', 'Ga', 'Hg', 'Ho', 'Tl', 'Ni', 'Tb']
                         label_map = {label: i + 1 for i, label in enumerate(ordered_labels)}
                     elif name == 'MUTAG':
                         ordered_labels = ['C', 'N', 'O', 'F', 'I', 'Cl', 'Br']
@@ -1712,7 +1783,7 @@ class ClassificationGraphDataset(GraphDataset):
                 #     n_X[:, :, :-add_feature] = X
                 #     X = n_X
 
-                results = ((X, A, Y), test_dataset)
+                results = ((X, A, Y), val_dataset, test_dataset)
 
                 np.save(f'{path}/{full_name}_X.npy', X)
                 np.save(f'{path}/{full_name}_A.npy', A)

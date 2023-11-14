@@ -292,19 +292,22 @@ def get_molecular_dataset_mp(name='qm7', data_path=None, categorical_values=Fals
     # all_mol = np.concatenate((train_dataset.X, valid_dataset.X, test_dataset.X), axis=0)
     # all_y = np.concatenate((train_dataset.y, valid_dataset.y, test_dataset.y), axis=0).astype(np.float)
 
-    train_data = (np.concatenate((train_mols, val_mols), axis=0),
-                  np.concatenate((train_y, val_y), axis=0))
+    # train_data = (np.concatenate((train_mols, val_mols), axis=0),
+    #               np.concatenate((train_y, val_y), axis=0))
+    train_data = (train_mols, train_y)
+    val_data = (val_mols, val_y)
     test_data = (test_mols, test_y)
-    results, _ = process_mols(name, train_data, test_data, max_num_nodes, label_map, dupe_filter,
+    datas = (train_data, val_data, test_data)
+    results, _ = process_mols(name, datas, max_num_nodes, label_map, dupe_filter,
                               categorical_values, return_smiles)
 
     return results, label_map
 
 
-def process_mols(name, train_data, test_data, max_num_nodes, lmap, dupe_filter, categorical_values=False,
+def process_mols(name, datas, max_num_nodes, lmap, dupe_filter, categorical_values=False,
                  return_smiles=False):
     results = []
-    for mols, y in (train_data, test_data):
+    for mols, y in datas:
 
         # pool = multiprocessing.Pool()
         # returns = pool.map(multiprocessing_func,

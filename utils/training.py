@@ -217,7 +217,8 @@ def training_arguments(optimize_training=False):
     parser.add_argument("--with_noise", type=float, default=None, help="add noise to input as learning")
 
     # Dataset arguments
-    parser.add_argument("--validation", default=0.02, type=float, help="validation rate")
+    parser.add_argument("--validation", default=0.1, type=float, help="validation data rate")
+    parser.add_argument("--test", default=0.1, type=float, help="test data rate")
 
     parser.add_argument("--unique_label", default=None, type=int, help="set if reducing dataset to one label only")
     parser.add_argument("--reduce_class_size", default=None, type=int,

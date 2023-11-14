@@ -65,6 +65,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 args = None
 train_dataset_id = None
 val_dataset_id = None
+test_dataset_id = None
 dim_per_label = None
 
 
@@ -76,13 +77,18 @@ def get_val_dataset():
     return ray.get(val_dataset_id)
 
 
+def get_test_dataset():
+    return ray.get(test_dataset_id)
+
+
 def train_opti(config):
     train_dataset = get_train_dataset()
     val_dataset = get_val_dataset()
+    test_dataset = get_test_dataset()
 
     trial_dir = tune.get_trial_dir()
 
-    train(args, config, train_dataset, val_dataset, trial_dir, is_raytuning=True)
+    train(args, config, train_dataset, val_dataset, test_dataset, trial_dir, is_raytuning=True)
 
 
 def set_config_given_args(config, args):
@@ -182,17 +188,26 @@ if __name__ == "__main__":
         labels = list(map(int, args.multi_label.strip('[]').split(',')))
         dataset.reduce_dataset('multi_class', label=labels)
 
-    validation = args.validation
-    if validation > 0:
+    if args.test > 0:
         # TEST with stratified sample
-        train_dset, val_dset = dataset.split_dataset(validation, stratified=True)
-        train_dset.ori_X = train_dset.X
-        train_dset.ori_true_labels = train_dset.true_labels
-        val_dset.ori_X = val_dset.X
-        val_dset.ori_true_labels = val_dset.true_labels
+        train_dataset, test_dataset = dataset.split_dataset(args.test, stratified=True, split_type='test')
+        train_dataset.ori_X = train_dataset.X
+        train_dataset.ori_true_labels = train_dataset.true_labels
+        test_dataset.ori_X = test_dataset.X
+        test_dataset.ori_true_labels = test_dataset.true_labels
     else:
-        train_dset = dataset
-        val_dset = None
+        train_dataset = dataset
+        test_dataset = None
+
+    if args.validation > 0:
+        # TEST with stratified sample
+        train_dataset, val_dataset = train_dataset.split_dataset(args.validation, stratified=True, split_type='val')
+        train_dataset.ori_X = train_dataset.X
+        train_dataset.ori_true_labels = train_dataset.true_labels
+        val_dataset.ori_X = val_dataset.X
+        val_dataset.ori_true_labels = val_dataset.true_labels
+    else:
+        val_dataset = None
 
     device = 'cuda:0'
 
@@ -202,10 +217,10 @@ if __name__ == "__main__":
     create_folder(folder_path)
 
     path = f'{folder_path}/train_idx'
-    train_dset.save_split(path)
-    if val_dset is not None:
+    train_dataset.save_split(path)
+    if val_dataset is not None:
         path = f'{folder_path}/val_idx'
-        val_dset.save_split(path)
+        val_dataset.save_split(path)
 
     # Config MUTAG
     # config = {
@@ -271,8 +286,9 @@ if __name__ == "__main__":
         parameter_columns=["var", "beta", "lr", "batch_size", "add_feature"],
         metric_columns=["loss", "nll", "logp", "logdet", "distloss", "training_iteration"])
 
-    train_dataset_id = ray.put(train_dset)
-    val_dataset_id = ray.put(val_dset)
+    train_dataset_id = ray.put(train_dataset)
+    val_dataset_id = ray.put(val_dataset)
+    test_dataset_id = ray.put(test_dataset)
     result = tune.run(
         partial(train_opti),
         resources_per_trial={"cpu": 4, "gpu": 1},

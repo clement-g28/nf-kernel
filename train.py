@@ -277,7 +277,7 @@ def validate_model(val_loader, val_dataset, model, beta, config, device):
     return val_loss, val_steps, accuracy, val_nll, val_logp, val_logdet, val_dist
 
 
-def train(args, config, train_dataset, val_dataset, save_dir, is_raytuning):
+def train(args, config, train_dataset, val_dataset, test_dataset, save_dir, is_raytuning):
     path = os.path.join(save_dir, "train_idx")
     train_dataset.save_split(path)
     if val_dataset is not None:
@@ -443,7 +443,7 @@ def train(args, config, train_dataset, val_dataset, save_dir, is_raytuning):
                 torch.save(model.state_dict(), path)
 
             if epoch > 1:
-                evaluate_pred_model(args, train_dataset, val_dataset, model, checkpoint_dir, config)
+                test_pred_model(args, train_dataset, test_dataset, model, checkpoint_dir, config)
 
         # if epoch > args.save_at_epoch and epoch % args.save_each_epoch == 0:
         #     with tune.checkpoint_dir(epoch) as checkpoint_dir:
@@ -463,7 +463,7 @@ def train(args, config, train_dataset, val_dataset, save_dir, is_raytuning):
                 write_dict_to_tensorboard(writer, loss_dict, base_name="VAL", iteration=epoch)
 
 
-def evaluate_pred_model(args, train_dataset, val_dataset, model, save_dir, config):
+def test_pred_model(args, train_dataset, test_dataset, model, save_dir, config):
     batch_size = args.batch_size
 
     # reduce train dataset size (fitting too long)
@@ -476,7 +476,7 @@ def evaluate_pred_model(args, train_dataset, val_dataset, model, save_dir, confi
 
     if isinstance(t_dataset, GraphDataset):
         t_dataset.permute_graphs_in_dataset()
-        val_dataset.permute_graphs_in_dataset()
+        test_dataset.permute_graphs_in_dataset()
 
     model.eval()
     Z = []
@@ -535,24 +535,24 @@ def evaluate_pred_model(args, train_dataset, val_dataset, model, save_dir, confi
         our_scores = []
 
         for n_perm in range(n_permutation):
-            val_dataset.permute_graphs_in_dataset()
+            test_dataset.permute_graphs_in_dataset()
             # OUR APPROACH EVALUATION
-            val_loader = val_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
-            val_inZ = []
+            test_loader = test_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+            test_inZ = []
             elabels = []
             with torch.no_grad():
-                for j, data in enumerate(val_loader):
+                for j, data in enumerate(test_loader):
                     inp, labels = data
-                    inp = val_dataset.format_data(inp, device, add_feature=config["add_feature"])
+                    inp = test_dataset.format_data(inp, device, add_feature=config["add_feature"])
                     labels = labels.to(device)
                     log_p, distloss, logdet, out = model(inp, labels)
-                    val_inZ.append(out.detach().cpu().numpy())
+                    test_inZ.append(out.detach().cpu().numpy())
                     elabels.append(labels.detach().cpu().numpy())
-            val_inZ = np.concatenate(val_inZ, axis=0).reshape(len(val_dataset), -1)
+            test_inZ = np.concatenate(test_inZ, axis=0).reshape(len(test_dataset), -1)
             elabels = np.concatenate(elabels, axis=0)
 
-            z_pred = predictor.predict(val_inZ)
-            if val_dataset.is_regression_dataset():
+            z_pred = predictor.predict(test_inZ)
+            if test_dataset.is_regression_dataset():
                 score = np.power(z_pred - elabels, 2).mean()  # MSE
             else:
                 score = classification_score(z_pred, elabels)
@@ -574,22 +574,22 @@ def evaluate_pred_model(args, train_dataset, val_dataset, model, save_dir, confi
         lines += [score_str, '\n']
 
     else:
-        val_loader = val_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
-        val_inZ = []
+        test_loader = test_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+        test_inZ = []
         elabels = []
         with torch.no_grad():
-            for j, data in enumerate(val_loader):
+            for j, data in enumerate(test_loader):
                 inp, labels = data
-                inp = val_dataset.format_data(inp, device, add_feature=config["add_feature"])
+                inp = test_dataset.format_data(inp, device, add_feature=config["add_feature"])
                 labels = labels.to(device)
                 log_p, distloss, logdet, out = model(inp, labels)
-                val_inZ.append(out.detach().cpu().numpy())
+                test_inZ.append(out.detach().cpu().numpy())
                 elabels.append(labels.detach().cpu().numpy())
-        val_inZ = np.concatenate(val_inZ, axis=0).reshape(len(val_dataset), -1)
+        test_inZ = np.concatenate(test_inZ, axis=0).reshape(len(test_dataset), -1)
         elabels = np.concatenate(elabels, axis=0)
 
-        z_pred = predictor.predict(val_inZ)
-        if val_dataset.is_regression_dataset():
+        z_pred = predictor.predict(test_inZ)
+        if test_dataset.is_regression_dataset():
             score = np.power(z_pred - elabels, 2).mean()  # MSE
         else:
             score = classification_score(z_pred, elabels)
@@ -666,16 +666,25 @@ def main(args):
         for label in labels:
             redlabel_str += '-' + str(label)
 
-    validation = args.validation
-    if validation > 0:
+    if args.test > 0:
         # TEST with stratified sample
-        train_dataset, val_dataset = dataset.split_dataset(validation, stratified=True)
+        train_dataset, test_dataset = dataset.split_dataset(args.test, stratified=True, split_type='test')
+        train_dataset.ori_X = train_dataset.X
+        train_dataset.ori_true_labels = train_dataset.true_labels
+        test_dataset.ori_X = test_dataset.X
+        test_dataset.ori_true_labels = test_dataset.true_labels
+    else:
+        train_dataset = dataset
+        test_dataset = None
+
+    if args.validation > 0:
+        # TEST with stratified sample
+        train_dataset, val_dataset = train_dataset.split_dataset(args.validation, stratified=True, split_type='val')
         train_dataset.ori_X = train_dataset.X
         train_dataset.ori_true_labels = train_dataset.true_labels
         val_dataset.ori_X = val_dataset.X
         val_dataset.ori_true_labels = val_dataset.true_labels
     else:
-        train_dataset = dataset
         val_dataset = None
 
     device = 'cuda:0'
@@ -838,7 +847,7 @@ def main(args):
 
     train_start = time.time()
     # train(args, model_single, folder_path, train_dataset=train_dataset, val_dataset=val_dataset)
-    train(args, config, train_dataset, val_dataset, save_dir, is_raytuning=False)
+    train(args, config, train_dataset, val_dataset, test_dataset, save_dir, is_raytuning=False)
     train_end = time.time()
     # del dataset
     gpu_info = torch.cuda.mem_get_info(device=device)
