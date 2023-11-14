@@ -81,7 +81,9 @@ class NF(nn.Module):
                 self.dim_per_lab = np.count_nonzero(eigenval > 1)
                 covariance_matrix = construct_covariance(eigenvec, eigenval)
                 # compute faster determinant and inverse using the diagonal property
-                determinant = np.prod(eigenval)
+                # determinant = np.prod(eigenval)
+                # log to compute
+                determinant = np.exp(np.sum(np.log(eigenval)))
                 # self.covariance_matrices.append(covariance_matrix)
                 inverse_matrix = covariance_matrix.copy()
                 inverse_matrix[np.diag_indices(inverse_matrix.shape[0])] = 1 / np.diag(inverse_matrix)

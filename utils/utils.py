@@ -280,7 +280,9 @@ def initialize_class_gaussian_params(dataset, al_list, isotrope=False, dim_per_l
         for i, label in enumerate(uni):
             mean = np.zeros(n_dim)
             if fixed_eigval is None:
-                be = np.power(1 / (math.pow(sum(al_list) / len(al_list), dim_per_label)), 1 / (n_dim - dim_per_label))
+                # be = np.power(1 / (math.pow(sum(al_list) / len(al_list), dim_per_label)), 1 / (n_dim - dim_per_label))
+                # log to calculate
+                be = math.exp(1 / (n_dim - dim_per_label) * (- dim_per_label * math.log(sum(al_list) / len(al_list))))
                 eigenvals = np.ones(n_dim) * be
                 if isinstance(dataset, GraphDataset) and split_graph_dim:
                     eigenvals[dim_per_label_x * i:dim_per_label_x * (i + 1)] = al_list[:dim_per_label_x]
@@ -317,8 +319,9 @@ def initialize_regression_gaussian_params(dataset, al_list, isotrope=False, dim_
             eigenvecs = np.zeros((n_dim, n_dim))
             np.fill_diagonal(eigenvecs, 1)
             if fixed_eigval is None:
-                be = np.exp(
-                    1 / (n_dim - dim_per_label) * np.log(1 / math.pow(sum(al_list) / len(al_list), dim_per_label)))
+                # be = np.power(1 / (math.pow(sum(al_list) / len(al_list), dim_per_label)), 1 / (n_dim - dim_per_label))
+                # log to calculate
+                be = math.exp(1 / (n_dim - dim_per_label) * (- dim_per_label * math.log(sum(al_list) / len(al_list))))
                 eigenvals = np.ones(n_dim) * be
                 eigenvals[dim_per_label * i:dim_per_label * (i + 1)] = al_list
             else:
