@@ -169,7 +169,7 @@ class BaseDataset(Dataset):
         if not reduce_from_ori and self.idx is not None:
             self.idx = self.idx[n_idx]
         else:
-            self.idx = n_idx
+            self.idx = np.array(n_idx)
         self.X = n_X
         self.true_labels = n_true_labels
 
@@ -223,8 +223,8 @@ class BaseDataset(Dataset):
             part1_dataset.true_labels = self.true_labels[train_idx]
 
             if self.idx is None:
-                part2_dataset.idx = val_idx
-                part1_dataset.idx = train_idx
+                part2_dataset.idx = np.array(val_idx)
+                part1_dataset.idx = np.array(train_idx)
             else:
                 part2_dataset.idx = self.idx[val_idx]
                 part1_dataset.idx = self.idx[train_idx]
@@ -251,7 +251,7 @@ class BaseDataset(Dataset):
         self.true_labels = self.true_labels[n_idx]
 
         if self.idx is None:
-            self.idx = n_idx
+            self.idx = np.array(n_idx)
         else:
             self.idx = self.idx[n_idx]
 
@@ -976,8 +976,8 @@ class GraphDataset(BaseDataset):
             part1_dataset.true_labels = self.true_labels[train_idx]
 
             if self.idx is None:
-                part2_dataset.idx = val_idx
-                part1_dataset.idx = train_idx
+                part2_dataset.idx = np.array(val_idx)
+                part1_dataset.idx = np.array(train_idx)
             else:
                 part2_dataset.idx = self.idx[val_idx]
                 part1_dataset.idx = self.idx[train_idx]
@@ -1013,7 +1013,7 @@ class GraphDataset(BaseDataset):
         self.true_labels = self.true_labels[n_idx]
 
         if self.idx is None:
-            self.idx = n_idx
+            self.idx = np.array(n_idx)
         else:
             self.idx = np.array(self.idx)[n_idx].tolist()
 

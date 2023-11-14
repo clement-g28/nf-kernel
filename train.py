@@ -467,7 +467,7 @@ def train(args, config, train_dataset, val_dataset, test_dataset, save_dir, is_r
 
 
 def test_pred_model(args, train_dataset, test_dataset, model, save_dir, config):
-    batch_size = args.batch_size
+    batch_size = config["batch_size"]
 
     # reduce train dataset size (fitting too long)
     if args.reduce_test_dataset_size is not None:
