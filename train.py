@@ -182,6 +182,13 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 #             if epoch > args.save_at_epoch and epoch % args.save_each_epoch == 0:
 #                 torch.save(model.state_dict(), f"{save_dir}/model_{str(epoch).zfill(6)}.pt")
 
+def compare_classification_score(score1, score2):
+    return score1 > score2
+
+
+def compare_regression_score(score1, score2):
+    return score1 < score2
+
 
 def prepare_model(args, var, noise, dataset, noise_x=None, add_feature=None, split_graph_dim=False):
     n_dim = dataset.get_n_dim(add_feature=add_feature)
@@ -314,6 +321,9 @@ def train(args, config, train_dataset, val_dataset, test_dataset, save_dir, is_r
 
     best_accuracy = math.inf
     # best_accuracy = -math.inf
+    best_score = None
+
+    score_comparer = compare_regression_score if train_dataset.is_regression_dataset() else compare_classification_score
 
     for epoch in range(args.n_epoch):
         running_loss = 0.0
@@ -432,21 +442,27 @@ def train(args, config, train_dataset, val_dataset, test_dataset, save_dir, is_r
             #         accuracy += val_logp
 
         model.train()
-        # if accuracy > best_accuracy and epoch > args.save_at_epoch:
-        if accuracy < best_accuracy and epoch > args.save_at_epoch and epoch % args.save_each_epoch == 0:
-            best_accuracy = accuracy
-            if is_raytuning:
-                with tune.checkpoint_dir(epoch) as checkpoint_dir:
-                    path = os.path.join(checkpoint_dir, "checkpoint")
-                    torch.save((model.state_dict(), optimizer.state_dict()), path)
-            else:
-                checkpoint_dir = os.path.join(save_dir, f"checkpoint_{str(epoch).zfill(5)}")
-                create_folder(checkpoint_dir)
-                path = os.path.join(checkpoint_dir, "checkpoint")
-                torch.save(model.state_dict(), path)
+        if epoch > args.save_at_epoch and epoch % args.save_each_epoch == 0:
+            # if accuracy < best_accuracy and epoch > args.save_at_epoch and epoch % args.save_each_epoch == 0:
 
             if epoch > 1:
-                test_pred_model(args, train_dataset, test_dataset, model, checkpoint_dir, config)
+
+                # best_accuracy = accuracy
+                if is_raytuning:
+                    with tune.checkpoint_dir(epoch) as checkpoint_dir:
+                        score = test_pred_model(args, train_dataset, test_dataset, model, checkpoint_dir, config)
+                        if best_score is None or score_comparer(score, best_score):
+                            best_score = score
+                            path = os.path.join(checkpoint_dir, "checkpoint")
+                            torch.save((model.state_dict(), optimizer.state_dict()), path)
+                else:
+                    checkpoint_dir = os.path.join(save_dir, f"checkpoint_{str(epoch).zfill(5)}")
+                    create_folder(checkpoint_dir)
+                    score = test_pred_model(args, train_dataset, test_dataset, model, checkpoint_dir, config)
+                    if best_score is None or score_comparer(score, best_score):
+                        best_score = score
+                        path = os.path.join(checkpoint_dir, "checkpoint")
+                        torch.save(model.state_dict(), path)
 
         # if epoch > args.save_at_epoch and epoch % args.save_each_epoch == 0:
         #     with tune.checkpoint_dir(epoch) as checkpoint_dir:
@@ -575,6 +591,7 @@ def test_pred_model(args, train_dataset, test_dataset, model, save_dir, config):
                     f'Std Scores: {std_score}'
         print(score_str)
         lines += [score_str, '\n']
+        score = mean_score
 
     else:
         test_loader = test_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
@@ -608,6 +625,7 @@ def test_pred_model(args, train_dataset, test_dataset, model, save_dir, config):
         f.writelines(lines)
 
     model.train()
+    return score
 
 
 def main(args):

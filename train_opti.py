@@ -117,6 +117,7 @@ if __name__ == "__main__":
     # args, _ = training_arguments().parse_known_args()
     parser = training_arguments(optimize_training=True)
     parser.add_argument("--n_trials", default=50, type=int, help="number of trials to make")
+    parser.add_argument("--grace_period", default=50, type=int, help="minimum number of epoch by trails")
 
     parser.add_argument("--batch_size", default=None, type=int, help="batch size")
     parser.add_argument("--lr", default=None, type=float, help="learning rate")
@@ -237,12 +238,12 @@ if __name__ == "__main__":
     # Config Letter-med
     config = {
         "var_type": 'uniform',
-        "var": tune.uniform(20, 300),
-        "beta": tune.randint(10, 200),
+        "var": tune.uniform(10, 300),
+        "beta": tune.randint(100, 300),
         "noise": tune.uniform(0.2, 0.6),
         "noise_x": tune.uniform(0.05, 0.3),
         # "noise_x": None,
-        "lr": tune.loguniform(1e-3, 0.01),
+        "lr": tune.loguniform(9e-4, 0.005),
         "batch_size": tune.choice([50, 100, 150, 200, 250]),
         "add_feature": tune.randint(0, 20),
         "split_graph_dim": True
@@ -281,7 +282,7 @@ if __name__ == "__main__":
         mode="min",
         # mode="max",
         max_t=args.n_epoch,
-        grace_period=10,
+        grace_period=args.grace_period,
         reduction_factor=2)
     reporter = CLIReporter(
         parameter_columns=["var", "beta", "lr", "batch_size", "add_feature"],
@@ -292,7 +293,7 @@ if __name__ == "__main__":
     test_dataset_id = ray.put(test_dataset)
     result = tune.run(
         partial(train_opti),
-        resources_per_trial={"cpu": 4, "gpu": 1},
+        resources_per_trial={"cpu": 4, "gpu": 0.25},
         config=config,
         num_samples=args.n_trials,
         scheduler=scheduler,

@@ -25,7 +25,7 @@ SIMPLE_DATASETS = ['single_moon', 'double_moon', 'iris', 'bcancer']
 IMAGE_DATASETS = ['mnist', 'cifar10', 'olivetti_faces']
 SIMPLE_REGRESSION_DATASETS = ['swissroll', 'diabetes', 'waterquality', 'aquatoxi', 'fishtoxi', 'trafficflow']
 GRAPH_REGRESSION_DATASETS = ['qm7', 'qm9', 'freesolv', 'esol', 'lipo', 'fishtoxi']
-GRAPH_CLASSIFICATION_DATASETS = ['toxcast', 'AIDS', 'Letter-med', 'MUTAG', 'COIL-DEL', 'BZR', 'BACE']
+GRAPH_CLASSIFICATION_DATASETS = ['toxcast', 'AIDS', 'Letter-low', 'Letter-med', 'Letter-high', 'MUTAG', 'COIL-DEL', 'BZR', 'BACE']
 
 
 # abstract base kernel dataset class
@@ -899,7 +899,7 @@ class GraphDataset(BaseDataset):
         return x_shape, adj_shape
 
     def is_attributed_node_dataset(self):
-        return self.dataset_name in ['Letter-med']
+        return 'Letter' in self.dataset_name #or self.dataset_name in ['Letter-med']
 
     def define_networkx_labels(self):
         self.label_names = {'node_labels': ['node_attr'], 'node_attrs': ['node_attr'], 'edge_labels': ['bond_attr'],
@@ -1540,7 +1540,17 @@ class ClassificationGraphDataset(GraphDataset):
             # a_n_node = 13
             a_n_node = 57
             a_n_type = len(node_type_list) + 1  # 5
+        elif self.dataset_name == 'Letter-low':
+            b_n_type = 2
+            b_n_squeeze = 4
+            a_n_node = 8
+            a_n_type = len(node_type_list) + 1  # 5
         elif self.dataset_name == 'Letter-med':
+            b_n_type = 2
+            b_n_squeeze = 3
+            a_n_node = 9
+            a_n_type = len(node_type_list) + 1  # 5
+        elif self.dataset_name == 'Letter-high':
             b_n_type = 2
             b_n_squeeze = 3
             a_n_node = 9
@@ -1615,7 +1625,7 @@ class ClassificationGraphDataset(GraphDataset):
             return None
         elif dataset_name == 'MUTAG':
             return None
-        elif dataset_name == 'Letter-med':
+        elif 'Letter' in dataset_name:
             return None
         elif dataset_name == 'COIL-DEL':
             return 60
@@ -1715,7 +1725,7 @@ class ClassificationGraphDataset(GraphDataset):
             #     plt.close()
 
             if exist_dataset:
-                if name in ['AIDS', 'Letter-med', 'MUTAG', 'COIL-DEL', 'BZR']:
+                if 'Letter' in name or name in ['AIDS', 'MUTAG', 'COIL-DEL', 'BZR']:
                     X = np.load(f'{path}/{full_name}_X.npy')
                     A = np.load(f'{path}/{full_name}_A.npy')
                     Y = np.load(f'{path}/{full_name}_Y.npy')
@@ -1734,9 +1744,9 @@ class ClassificationGraphDataset(GraphDataset):
                 else:
                     assert False, 'unknown dataset'
             else:
-                if name in ['AIDS', 'Letter-med', 'MUTAG', 'COIL-DEL', 'BZR']:
+                if 'Letter' in name or name in ['AIDS', 'MUTAG', 'COIL-DEL', 'BZR']:
                     # node_features = name in ['Letter-med', 'COIL-DEL']  # features if not node labels (e.g Letter-med (x,y))
-                    node_features = name in ['Letter-med',
+                    node_features = 'Letter' in name or name in [
                                              'COIL-DEL']  # features if not node labels (e.g Letter-med (x,y))
                     dset = TUDataset(path, name=name, use_node_attr=node_features, use_edge_attr=True)
                     # TEST with virtual node
