@@ -675,9 +675,9 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
         wl_height = 5
         normalize = False
         if val_dataset.is_attributed_node_dataset():
-            # graph_kernel_names = ['mslap']
+            graph_kernel_names = ['mslap', 'prop']
             # graph_kernel_names = ['prop']
-            graph_kernel_names = []
+            # graph_kernel_names = []
             attributed_node = True
             edge_to_node = False
         else:

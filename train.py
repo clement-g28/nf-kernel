@@ -25,6 +25,8 @@ from evaluate import classification_score, learn_or_load_modelhyperparams
 from sklearn.svm import SVC
 from sklearn.linear_model import Ridge
 
+from utils.training import load_existing_split
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -687,29 +689,6 @@ def main(args):
         for label in labels:
             redlabel_str += '-' + str(label)
 
-    if args.test > 0:
-        # TEST with stratified sample
-        train_dataset, test_dataset = dataset.split_dataset(args.test, stratified=True, split_type='test')
-        train_dataset.ori_X = train_dataset.X
-        train_dataset.ori_true_labels = train_dataset.true_labels
-        test_dataset.ori_X = test_dataset.X
-        test_dataset.ori_true_labels = test_dataset.true_labels
-    else:
-        train_dataset = dataset
-        test_dataset = None
-
-    if args.validation > 0:
-        # TEST with stratified sample
-        train_dataset, val_dataset = train_dataset.split_dataset(args.validation, stratified=True, split_type='val')
-        train_dataset.ori_X = train_dataset.X
-        train_dataset.ori_true_labels = train_dataset.true_labels
-        val_dataset.ori_X = val_dataset.X
-        val_dataset.ori_true_labels = val_dataset.true_labels
-    else:
-        val_dataset = None
-
-    device = 'cuda:0'
-
     dim_per_label = dataset.get_dim_per_label(add_feature=args.add_feature)
     # n_dim = dataset.get_n_dim()
     #
@@ -852,6 +831,32 @@ def main(args):
     #     folder_path += '/restart'
     #     save_dir = f'./checkpoint/{folder_path}'
     #     create_folder(save_dir)
+
+    dset_res = load_existing_split(save_dir, dataset)
+    if dset_res is None:
+        if args.test > 0:
+            # TEST with stratified sample
+            train_dataset, test_dataset = dataset.split_dataset(args.test, stratified=True, split_type='test')
+            train_dataset.ori_X = train_dataset.X
+            train_dataset.ori_true_labels = train_dataset.true_labels
+            test_dataset.ori_X = test_dataset.X
+            test_dataset.ori_true_labels = test_dataset.true_labels
+        else:
+            train_dataset = dataset
+            test_dataset = None
+
+        if args.validation > 0:
+            # TEST with stratified sample
+            train_dataset, val_dataset = train_dataset.split_dataset(args.validation, stratified=True, split_type='val')
+            train_dataset.ori_X = train_dataset.X
+            train_dataset.ori_true_labels = train_dataset.true_labels
+            val_dataset.ori_X = val_dataset.X
+            val_dataset.ori_true_labels = val_dataset.true_labels
+        else:
+            val_dataset = None
+    else:
+        train_dataset, val_dataset, test_dataset = dset_res
+    device = 'cuda:0'
 
     config = {
         "var_type": var_type,

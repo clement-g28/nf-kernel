@@ -1,5 +1,6 @@
 import argparse
 import math
+import os
 import torch
 
 import ffjord_lib.layers.odefunc as odefunc
@@ -271,3 +272,21 @@ class AddGaussianNoise(object):
 
     def __repr__(self):
         return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
+
+
+def load_existing_split(folder_path, dataset):
+    train_idx_path = f'{folder_path}/train_idx.npy'
+    test_idx_path = f'{folder_path}/test_idx.npy'
+    val_idx_path = f'{folder_path}/val_idx.npy'
+    if os.path.exists(train_idx_path) and os.path.exists(test_idx_path) and os.path.exists(val_idx_path):
+        print('Split idx already created, loading them...')
+        train_dataset = dataset.duplicate()
+        train_dataset.load_split(train_idx_path)
+        test_dataset = dataset.duplicate()
+        test_dataset.load_split(test_idx_path)
+        val_dataset = dataset.duplicate()
+        val_dataset.load_split(val_idx_path)
+        return train_dataset, val_dataset, test_dataset
+    else:
+        print('No idx split found in folder, creating them...')
+        return None
