@@ -70,7 +70,7 @@ def main(args):
     config, batch_size = retrieve_config(params_path)
 
     # DATASET #
-    dataset = load_dataset(args, dataset_name, model_type, to_evaluate=True, add_feature=config['add_feature'])
+    dataset = load_dataset(args, dataset_name, model_type in GRAPH_MODELS, to_evaluate=True, add_feature=config['add_feature'])
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

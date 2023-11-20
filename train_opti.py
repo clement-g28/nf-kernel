@@ -6,7 +6,7 @@ from torchvision import transforms
 from datetime import datetime
 
 from utils.custom_glow import CGlow
-from utils.models import load_seqflow_model, load_cglow_model, load_ffjord_model, load_moflow_model
+from utils.models import load_seqflow_model, load_cglow_model, load_ffjord_model, load_moflow_model, GRAPH_MODELS
 from utils.training import training_arguments, seqflow_arguments, ffjord_arguments, cglow_arguments, moflow_arguments, \
     graphnvp_arguments, AddGaussianNoise
 from utils.utils import write_dict_to_tensorboard, set_seed, create_folder, AverageMeter, \
@@ -177,7 +177,8 @@ if __name__ == "__main__":
 
     # DATASET #
     # dataset = load_dataset(args, args.dataset, args.model, transform=transform, add_feature=args.add_feature)
-    dataset = load_dataset(args, args.dataset, args.model, transform=transform)  # do not give the add_feature here !
+    dataset = load_dataset(args, args.dataset, args.model in GRAPH_MODELS,
+                           transform=transform)  # do not give the add_feature here !
 
     if args.reduce_class_size:
         dataset.reduce_dataset('every_class', how_many=args.reduce_class_size)

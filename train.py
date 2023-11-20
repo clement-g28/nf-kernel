@@ -11,7 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision import transforms
 
 from utils.models import load_seqflow_model, load_ffjord_model, load_moflow_model, load_graphnvp_model, \
-    load_cglow_model
+    load_cglow_model, GRAPH_MODELS
 from utils.training import training_arguments, ffjord_arguments, seqflow_arguments, cglow_arguments, moflow_arguments, \
     graphnvp_arguments, AddGaussianNoise
 from utils.utils import write_dict_to_tensorboard, set_seed, create_folder, AverageMeter, \
@@ -670,7 +670,7 @@ def main(args):
     # dataset = ImDataset(dataset_name=args.dataset, transform=transform)
     # DATASET #
     # dataset = load_dataset(args, args.dataset, args.model, transform=transform, add_feature=args.add_feature)
-    dataset = load_dataset(args, args.dataset, args.model, transform=transform)  # do not give the add_feature here !
+    dataset = load_dataset(args, args.dataset, args.model in GRAPH_MODELS, transform=transform)  # do not give the add_feature here !
 
     redclass_str = ''
     if args.reduce_class_size:

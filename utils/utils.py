@@ -402,8 +402,9 @@ def predict_by_log_p_with_gaussian_params(x, means, gaussian_params):
         # np_label = label.clone().detach().cpu().numpy()
         test = np.array(gaussian_params, dtype=object)[label]
 
-        determinant = torch.from_numpy(np.repeat(np.expand_dims(test[1].astype(np.float32),0),x.shape[0])).to(x.device)
-        diag_inv = torch.diag_embed(test[0].unsqueeze(0).repeat(x.shape[0],1)).to(torch.float32).to(x.device)
+        determinant = torch.from_numpy(np.repeat(np.expand_dims(test[1].astype(np.float32), 0), x.shape[0])).to(
+            x.device)
+        diag_inv = torch.diag_embed(test[0].unsqueeze(0).repeat(x.shape[0], 1)).to(torch.float32).to(x.device)
         mean = means[label].to(torch.float32)
 
         b_size = x.shape[0]
@@ -438,8 +439,7 @@ def calculate_log_p_with_gaussian_params_regression(x, mean, inv_cov, det):
     return log_ps
 
 
-def load_dataset(args, dataset_name, model_type, to_evaluate=False, transform=None, add_feature=None):
-    from utils.models import GRAPH_MODELS
+def load_dataset(args, dataset_name, is_graph_model, to_evaluate=False, transform=None, add_feature=None):
     from utils.dataset import ImDataset, SimpleDataset, RegressionGraphDataset, ClassificationGraphDataset, \
         SIMPLE_DATASETS, SIMPLE_REGRESSION_DATASETS, IMAGE_DATASETS, GRAPH_REGRESSION_DATASETS, \
         GRAPH_CLASSIFICATION_DATASETS
@@ -453,15 +453,14 @@ def load_dataset(args, dataset_name, model_type, to_evaluate=False, transform=No
                     transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))])
         else:
             if dataset_name in GRAPH_REGRESSION_DATASETS or dataset_name in GRAPH_CLASSIFICATION_DATASETS or (
-                    dataset_name == 'fishtoxi' and model_type in GRAPH_MODELS):
+                    dataset_name == 'fishtoxi' and is_graph_model):
                 transform = 'permutation'
 
     # DATASET #
     if dataset_name in IMAGE_DATASETS:
         dataset = ImDataset(dataset_name=dataset_name, n_bits=args.n_bits, transform=transform)
     elif dataset_name == 'fishtoxi':  # Special case where the data can be either graph or vectorial data
-        use_graph_type = model_type in GRAPH_MODELS
-        if use_graph_type:
+        if is_graph_model:
             dataset = RegressionGraphDataset(dataset_name=dataset_name, transform=transform, add_feature=add_feature)
         else:
             dataset = SimpleDataset(dataset_name=dataset_name, transform=transform, add_feature=add_feature)

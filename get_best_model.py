@@ -6,6 +6,7 @@ import os
 
 from utils.custom_glow import WrappedModel
 from utils.dataset import GraphDataset
+from utils.models import GRAPH_MODELS
 
 from utils.utils import set_seed, create_folder, save_fig, load_dataset
 
@@ -662,7 +663,7 @@ def main(args):
     config = retrieve_params_from_name(folder_name, model_type)
 
     # DATASET #
-    dataset = load_dataset(args, dataset_name, model_type, to_evaluate=True, add_feature=config['add_feature'])
+    dataset = load_dataset(args, dataset_name, model_type in GRAPH_MODELS, to_evaluate=True, add_feature=config['add_feature'])
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

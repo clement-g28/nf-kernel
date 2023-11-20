@@ -5,7 +5,7 @@ import glob
 
 from utils.utils import set_seed, create_folder, load_dataset
 
-from utils.models import load_seqflow_model, load_ffjord_model, load_moflow_model, load_cglow_model
+from utils.models import load_seqflow_model, load_ffjord_model, load_moflow_model, load_cglow_model, GRAPH_MODELS
 from utils.testing import load_split_dataset, testing_arguments, initialize_gaussian_params
 from utils.training import ffjord_arguments, cglow_arguments, moflow_arguments, seqflow_arguments
 
@@ -23,7 +23,7 @@ def main(args):
     config, batch_size = retrieve_config(params_path)
 
     # DATASET #
-    dataset = load_dataset(args, dataset_name, model_type, to_evaluate=True, add_feature=config['add_feature'])
+    dataset = load_dataset(args, dataset_name, model_type in GRAPH_MODELS, to_evaluate=True, add_feature=config['add_feature'])
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -106,11 +106,11 @@ def main(args):
     save_dir = './save'
     create_folder(save_dir)
 
-    from evaluate import launch_evaluation
+    from evaluate import evaluate_feature_space
 
     eval_type = args.eval_type
-    launch_evaluation(eval_type, dataset_name, model, gaussian_params, train_dataset, test_dataset, save_dir, device,
-                      batch_size, args.n_permutation_test)
+    evaluate_feature_space(eval_type, dataset_name, model, gaussian_params, train_dataset, test_dataset, save_dir, device,
+                           batch_size, args.n_permutation_test)
 
     del dataset
     del test_dataset

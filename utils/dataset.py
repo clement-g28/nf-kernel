@@ -264,11 +264,13 @@ class BaseDataset(Dataset):
         else:
             print('The dataset doesn\'t have idx to save!')
 
-    def load_split(self, load_path):
+    def load_split(self, load_path, return_idx=False):
         if os.path.exists(load_path):
             self.idx = np.load(load_path)
             self.X = self.ori_X[self.idx]
             self.true_labels = self.ori_true_labels[self.idx]
+            if return_idx:
+                return self.idx
         else:
             assert False, f'No file to load split at the path : {load_path}'
 
@@ -1018,7 +1020,7 @@ class GraphDataset(BaseDataset):
             self.idx = np.array(self.idx)[n_idx].tolist()
 
     # overwrite
-    def load_split(self, load_path):
+    def load_split(self, load_path, return_idx=False):
         if os.path.exists(load_path):
             self.idx = np.load(load_path)
             x, adj = list(zip(*self.ori_X))
@@ -1031,6 +1033,8 @@ class GraphDataset(BaseDataset):
                 train_X.append((train_x[i], train_adj[i]))
             self.X = train_X
             self.true_labels = self.ori_true_labels[self.idx]
+            if return_idx:
+                return self.idx
         else:
             assert False, f'No file to load split at the path : {load_path}'
 

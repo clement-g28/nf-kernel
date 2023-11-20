@@ -24,11 +24,11 @@ from utils.graphs.graph_utils import save_nx_graph, save_nx_graph_attr
 from utils.graphs.kernels import compute_wl_kernel, compute_sp_kernel, compute_mslap_kernel, compute_hadcode_kernel, \
     compute_propagation_kernel
 from utils.graphs.mol_utils import valid_mol, construct_mol
-from utils.models import load_seqflow_model, load_ffjord_model, load_moflow_model, load_cglow_model
+from utils.models import load_seqflow_model, load_ffjord_model, load_moflow_model, load_cglow_model, GRAPH_MODELS
 from utils.testing import generate_sample, project_inZ, testing_arguments, noise_data, project_between, \
     retrieve_params_from_name, learn_or_load_modelhyperparams, initialize_gaussian_params, \
     load_split_dataset
-from utils.training import ffjord_arguments, cglow_arguments, moflow_arguments
+from utils.training import ffjord_arguments, cglow_arguments, moflow_arguments, seqflow_arguments
 from utils.utils import set_seed, create_folder, save_every_pic, save_fig, save_projection_fig, load_dataset
 
 from scipy.stats import kruskal
@@ -36,6 +36,8 @@ from scipy.stats import kruskal
 from rdkit import Chem, DataStructs
 from rdkit.Chem import Draw, AllChem
 from ordered_set import OrderedSet
+
+from get_best_opti import retrieve_config
 
 
 def classification_score(pred, true):
@@ -536,6 +538,491 @@ def evaluate_p_value(predictions, by_pairs=False):
             return H, p
     else:
         return None
+
+
+def multi_evaluate_classification(models, add_features_li, train_dataset, val_dataset, save_dir, device,
+                                  fithyperparam=True,
+                                  batch_size=10, n_permutation_test=None):
+    if isinstance(train_dataset, GraphDataset):
+        n_permutation_test = 5 if n_permutation_test is None else n_permutation_test
+        train_dataset.permute_graphs_in_dataset()
+        val_dataset.permute_graphs_in_dataset()
+
+    zsvcs = []
+    # Compute results with our approach if not None
+    if models is not None:
+        for i, model in enumerate(models):
+            train_dataset.add_feature = add_features_li[i]
+            print(f'Model {i} predictor definition...')
+            model.to(device)
+            model.eval()
+            start = time.time()
+            Z = []
+            tlabels = []
+            if isinstance(train_dataset, GraphDataset):
+                n_permutation = n_permutation_test
+                for n_perm in range(n_permutation):
+                    train_dataset.permute_graphs_in_dataset()
+
+                    loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+
+                    with torch.no_grad():
+                        for j, data in enumerate(loader):
+                            inp, labels = data
+                            inp = train_dataset.format_data(inp, device)
+                            labels = labels.to(device)
+                            log_p, distloss, logdet, out = model(inp, labels)
+                            Z.append(out.detach().cpu().numpy())
+                            tlabels.append(labels.detach().cpu().numpy())
+            else:
+                loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+
+                with torch.no_grad():
+                    for j, data in enumerate(loader):
+                        inp, labels = data
+                        inp = train_dataset.format_data(inp, device)
+                        labels = labels.to(device)
+                        log_p, distloss, logdet, out = model(inp, labels)
+                        Z.append(out.detach().cpu().numpy())
+                        tlabels.append(labels.detach().cpu().numpy())
+            tlabels = np.concatenate(tlabels, axis=0)
+            Z = np.concatenate(Z, axis=0).reshape(tlabels.shape[0], -1)
+            end = time.time()
+            print(f"time to get Z_train from X_train: {str(end - start)}, batch size: {batch_size}")
+
+            # Learn SVC
+            start = time.time()
+            kernel_name = 'zlinear'
+            if fithyperparam:
+                param_gridlin = [
+                    {'SVC__kernel': ['linear'], 'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))}]
+                # param_gridlin = [{'SVC__kernel': ['linear'], 'SVC__C': np.array([1])}]
+                model_type = ('SVC', SVC(max_iter=100000))
+                # model_type = ('SVC', SVC())
+                scaler = False
+                zlinsvc = learn_or_load_modelhyperparams(Z, tlabels, kernel_name, param_gridlin, save_dir,
+                                                         model_type=model_type, scaler=scaler, save=False)
+            else:
+                zlinsvc = make_pipeline(StandardScaler(), SVC(kernel='linear', C=1.0))
+                zlinsvc.fit(Z, tlabels)
+                print(f'Fitting done.')
+            print(zlinsvc)
+            end = time.time()
+            print(f"time to fit linear svc in Z : {str(end - start)}")
+            zsvcs.append(zlinsvc)
+            model.to('cpu')
+
+    # KERNELS FIT
+    X_train = train_dataset.get_flattened_X()  # TODO : add the permutations ?
+    labels_train = train_dataset.true_labels
+
+    start = time.time()
+    kernel_name = 'linear'
+    if fithyperparam:
+        param_gridlin = [
+            {'SVC__kernel': [kernel_name], 'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))}]
+        linsvc = learn_or_load_modelhyperparams(X_train, labels_train, kernel_name, param_gridlin, save_dir,
+                                                model_type=('SVC', SVC()), scaler=False)
+    else:
+        linsvc = make_pipeline(StandardScaler(), SVC(kernel=kernel_name, C=1.0))
+        linsvc.fit(X_train, labels_train)
+        print(f'Fitting done.')
+    end = time.time()
+    print(f"time to fit linear svc : {str(end - start)}")
+
+    # krr_types = ['linear', 'poly', 'rbf', 'sigmoid', 'cosine']
+    ksvc_types = ['rbf', 'poly', 'sigmoid']
+    # ksvc_types = ['poly']
+    ksvc_params = [
+        {'SVC__kernel': ['rbf'], 'SVC__gamma': np.logspace(-5, 3, 10),
+         'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))},
+        # {'SVC__kernel': ['poly'], 'SVC__gamma': np.logspace(-5, 3, 5),
+        #  'SVC__degree': np.linspace(1, 4, 4).astype(np.int),
+        #  'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))},
+        {'SVC__kernel': ['poly'], 'SVC__gamma': np.logspace(-5, 1, 5),
+         'SVC__degree': np.linspace(1, 2, 2).astype(np.int),
+         'SVC__C': np.concatenate((np.logspace(-5, 1, 10), np.array([1])))},
+        {'SVC__kernel': ['sigmoid'], 'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))}
+    ]
+
+    ksvcs = [None] * len(ksvc_types)
+    for i, ksvc_type in enumerate(ksvc_types):
+        start = time.time()
+        if fithyperparam:
+            ksvcs[i] = learn_or_load_modelhyperparams(X_train, labels_train, ksvc_type, [ksvc_params[i]], save_dir,
+                                                      model_type=('SVC', SVC()), scaler=True)
+        else:
+            ksvcs[i] = make_pipeline(StandardScaler(), SVC(kernel=ksvc_type, C=1.0))
+            ksvcs[i].fit(X_train, labels_train)
+            print(f'Fitting done.')
+        end = time.time()
+        print(f"time to fit {ksvc_type} svc : {str(end - start)}")
+
+    # GRAPH KERNELS FIT
+    if isinstance(train_dataset, GraphDataset):
+        def compute_kernel(name, dataset, edge_to_node, normalize, wl_height=10, attributed_node=False):
+            if name == 'wl':
+                K = compute_wl_kernel(dataset, wl_height=wl_height, edge_to_node=edge_to_node,
+                                      normalize=normalize, attributed_node=attributed_node)
+            elif name == 'prop':
+                K = compute_propagation_kernel(dataset, normalize=normalize, edge_to_node=edge_to_node,
+                                               attributed_node=attributed_node)
+            elif name == 'sp':
+                K = compute_sp_kernel(dataset, normalize=normalize, edge_to_node=edge_to_node,
+                                      attributed_node=attributed_node)
+            elif name == 'mslap':
+                K = compute_mslap_kernel(dataset, normalize=normalize, edge_to_node=edge_to_node,
+                                         attributed_node=attributed_node)
+            elif name == 'hadcode':
+                K = compute_hadcode_kernel(dataset, normalize=normalize, edge_to_node=edge_to_node,
+                                           attributed_node=attributed_node)
+            else:
+                assert False, f'unknown graph kernel: {graph_kernel}'
+            return K
+
+        wl_height = 5
+        normalize = False
+        if val_dataset.is_attributed_node_dataset():
+            graph_kernel_names = ['mslap', 'prop']
+            # graph_kernel_names = ['prop']
+            # graph_kernel_names = []
+            attributed_node = True
+            edge_to_node = False
+        else:
+            graph_kernel_names = ['wl', 'sp', 'hadcode']
+            attributed_node = False
+            edge_to_node = True
+        graph_kernels = []
+        graph_svc_params = []
+        for graph_kernel in graph_kernel_names:
+            K = compute_kernel(graph_kernel, train_dataset, edge_to_node=edge_to_node, normalize=normalize,
+                               wl_height=wl_height, attributed_node=attributed_node)
+            graph_kernels.append(('precomputed', K, graph_kernel))
+            graph_svc_params.append(
+                {'SVC__kernel': ['precomputed'], 'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))})
+
+        graph_ksvcs = [None] * len(graph_kernels)
+        for i, (krr_type, K, name) in enumerate(graph_kernels):
+            start = time.time()
+            if fithyperparam:
+                graph_ksvcs[i] = learn_or_load_modelhyperparams(K, labels_train, name, [graph_svc_params[i]],
+                                                                save_dir,
+                                                                model_type=('SVC', SVC()), scaler=False)
+            else:
+                graph_ksvcs[i] = make_pipeline(StandardScaler(), SVC(kernel=name, C=1.0))
+                graph_ksvcs[i].fit(K, labels_train)
+                print(f'Fitting done.')
+            end = time.time()
+            print(f"time to fit {krr_type} ridge : {str(end - start)}")
+
+    if isinstance(train_dataset, GraphDataset):
+        n_permutation = 20
+        models_preds = []
+        models_scores = []
+        for model in models:
+            models_scores.append([])
+            models_preds.append([])
+        svc_preds = []
+        svc_scores = []
+        ksvc_preds = []
+        ksvc_scores = []
+        for ksvc in ksvcs:
+            ksvc_scores.append([])
+            ksvc_preds.append([])
+        ksvc_graph_preds = []
+        ksvc_graph_scores = []
+        for graph_ksvc in graph_ksvcs:
+            ksvc_graph_scores.append([])
+            ksvc_graph_preds.append([])
+
+        for n_perm in range(n_permutation):
+            val_dataset.permute_graphs_in_dataset()
+            # OUR APPROACH EVALUATION
+            if models is not None:
+                for i, model in enumerate(models):
+                    val_dataset.add_feature = add_features_li[i]
+                    model.to(device)
+                    # batch_size = 200 if 200 < len(val_dataset) else int(len(val_dataset) / 2)
+                    val_loader = val_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+
+                    start = time.time()
+                    val_inZ = []
+                    elabels = []
+                    val_predict = []
+                    with torch.no_grad():
+                        for j, data in enumerate(val_loader):
+                            inp, labels = data
+                            inp = val_dataset.format_data(inp, device)
+                            labels = labels.to(device)
+                            log_p, distloss, logdet, out = model(inp, labels)
+                            # probs = predict_by_log_p_with_gaussian_params(out, model.means, model.gaussian_params)
+                            # val_predict.append(probs.detach().cpu().numpy())
+                            val_inZ.append(out.detach().cpu().numpy())
+                            elabels.append(labels.detach().cpu().numpy())
+                    val_inZ = np.concatenate(val_inZ, axis=0).reshape(len(val_dataset), -1)
+                    elabels = np.concatenate(elabels, axis=0)
+                    # val_predict = np.concatenate(val_predict, axis=0)
+                    end = time.time()
+                    print(f"time to get Z_val from X_val : {str(end - start)}")
+
+                    start = time.time()
+                    zsvc_pred = zsvcs[i].predict(val_inZ)
+                    zsvc_score = classification_score(zsvc_pred, elabels)
+                    # val_pred_scores = classification_score(val_predict, elabels)
+                    # zsvc_score = zlinsvc.score(val_inZ, elabels)
+                    models_preds[i].append(zsvc_pred)
+                    models_scores[i].append(zsvc_score)
+                    # our_pred_scores.append(val_pred_scores)
+                    end = time.time()
+                    print(f"time to predict with zlinSVC : {str(end - start)}")
+                    model.to('cpu')
+
+            # KERNELS EVALUATION
+            X_val = val_dataset.get_flattened_X()
+            labels_val = val_dataset.true_labels
+
+            start = time.time()
+            svc_pred = linsvc.predict(X_val)
+            svc_score = classification_score(svc_pred, labels_val)
+            svc_preds.append(svc_pred)
+            svc_scores.append(svc_score)
+            end = time.time()
+            print(f"time to predict with xlinSVC : {str(end - start)}")
+
+            start = time.time()
+            for i, ksvc in enumerate(ksvcs):
+                ksvc_pred = ksvc.predict(X_val)
+                ksvc_score = classification_score(ksvc_pred, labels_val)
+                # ksvc_score = ksvc.score(X_val, labels_val)
+                ksvc_preds[i].append(ksvc_pred)
+                ksvc_scores[i].append(ksvc_score)
+            end = time.time()
+            print(f"time to predict with {len(ksvcs)} kernelSVC : {str(end - start)}")
+
+            start = time.time()
+            # GRAPH KERNELS EVALUATION
+            for i, graph_ksvc in enumerate(graph_ksvcs):
+                K_val = compute_kernel(graph_kernels[i][2], (val_dataset, train_dataset), edge_to_node=edge_to_node,
+                                       normalize=normalize, wl_height=wl_height, attributed_node=attributed_node)
+                graph_ksvc_pred = graph_ksvc.predict(K_val)
+                graph_ksvc_score = classification_score(graph_ksvc_pred, labels_val)
+                # graph_ksvc_score = graph_ksvc.score(K_val, labels_val)
+                ksvc_graph_preds[i].append(graph_ksvc_pred)
+                ksvc_graph_scores[i].append(graph_ksvc_score)
+            end = time.time()
+            print(f"time to predict with {len(graph_ksvcs)} graphkernelSVC : {str(end - start)}")
+
+        # PRINT RESULTS
+        lines = []
+        print('Predictions scores :')
+
+        # P-value calculation
+        # predictions = {'linear': np.concatenate(svc_preds)}
+        # for ktype, kpred in zip(ksvc_types, ksvc_preds):
+        #     predictions[ktype] = np.concatenate(kpred)
+        # for ktype, kpred in zip(graph_kernels, ksvc_graph_preds):
+        #     predictions[ktype] = np.concatenate(kpred)
+        # if model is not None:
+        #     predictions['zlinear'] = np.concatenate(our_preds)
+        # res_pvalue = evaluate_p_value(predictions)
+        # if res_pvalue is not None:
+        #     H, p = res_pvalue
+        #     score_str = 'Kruskal-Wallis H-test, H: ' + str(H) + ', p-value: ' + str(p)
+        #     print(score_str)
+        #     lines += [score_str, '\n']
+
+        # for i, pred1 in enumerate(preds):
+        #     for j, pred2 in enumerate(preds):
+        #         if i != j:
+        #             U, p2 = mannwhitneyu(pred1, pred2, alternative='two-sided')
+        #             print(f'({i},{j}):' + str(p2))
+
+        svc_mean_score = np.mean(svc_scores)
+        svc_std_score = np.std(svc_scores)
+        score_str = f'SVC R2: {svc_scores} \n' \
+                    f'Mean Scores: {svc_mean_score} \n' \
+                    f'Std Scores: {svc_std_score}'
+        print(score_str)
+        lines += [score_str, '\n']
+
+        for j, ksvc_type in enumerate(ksvc_types):
+            scores = []
+            for ksvc_score in ksvc_scores[j]:
+                scores.append(ksvc_score)
+            mean_score = np.mean(scores)
+            std_score = np.std(scores)
+            score_str = f'KernelSVC ({ksvc_type}): {scores} \n' \
+                        f'Mean Scores: {mean_score} \n' \
+                        f'Std Scores: {std_score}'
+            print(score_str)
+            lines += [score_str, '\n']
+
+        for j, graph_ksvc in enumerate(graph_ksvcs):
+            scores = []
+            for graph_ksvc_score in ksvc_graph_scores[j]:
+                scores.append(graph_ksvc_score)
+            mean_score = np.mean(scores)
+            std_score = np.std(scores)
+            score_str = f'GraphKernelSVC ({graph_kernels[j][2]}): {scores} \n' \
+                        f'Mean Scores: {mean_score} \n' \
+                        f'Std Scores: {std_score}'
+            print(score_str)
+            lines += [score_str, '\n']
+
+        for j, model in enumerate(models):
+            mean_score = np.mean(models_scores[j])
+            # mean_pred_score = np.mean(our_pred_scores)
+            std_score = np.std(models_scores[j])
+            score_str = f'Our approach ({j}): {models_scores[j]} \n' \
+                        f'Mean Scores: {mean_score} \n' \
+                        f'Std Scores: {std_score}'
+            print(score_str)
+            lines += [score_str, '\n']
+
+    else:
+        # OUR APPROACH EVALUATION
+        if models is not None:
+            zsvc_scores = []
+            t_zsvc_scores = []
+            for i, model in enumerate(models):
+                model.to(device)
+                val_loader = val_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+
+                start = time.time()
+                val_inZ = []
+                elabels = []
+                with torch.no_grad():
+                    for j, data in enumerate(val_loader):
+                        inp, labels = data
+                        inp = val_dataset.format_data(inp, device)
+                        labels = labels.to(device)
+                        log_p, distloss, logdet, out = model(inp, labels)
+                        val_inZ.append(out.detach().cpu().numpy())
+                        elabels.append(labels.detach().cpu().numpy())
+                val_inZ = np.concatenate(val_inZ, axis=0).reshape(len(val_dataset), -1)
+                elabels = np.concatenate(elabels, axis=0)
+                end = time.time()
+                print(f"time to get Z_val from X_val : {str(end - start)}")
+
+                zsvc_pred = zsvcs[i].predict(val_inZ)
+                zsvc_score = classification_score(zsvc_pred, elabels)
+                # zsvc_score = zlinsvc.score(val_inZ, elabels)
+                zsvc_scores.append(zsvc_score)
+
+                print(f'Our approach : {zsvc_score}')
+
+                t_zsvc_pred = zsvcs[i].predict(Z)
+                t_zsvc_score = classification_score(t_zsvc_pred, tlabels)
+                # t_zsvc_score = zlinsvc.score(Z, tlabels)
+                t_zsvc_scores.append(t_zsvc_score)
+                print(f'(On Train) Our approach : {t_zsvc_score}')
+
+                # Misclassified data
+                predictions = zsvcs[i].predict(val_inZ)
+                misclassif_i = np.where((predictions == elabels) == False)
+                if misclassif_i[0].shape[0] > 0:
+                    z_shape = model.calc_last_z_shape(val_dataset.in_size)
+                    z_sample = torch.from_numpy(
+                        val_inZ[misclassif_i].reshape(misclassif_i[0].shape[0], *z_shape)).float().to(
+                        device)
+                    with torch.no_grad():
+                        images = model.reverse(z_sample).cpu().data
+                    images = val_dataset.rescale(images)
+                    print('Misclassification:')
+                    print('Real labels :' + str(elabels[misclassif_i]))
+                    print('Predicted labels :' + str(predictions[misclassif_i]))
+
+                if train_dataset.dataset_name == 'mnist':
+                    nrow = math.floor(math.sqrt(images.shape[0]))
+                    utils.save_image(
+                        images,
+                        f"{save_dir}/misclassif.png",
+                        normalize=True,
+                        nrow=nrow,
+                        range=(0, 255),
+                    )
+
+                    # write in images pred and true labels
+                    ndarr = images.numpy()
+                    res = []
+                    margin = 10
+                    shape = (ndarr[0].shape[0], ndarr[0].shape[1] + margin, ndarr[0].shape[2] + 2 * margin)
+                    for j, im_arr in enumerate(ndarr):
+                        im = np.zeros(shape)
+                        im[:, margin:, margin:-margin] = im_arr[:, :, :]
+                        im = im.squeeze()
+                        img = Image.fromarray(im)
+                        draw = ImageDraw.Draw(img)
+                        draw.text((0, 0), f'P:{predictions[misclassif_i[0][j]]} R:{elabels[misclassif_i[0][j]]}', 255)
+                        res.append(np.expand_dims(np.array(img).reshape(shape), axis=0))
+                    res = torch.from_numpy(np.concatenate(res, axis=0)).to(torch.float32)
+                    utils.save_image(
+                        res,
+                        f"{save_dir}/misclassif_PR.png",
+                        normalize=True,
+                        nrow=nrow,
+                        range=(0, 255),
+                    )
+                model.to('cpu')
+
+        # KERNELS EVALUATION
+        X_val = val_dataset.get_flattened_X()
+        labels_val = val_dataset.true_labels
+
+        ksvc_preds = []
+        ksvc_scores = []
+        for ksvc in ksvcs:
+            ksvc_scores.append([])
+
+        svc_pred = linsvc.predict(X_val)
+        svc_score = classification_score(svc_pred, labels_val)
+
+        for i, ksvc in enumerate(ksvcs):
+            ksvc_pred = ksvc.predict(X_val)
+            ksvc_score = classification_score(ksvc_pred, labels_val)
+            # ksvc_score = ksvc.score(X_val, labels_val)
+            ksvc_scores[i].append(ksvc_score)
+            ksvc_preds.append(ksvc_pred)
+
+        lines = []
+        print('Predictions scores :')
+
+        # P-value calculation
+        predictions = {'linear': svc_pred}
+        for ktype, kpred in zip(ksvc_types, ksvc_preds):
+            predictions[ktype] = kpred
+        if model is not None:
+            predictions['zlinear'] = zsvc_pred
+        res_pvalue = evaluate_p_value(predictions)
+        if res_pvalue is not None:
+            H, p = res_pvalue
+            score_str = 'Kruskal-Wallis H-test, H: ' + str(H) + ', p-value: ' + str(p)
+            print(score_str)
+            lines += [score_str, '\n']
+
+        # score_str = f'SVC Linear: {svc_score}'
+        # print(score_str)
+        # lines += [score_str, '\n']
+        for j, krr_type in enumerate(ksvc_types):
+            score_str = f'KernelRidge ({krr_type}):{np.mean(ksvc_scores[j])}'
+            print(score_str)
+            lines += [score_str, '\n']
+
+        if models is not None:
+            for j, model in enumerate(models):
+                score_str = f'Our approach: {zsvc_scores[j]}'
+                print(score_str)
+                lines += [score_str, '\n']
+                score_str = f'(On train) Our approach: {t_zsvc_score[j]}'
+                print(score_str)
+                lines += [score_str, '\n']
+
+    with open(f"{save_dir}/eval_res.txt", 'w') as f:
+        f.writelines(lines)
+
+    # np.save(f"{save_dir}/predictions.npy", predictions)
+
+    return zsvcs
 
 
 def evaluate_classification(model, train_dataset, val_dataset, save_dir, device, fithyperparam=True, batch_size=10,
@@ -2544,8 +3031,38 @@ def evaluate_graph_permutation(model, train_dataset, val_dataset, save_dir, devi
             break
 
 
-def launch_evaluation(eval_type, dataset_name, model, gaussian_params, train_dataset, val_dataset, save_dir, device,
-                      batch_size, n_permutation_test=None):
+def evaluate_predictor(eval_type, dataset_name, models, add_features_li, train_dataset, test_dataset, save_dir, device,
+                       batch_size, n_permutation_test=None):
+    assert len(models) > 0, 'empty list of models !'
+
+    predictors = None
+
+    if eval_type == 'classification':
+        dataset_name_eval = ['mnist', 'cifar10', 'double_moon', 'iris', 'bcancer'] + GRAPH_CLASSIFICATION_DATASETS
+        assert dataset_name in dataset_name_eval, f'Classification can only be evaluated on {dataset_name_eval}'
+        if len(models) > 1:
+            predictors = multi_evaluate_classification(models, add_features_li, train_dataset, test_dataset, save_dir,
+                                                       device, batch_size=batch_size,
+                                                       n_permutation_test=args.n_permutation_test)
+        else:
+            predictor = evaluate_classification(models[0], train_dataset, test_dataset, save_dir, device,
+                                                batch_size=batch_size, n_permutation_test=n_permutation_test)
+            predictors = [predictor]
+    elif eval_type == 'regression':
+        assert train_dataset.is_regression_dataset(), 'the dataset is not made for regression purposes'
+        if len(models) > 1:
+            assert False, 'Not Implemented'
+        else:
+            predictor = evaluate_regression(models[0], train_dataset, test_dataset, save_dir, device,
+                                            batch_size=batch_size, n_permutation_test=n_permutation_test)
+            predictors = [predictor]
+
+    return predictors
+
+
+def evaluate_feature_space(eval_type, dataset_name, model, gaussian_params, train_dataset, val_dataset, save_dir,
+                           device,
+                           batch_size, Z=None, predictor=None):
     dim_per_label, n_dim = train_dataset.get_dim_per_label(return_total_dim=True)
 
     # generate flows
@@ -2557,12 +3074,7 @@ def launch_evaluation(eval_type, dataset_name, model, gaussian_params, train_dat
     if eval_type == 'classification':
         dataset_name_eval = ['mnist', 'cifar10', 'double_moon', 'iris', 'bcancer'] + GRAPH_CLASSIFICATION_DATASETS
         assert dataset_name in dataset_name_eval, f'Classification can only be evaluated on {dataset_name_eval}'
-        _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
-                                 only_Z=isinstance(train_dataset, GraphDataset), batch_size=batch_size)
-        predmodel = evaluate_classification(model, train_dataset, val_dataset, save_dir, device, batch_size=batch_size,
-                                            n_permutation_test=n_permutation_test)
-        # evaluate_classification(model, train_dataset, val_dataset, save_dir, device, batch_size=batch_size,
-        #                         n_permutation_test=n_permutation_test)
+
         print_as_mol = True
         print_as_graph = False
         refresh_means = False
@@ -2571,9 +3083,10 @@ def launch_evaluation(eval_type, dataset_name, model, gaussian_params, train_dat
         computed_means = model.refresh_classification_mean_classes(Z, train_dataset.true_labels) if refresh_means \
             else None
         evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=print_as_mol,
-                          print_as_graph=print_as_graph, eval_type=eval_type, means=computed_means, batch_size=batch_size)
+                          print_as_graph=print_as_graph, eval_type=eval_type, means=computed_means,
+                          batch_size=batch_size)
         evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=12, print_as_mol=print_as_mol,
-                           print_as_graph=print_as_graph, eval_type=eval_type, predmodel=predmodel,
+                           print_as_graph=print_as_graph, eval_type=eval_type, predmodel=predictor,
                            means=computed_means, debug=True, batch_size=batch_size)
         if isinstance(val_dataset, GraphDataset):
             evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=9, n_interpolation=30, Z=Z,
@@ -2683,10 +3196,7 @@ def launch_evaluation(eval_type, dataset_name, model, gaussian_params, train_dat
         #     assert dataset_name in dataset_name_eval, f'Projection can only be evaluated on {dataset_name_eval}'
     elif eval_type == 'regression':
         assert train_dataset.is_regression_dataset(), 'the dataset is not made for regression purposes'
-        predmodel = evaluate_regression(model, train_dataset, val_dataset, save_dir, device, batch_size=batch_size,
-                                        n_permutation_test=n_permutation_test)
-        _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
-                                 only_Z=isinstance(train_dataset, GraphDataset), batch_size=batch_size)
+
         print_as_mol = True
         print_as_graph = False
         print(f'(print_as_mol, print_as_graph) are set manually to '
@@ -2694,58 +3204,92 @@ def launch_evaluation(eval_type, dataset_name, model, gaussian_params, train_dat
         evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=print_as_mol,
                           print_as_graph=print_as_graph, batch_size=batch_size)
         evaluate_preimage2(model, val_dataset, device, save_dir, n_y=12, n_samples_by_y=1,
-                           print_as_mol=print_as_mol, print_as_graph=print_as_graph, predmodel=predmodel, debug=True,
+                           print_as_mol=print_as_mol, print_as_graph=print_as_graph, predmodel=predictor, debug=True,
                            batch_size=batch_size)
         if isinstance(val_dataset, GraphDataset):
             evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z,
                                           print_as_mol=print_as_mol, print_as_graph=print_as_graph)
 
 
-def main(args):
-    print(args)
-    if args.seed is not None:
-        set_seed(args.seed)
+def init_model_opti(args, folder, config, dataset, device):
+    dataset_name, model_type, folder_name = folder.split('/')[-3:]
 
-    dataset_name, model_type, folder_name = args.folder.split('/')[-3:]
+    n_dim, dim_per_label = dataset.get_dim_per_label(return_total_dim=True)
+    config['dim_per_label'] = dim_per_label
 
-    # Retrieve parameters from name
-    # n_block, n_flow, mean_of_eigval, dim_per_label, label, fixed_eigval, uniform_eigval, gaussian_eigval, \
-    # reg_use_var, split_graph_dim = \
-    config = retrieve_params_from_name(folder_name, model_type)
-
-    # DATASET #
-    dataset = load_dataset(args, dataset_name, model_type, to_evaluate=True, add_feature=config['add_feature'])
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    flow_path = f'{args.folder}/save/best_{args.model_to_use}_model.pth'
+    flow_path = f'{folder}/save/best_{args.model_to_use}_model.pth'
     # assert os.path.exists(flow_path), f'snapshot path {flow_path} does not exists'
+    is_last_chckpt = False
     if not os.path.exists(flow_path):
         # os.chdir(args.folder)
         saves = []
-        for file in glob.glob(f"{args.folder}/checkpoint_*/checkpoint"):
+        for file in glob.glob(f"{folder}/checkpoint_*/checkpoint"):
             saves.append(file)
 
         saves.sort()
         print(saves)
         flow_path = saves[-1]
-        # is_last_chckpt = True
+        is_last_chckpt = True
         print('selecting last saved checkpoint as model.')
 
-    if config['label'] is not None:
-        dataset.reduce_dataset('one_class', label=config['label'])
+    # initialize gaussian params
+    gaussian_params = initialize_gaussian_params(args, dataset, config['var_type'], config['mean_of_eigval'],
+                                                 config['dim_per_label'], dataset.is_regression_dataset(),
+                                                 config['split_graph_dim'], fixed_eigval=config['fixed_eigval'],
+                                                 gaussian_eigval=config['gaussian_eigval'],
+                                                 add_feature=config['add_feature'])
 
-    # Load the splits of the dataset used in the training phase
-    train_idx_path = f'{args.folder}/train_idx.npy'
-    test_idx_path = f'{args.folder}/test_idx.npy'
-    train_dataset, test_dataset = load_split_dataset(dataset, train_idx_path, test_idx_path,
-                                                     reselect_val_idx=args.reselect_val_idx, split_type='test')
+    # n_flow or n_block should be specified in arguments as there are not saved during training
+    learn_mean = True
+    reg_use_var = False
+    if model_type == 'cglow':
+        args_cglow, _ = cglow_arguments().parse_known_args()
+        # args_cglow.n_flow = n_flow
+        n_channel = dataset.n_channel
+        model_single = load_cglow_model(args_cglow, n_channel, gaussian_params=gaussian_params,
+                                        learn_mean=learn_mean, device=device)
+    elif model_type == 'seqflow':
+        args_seqflow, _ = seqflow_arguments().parse_known_args()
+        model_single = load_seqflow_model(n_dim, args_seqflow.n_flow, gaussian_params=gaussian_params,
+                                          learn_mean=learn_mean, reg_use_var=reg_use_var, dataset=dataset)
+    elif model_type == 'ffjord':
+        args_ffjord, _ = ffjord_arguments().parse_known_args()
+        # args_ffjord.n_block = n_block
+        model_single = load_ffjord_model(args_ffjord, n_dim, gaussian_params=gaussian_params,
+                                         learn_mean=learn_mean, reg_use_var=reg_use_var, dataset=dataset)
+    elif model_type == 'moflow':
+        args_moflow, _ = moflow_arguments().parse_known_args()
+        model_single = load_moflow_model(args_moflow,
+                                         gaussian_params=gaussian_params,
+                                         learn_mean=learn_mean, reg_use_var=reg_use_var,
+                                         dataset=dataset, add_feature=config['add_feature'])
+    else:
+        assert False, 'unknown model type!'
 
-    # reduce train dataset size (fitting too long)
-    if args.reduce_test_dataset_size is not None:
-        train_dataset = train_dataset.duplicate()
-        print('Train dataset reduced in order to accelerate. (stratified)')
-        train_dataset.reduce_dataset_ratio(args.reduce_test_dataset_size, stratified=True)
+    if not is_last_chckpt:
+        model_state = torch.load(flow_path, map_location=device)
+    else:
+        model_state, optimizer_state = torch.load(flow_path, map_location=device)
+    model_single.load_state_dict(model_state)
+
+    return model_single, gaussian_params
+
+
+def init_model(args, folder, config, dataset, device):
+    dataset_name, model_type, folder_name = folder.split('/')[-3:]
+
+    flow_path = f'{folder}/save/best_{args.model_to_use}_model.pth'
+    # assert os.path.exists(flow_path), f'snapshot path {flow_path} does not exists'
+    if not os.path.exists(flow_path):
+        # os.chdir(args.folder)
+        saves = []
+        for file in glob.glob(f"{folder}/checkpoint_*/checkpoint"):
+            saves.append(file)
+
+        saves.sort()
+        print(saves)
+        flow_path = saves[-1]
+        print('selecting last saved checkpoint as model.')
 
     # dim_per_label, n_dim = dataset.get_dim_per_label(return_total_dim=True)
     n_dim = dataset.get_n_dim()
@@ -2774,7 +3318,9 @@ def main(args):
         model_single = load_cglow_model(args_cglow, n_channel, gaussian_params=gaussian_params,
                                         learn_mean='lmean' in folder_name, device=device)
     elif model_type == 'seqflow':
-        model_single = load_seqflow_model(n_dim, config['n_flow'], gaussian_params=gaussian_params,
+        args_seqflow, _ = seqflow_arguments().parse_known_args()
+        args_seqflow.n_flow = config['n_flow']
+        model_single = load_seqflow_model(n_dim, args_seqflow.n_flow, gaussian_params=gaussian_params,
                                           learn_mean='lmean' in folder_name, reg_use_var=config['reg_use_var'],
                                           dataset=dataset)
 
@@ -2822,20 +3368,150 @@ def main(args):
     #         n_params[k] = v
     # model_single.load_state_dict(n_params)
     # model = model_single.module
-    model = model_single
-    model = model.to(device)
-    model.eval()
+    return model_single, gaussian_params
 
-    os.chdir(args.folder)
 
-    save_dir = './save'
-    create_folder(save_dir)
+def main(args):
+    print(args)
+    if args.seed is not None:
+        set_seed(args.seed)
 
-    # evaluate_graph_permutation(model, train_dataset, val_dataset, save_dir, device, batch_size=batch_size)
-    batch_size = args.batch_size
-    eval_type = args.eval_type
-    launch_evaluation(eval_type, dataset_name, model, gaussian_params, train_dataset, test_dataset, save_dir, device,
-                      batch_size, n_permutation_test=args.n_permutation_test)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    if '[' in args.folder:
+        # if multiple folders the separator should be |
+        paths = list(map(str, args.folder.strip('[]').split('|')))
+
+        # test if models have been trained with the same environment
+        first_dataset_name = None
+        first_train_idx = None
+        first_test_idx = None
+        for folder_path in paths:
+            dataset_name, model_type, folder_name = folder_path.split('/')[-3:]
+
+            assert first_dataset_name is None or first_dataset_name == dataset_name, \
+                'models should have been used on the same dataset !'
+            first_dataset_name = dataset_name
+
+            # verify same idx splits
+            train_idx = None
+            test_idx = None
+            train_idx_path = f'{folder_path}/train_idx.npy'
+            test_idx_path = f'{folder_path}/test_idx.npy'
+            if os.path.exists(train_idx_path):
+                train_idx = np.load(train_idx_path)
+            if os.path.exists(test_idx_path):
+                test_idx = np.load(test_idx_path)
+
+            assert first_train_idx is None or (first_train_idx == train_idx).all(), \
+                'models should have been trained with the same train idx !'
+            first_train_idx = train_idx
+            assert first_test_idx is None or (first_test_idx == test_idx).all(), \
+                'models should have been trained with the same test idx !'
+            first_test_idx = test_idx
+
+        folder = paths[0]
+    else:
+        folder = args.folder
+
+    dataset_name, model_type, folder_name = folder.split('/')[-3:]
+
+    if 'train_opti' in folder_name:
+        params_path = folder + '/params.json'
+        config, batch_size = retrieve_config(params_path)
+    else:
+        # Retrieve parameters from name
+        # n_block, n_flow, mean_of_eigval, dim_per_label, label, fixed_eigval, uniform_eigval, gaussian_eigval, \
+        # reg_use_var, split_graph_dim = \
+        config = retrieve_params_from_name(folder_name, model_type)
+        batch_size = args.batch_size
+
+    # DATASET #
+    dataset = load_dataset(args, dataset_name, model_type in GRAPH_MODELS, to_evaluate=True,
+                           add_feature=config['add_feature'])
+
+    if config['label'] is not None:
+        dataset.reduce_dataset('one_class', label=config['label'])
+
+    # Load the splits of the dataset used in the training phase
+    train_idx_path = f'{folder}/train_idx.npy'
+    test_idx_path = f'{folder}/test_idx.npy'
+    train_dataset, test_dataset = load_split_dataset(dataset, train_idx_path, test_idx_path,
+                                                     reselect_val_idx=args.reselect_val_idx, split_type='test')
+
+    # reduce train dataset size (fitting too long)
+    if args.reduce_test_dataset_size is not None:
+        train_dataset = train_dataset.duplicate()
+        print('Train dataset reduced in order to accelerate. (stratified)')
+        train_dataset.reduce_dataset_ratio(args.reduce_test_dataset_size, stratified=True)
+
+    if '[' in args.folder:
+        paths = list(map(str, args.folder.strip('[]').split('|')))
+
+        models = []
+        g_params = []
+        add_feature_li = []
+        for folder_path in paths:
+            if 'train_opti' in folder_path:
+                params_path = folder_path + '/params.json'
+                config, _ = retrieve_config(params_path)
+                add_feature_li.append(config['add_feature'])
+                model, gaussian_params = init_model_opti(args, folder_path, config, dataset, device)
+            else:
+                config = retrieve_params_from_name(folder_path, model_type)
+                add_feature_li.append(config['add_feature'])
+                model, gaussian_params = init_model(args, folder_path, config, dataset, device)
+            models.append(model)
+            g_params.append(gaussian_params)
+
+        os.chdir(paths[0])
+
+        save_dir = './save'
+        create_folder(save_dir)
+        eval_type = args.eval_type
+        predictors = evaluate_predictor(eval_type, dataset_name, models, add_feature_li, train_dataset, test_dataset,
+                                        save_dir, device, batch_size, n_permutation_test=args.n_permutation_test)
+
+        for i, model in enumerate(models):
+            model.to(device)
+            train_dataset.add_feature = add_feature_li[i]
+            test_dataset.add_feature = add_feature_li[i]
+            _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
+                                     only_Z=isinstance(train_dataset, GraphDataset), batch_size=batch_size)
+            evaluate_feature_space(eval_type, dataset_name, model, g_params[i], train_dataset, test_dataset, save_dir,
+                                   device, batch_size, Z=Z, predictor=predictors[i])
+
+            model.del_model_from_gpu()
+    else:
+        if 'train_opti' in folder_name:
+            model, gaussian_params = init_model_opti(args, folder, config, dataset, device)
+        else:
+            model, gaussian_params = init_model(args, folder, config, dataset, device)
+
+        model = model.to(device)
+        model.eval()
+
+        os.chdir(args.folder)
+
+        save_dir = './save'
+        create_folder(save_dir)
+
+        # evaluate_graph_permutation(model, train_dataset, val_dataset, save_dir, device, batch_size=batch_size)
+        eval_type = args.eval_type
+        Z = None
+        predictors = [None]
+        _, Z = create_figures_XZ(model, train_dataset, save_dir, device, std_noise=0.1,
+                                 only_Z=isinstance(train_dataset, GraphDataset), batch_size=batch_size)
+        predictors = evaluate_predictor(eval_type, dataset_name, [model], [config['add_feature']], train_dataset,
+                                        test_dataset, save_dir, device, batch_size,
+                                        n_permutation_test=args.n_permutation_test)
+        evaluate_feature_space(eval_type, dataset_name, model, gaussian_params, train_dataset, test_dataset, save_dir,
+                               device, batch_size, Z=Z, predictor=predictors[0])
+
+        model.del_model_from_gpu()
+    del dataset
+    del test_dataset
+    del train_dataset
 
 
 if __name__ == "__main__":
