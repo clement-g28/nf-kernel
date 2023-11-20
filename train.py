@@ -448,11 +448,11 @@ def train(args, config, train_dataset, val_dataset, test_dataset, save_dir, is_r
             # if accuracy < best_accuracy and epoch > args.save_at_epoch and epoch % args.save_each_epoch == 0:
 
             if epoch > 1:
-
                 # best_accuracy = accuracy
                 if is_raytuning:
                     with tune.checkpoint_dir(epoch) as checkpoint_dir:
-                        score = test_pred_model(args, train_dataset, test_dataset, model, checkpoint_dir, config)
+                        # score = test_pred_model(args, train_dataset, test_dataset, model, checkpoint_dir, config)
+                        score = test_pred_model(args, train_dataset, val_dataset, model, checkpoint_dir, config)
                         if best_score is None or score_comparer(score, best_score):
                             best_score = score
                             path = os.path.join(checkpoint_dir, "checkpoint")
@@ -460,7 +460,8 @@ def train(args, config, train_dataset, val_dataset, test_dataset, save_dir, is_r
                 else:
                     checkpoint_dir = os.path.join(save_dir, f"checkpoint_{str(epoch).zfill(5)}")
                     create_folder(checkpoint_dir)
-                    score = test_pred_model(args, train_dataset, test_dataset, model, checkpoint_dir, config)
+                    # score = test_pred_model(args, train_dataset, test_dataset, model, checkpoint_dir, config)
+                    score = test_pred_model(args, train_dataset, val_dataset, model, checkpoint_dir, config)
                     if best_score is None or score_comparer(score, best_score):
                         best_score = score
                         path = os.path.join(checkpoint_dir, "checkpoint")

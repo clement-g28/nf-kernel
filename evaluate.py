@@ -713,7 +713,7 @@ def multi_evaluate_classification(models, add_features_li, train_dataset, val_da
                 graph_ksvcs[i].fit(K, labels_train)
                 print(f'Fitting done.')
             end = time.time()
-            print(f"time to fit {krr_type} ridge : {str(end - start)}")
+            print(f"time to fit {krr_type} svc : {str(end - start)}")
 
     if isinstance(train_dataset, GraphDataset):
         n_permutation = 20
@@ -1192,7 +1192,7 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
                 graph_ksvcs[i].fit(K, labels_train)
                 print(f'Fitting done.')
             end = time.time()
-            print(f"time to fit {krr_type} ridge : {str(end - start)}")
+            print(f"time to fit {krr_type} svc : {str(end - start)}")
 
     if isinstance(train_dataset, GraphDataset):
         n_permutation = 20
@@ -3445,6 +3445,7 @@ def main(args):
         print('Train dataset reduced in order to accelerate. (stratified)')
         train_dataset.reduce_dataset_ratio(args.reduce_test_dataset_size, stratified=True)
 
+    # if multiple models
     if '[' in args.folder:
         paths = list(map(str, args.folder.strip('[]').split('|')))
 
@@ -3465,14 +3466,18 @@ def main(args):
             g_params.append(gaussian_params)
 
         os.chdir(paths[0])
-
         save_dir = './save'
         create_folder(save_dir)
+
         eval_type = args.eval_type
         predictors = evaluate_predictor(eval_type, dataset_name, models, add_feature_li, train_dataset, test_dataset,
                                         save_dir, device, batch_size, n_permutation_test=args.n_permutation_test)
 
         for i, model in enumerate(models):
+            os.chdir(paths[i])
+            save_dir = './save'
+            create_folder(save_dir)
+
             model.to(device)
             train_dataset.add_feature = add_feature_li[i]
             test_dataset.add_feature = add_feature_li[i]
@@ -3492,7 +3497,6 @@ def main(args):
         model.eval()
 
         os.chdir(args.folder)
-
         save_dir = './save'
         create_folder(save_dir)
 
