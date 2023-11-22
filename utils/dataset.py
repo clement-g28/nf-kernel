@@ -25,7 +25,8 @@ SIMPLE_DATASETS = ['single_moon', 'double_moon', 'iris', 'bcancer']
 IMAGE_DATASETS = ['mnist', 'cifar10', 'olivetti_faces']
 SIMPLE_REGRESSION_DATASETS = ['swissroll', 'diabetes', 'waterquality', 'aquatoxi', 'fishtoxi', 'trafficflow']
 GRAPH_REGRESSION_DATASETS = ['qm7', 'qm9', 'freesolv', 'esol', 'lipo', 'fishtoxi']
-GRAPH_CLASSIFICATION_DATASETS = ['toxcast', 'AIDS', 'Letter-low', 'Letter-med', 'Letter-high', 'MUTAG', 'COIL-DEL', 'BZR', 'BACE']
+GRAPH_CLASSIFICATION_DATASETS = ['toxcast', 'AIDS', 'Letter-low', 'Letter-med', 'Letter-high', 'MUTAG', 'COIL-DEL',
+                                 'BZR', 'BACE']
 
 
 # abstract base kernel dataset class
@@ -901,7 +902,7 @@ class GraphDataset(BaseDataset):
         return x_shape, adj_shape
 
     def is_attributed_node_dataset(self):
-        return 'Letter' in self.dataset_name #or self.dataset_name in ['Letter-med']
+        return 'Letter' in self.dataset_name  # or self.dataset_name in ['Letter-med']
 
     def define_networkx_labels(self):
         self.label_names = {'node_labels': ['node_attr'], 'node_attrs': ['node_attr'], 'edge_labels': ['bond_attr'],
@@ -1395,8 +1396,8 @@ class RegressionGraphDataset(GraphDataset):
         elif self.dataset_name == 'esol':
             b_n_type = 4
             # b_n_squeeze = 1
-            b_n_squeeze = 11
-            a_n_node = 22
+            b_n_squeeze = 5
+            a_n_node = 25  # change from 22
             a_n_type = len(atom_type_list) + 1  # 5
         elif self.dataset_name == 'lipo':
             b_n_type = 4
@@ -1751,7 +1752,7 @@ class ClassificationGraphDataset(GraphDataset):
                 if 'Letter' in name or name in ['AIDS', 'MUTAG', 'COIL-DEL', 'BZR']:
                     # node_features = name in ['Letter-med', 'COIL-DEL']  # features if not node labels (e.g Letter-med (x,y))
                     node_features = 'Letter' in name or name in [
-                                             'COIL-DEL']  # features if not node labels (e.g Letter-med (x,y))
+                        'COIL-DEL']  # features if not node labels (e.g Letter-med (x,y))
                     dset = TUDataset(path, name=name, use_node_attr=node_features, use_edge_attr=True)
                     # TEST with virtual node
                     # node_features = False if name in ['Letter-med'] else node_features

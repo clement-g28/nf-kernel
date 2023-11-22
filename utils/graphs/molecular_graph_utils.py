@@ -236,7 +236,7 @@ def get_molecular_dataset_mp(name='qm7', data_path=None, categorical_values=Fals
         val_mols = valid_dataset.X
         test_mols = test_dataset.X
 
-        filter_n_atom = 22
+        filter_n_atom = 25 # change from 22
         res_mols, res_ys, label_map, max_num_nodes = filter_datasets_with_n_atoms(
             datasets=[(train_mols, train_y), (test_mols, test_y), (val_mols, val_y)],
             filter_n_atom=filter_n_atom)
