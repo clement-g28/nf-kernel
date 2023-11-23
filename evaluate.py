@@ -1843,9 +1843,9 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
         wl_height = 5
         edge_to_node = True
         normalize = False
-        # graph_kernel_names = ['wl', 'sp', 'hadcode']
+        graph_kernel_names = ['wl', 'sp', 'hadcode']
         # graph_kernel_names = ['wl', 'sp']
-        graph_kernel_names = []
+        # graph_kernel_names = []
         graph_kernels = []
         graph_krr_params = []
         for graph_kernel in graph_kernel_names:

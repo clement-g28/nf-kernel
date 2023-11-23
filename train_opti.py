@@ -253,7 +253,7 @@ if __name__ == "__main__":
     # QM7, ESOL
     config = {
         "var_type": 'uniform',
-        "var": tune.uniform(0.1, 0.5),
+        "var": tune.uniform(0.05, 0.5),
         "beta": tune.randint(10, 200),
         "noise": tune.uniform(0.3, 0.6),
         # "noise_x": tune.uniform(0.05, 0.3),
@@ -295,7 +295,7 @@ if __name__ == "__main__":
     test_dataset_id = ray.put(test_dataset)
     result = tune.run(
         partial(train_opti),
-        resources_per_trial={"cpu": 4, "gpu": 0.25},
+        resources_per_trial={"cpu": 4, "gpu": 0.5},
         config=config,
         num_samples=args.n_trials,
         scheduler=scheduler,

@@ -57,7 +57,7 @@ if __name__ == '__main__':
     score_comparer = compare_regression_score if dataset_name in GRAPH_REGRESSION_DATASETS or \
                                                  dataset_name in SIMPLE_REGRESSION_DATASETS \
         else compare_classification_score
-
+    print(score_comparer)
     folder_paths = []
     if not args.single:
         for file in os.listdir(f"{args.folder}"):
