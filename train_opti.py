@@ -295,7 +295,7 @@ if __name__ == "__main__":
     test_dataset_id = ray.put(test_dataset)
     result = tune.run(
         partial(train_opti),
-        resources_per_trial={"cpu": 4, "gpu": 0.5},
+        resources_per_trial={"cpu": 4, "gpu": 0.3},
         config=config,
         num_samples=args.n_trials,
         scheduler=scheduler,
