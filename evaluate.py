@@ -1763,7 +1763,7 @@ def multi_evaluate_regression(models, add_features_li, train_dataset, val_datase
                 # param_gridlin = [{'Ridge__kernel': [kernel_name], 'Ridge__alpha': np.logspace(-5, 2, 11)}]
                 param_gridlin = [{'Ridge__alpha': np.concatenate((np.logspace(-5, 2, 11), np.array([1])))}]
                 model_type = ('Ridge', Ridge(max_iter=100000))
-                # model_type = ('SVC', SVC())
+                # model_type = ('Ridge', Ridge())
                 scaler = False
                 zlinridge = learn_or_load_modelhyperparams(Z, tlabels, kernel_name, param_gridlin, save_dir,
                                                            model_type=model_type, scaler=scaler, save=False)
@@ -1798,7 +1798,7 @@ def multi_evaluate_regression(models, add_features_li, train_dataset, val_datase
         linridge.fit(X_train, labels_train)
         print(f'Fitting done.')
     end = time.time()
-    print(f"time to fit linear svc : {str(end - start)}")
+    print(f"time to fit linear ridge : {str(end - start)}")
 
     krr_types = ['rbf', 'poly', 'sigmoid']
     # krr_types = ['rbf']
@@ -1826,7 +1826,7 @@ def multi_evaluate_regression(models, add_features_li, train_dataset, val_datase
         start = time.time()
         if fithyperparam:
             krrs[i] = learn_or_load_modelhyperparams(X_train, labels_train, krr_type, [krr_params[i]], save_dir,
-                                                     model_type=('SVC', KernelRidge()), scaler=False)
+                                                     model_type=('Ridge', KernelRidge()), scaler=False)
         else:
             krrs[i] = make_pipeline(StandardScaler(), KernelRidge(kernel=krr_type))
             krrs[i].fit(X_train, labels_train)
@@ -1890,7 +1890,7 @@ def multi_evaluate_regression(models, add_features_li, train_dataset, val_datase
                 graph_krrs[i].fit(K, labels_train)
                 print(f'Fitting done.')
             end = time.time()
-            print(f"time to fit {krr_type} svc : {str(end - start)}")
+            print(f"time to fit {krr_type} ridge : {str(end - start)}")
 
     if isinstance(train_dataset, GraphDataset):
         n_permutation = 20
@@ -1914,7 +1914,7 @@ def multi_evaluate_regression(models, add_features_li, train_dataset, val_datase
             krr_preds.append([])
         krr_graph_preds = []
         krr_graph_scores = []
-        for graph_ksvc in graph_krrs:
+        for graph_krr in graph_krrs:
             krr_graph_scores.append([])
             krr_graph_preds.append([])
 
@@ -1950,7 +1950,7 @@ def multi_evaluate_regression(models, add_features_li, train_dataset, val_datase
 
                     start = time.time()
                     pred = zlinridges[i].predict(val_inZ)
-                    zridge_r2_score = zlinridge.score(val_inZ, elabels)
+                    zridge_r2_score = zlinridges[i].score(val_inZ, elabels)
                     zridge_mae_score = np.abs(pred - elabels).mean()
                     zridge_mse_score = np.power(pred - elabels, 2).mean()
                     # print(f'Our approach R2: {zridge_r2_score}, MSE: {zridge_mse_score}, MAE: {zridge_mae_score}')
@@ -1979,11 +1979,11 @@ def multi_evaluate_regression(models, add_features_li, train_dataset, val_datase
 
             start = time.time()
             for i, krr in enumerate(krrs):
-                kridge_pred = krr.predict(X_val)
-                kridge_score = classification_score(kridge_pred, labels_val)
-                # ksvc_score = ksvc.score(X_val, labels_val)
-                krr_preds[i].append(kridge_pred)
-                krr_scores[i].append(kridge_score)
+                krr_r2_score = krr.score(X_val, labels_val)
+                krr_mae_score = np.abs(krr.predict(X_val) - labels_val).mean()
+                krr_mse_score = np.power(krr.predict(X_val) - labels_val, 2).mean()
+                # krr_score = np.abs(krr.predict(X_val) - labels_val).mean()
+                krr_scores[i].append((krr_r2_score, krr_mae_score, krr_mse_score))
             end = time.time()
             print(f"time to predict with {len(krrs)} kernelridge : {str(end - start)}")
 
@@ -3716,7 +3716,7 @@ def evaluate_feature_space(eval_type, dataset_name, model, gaussian_params, trai
 def init_model_opti(args, folder, config, dataset, device):
     dataset_name, model_type, folder_name = folder.split('/')[-3:]
 
-    n_dim, dim_per_label = dataset.get_dim_per_label(return_total_dim=True)
+    n_dim, dim_per_label = dataset.get_dim_per_label(add_feature=config['add_feature'], return_total_dim=True)
     config['dim_per_label'] = dim_per_label
 
     flow_path = f'{folder}/save/best_{args.model_to_use}_model.pth'
@@ -3967,6 +3967,7 @@ def main(args):
             models.append(model)
             g_params.append(gaussian_params)
 
+        current_working_directory = os.getcwd()
         os.chdir(paths[0])
         save_dir = './save'
         create_folder(save_dir)
@@ -3976,6 +3977,7 @@ def main(args):
                                         save_dir, device, batch_size, n_permutation_test=args.n_permutation_test)
 
         for i, model in enumerate(models):
+            os.chdir(current_working_directory)
             os.chdir(paths[i])
             save_dir = './save'
             create_folder(save_dir)
