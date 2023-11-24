@@ -635,14 +635,15 @@ def multi_evaluate_classification(models, add_features_li, train_dataset, val_da
     # ksvc_types = ['poly']
     ksvc_params = [
         {'SVC__kernel': ['rbf'], 'SVC__gamma': np.logspace(-5, 3, 10),
-         'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))},
-        # {'SVC__kernel': ['poly'], 'SVC__gamma': np.logspace(-5, 3, 5),
-        #  'SVC__degree': np.linspace(1, 4, 4).astype(np.int),
-        #  'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))},
+         'SVC__C': np.concatenate((np.logspace(-5, 3, 5), np.array([1])))},
         {'SVC__kernel': ['poly'], 'SVC__gamma': np.logspace(-5, 1, 5),
-         'SVC__degree': np.linspace(1, 2, 2).astype(np.int),
-         'SVC__C': np.concatenate((np.logspace(-5, 1, 10), np.array([1])))},
-        {'SVC__kernel': ['sigmoid'], 'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))}
+         'SVC__degree': np.linspace(1, 4, 4).astype(np.int),
+         'SVC__C': np.concatenate((np.logspace(-5, 3, 5), np.array([1])))},
+        # {'SVC__kernel': ['poly'], 'SVC__gamma': np.logspace(-5, 1, 5),
+        #  'SVC__degree': np.linspace(1, 2, 2).astype(np.int),
+        #  'SVC__C': np.concatenate((np.logspace(-5, 1, 10), np.array([1])))},
+        {'SVC__kernel': ['sigmoid'], 'SVC__gamma': np.logspace(-5, 3, 5),
+         'SVC__C': np.concatenate((np.logspace(-5, 3, 5), np.array([1])))}
     ]
 
     ksvcs = [None] * len(ksvc_types)
@@ -1114,14 +1115,15 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
     # ksvc_types = ['poly']
     ksvc_params = [
         {'SVC__kernel': ['rbf'], 'SVC__gamma': np.logspace(-5, 3, 10),
-         'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))},
-        # {'SVC__kernel': ['poly'], 'SVC__gamma': np.logspace(-5, 3, 5),
-        #  'SVC__degree': np.linspace(1, 4, 4).astype(np.int),
-        #  'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))},
+         'SVC__C': np.concatenate((np.logspace(-5, 3, 5), np.array([1])))},
         {'SVC__kernel': ['poly'], 'SVC__gamma': np.logspace(-5, 1, 5),
-         'SVC__degree': np.linspace(1, 2, 2).astype(np.int),
-         'SVC__C': np.concatenate((np.logspace(-5, 1, 10), np.array([1])))},
-        {'SVC__kernel': ['sigmoid'], 'SVC__C': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))}
+         'SVC__degree': np.linspace(1, 4, 4).astype(np.int),
+         'SVC__C': np.concatenate((np.logspace(-5, 3, 5), np.array([1])))},
+        # {'SVC__kernel': ['poly'], 'SVC__gamma': np.logspace(-5, 1, 5),
+        #  'SVC__degree': np.linspace(1, 2, 2).astype(np.int),
+        #  'SVC__C': np.concatenate((np.logspace(-5, 1, 10), np.array([1])))},
+        {'SVC__kernel': ['sigmoid'], 'SVC__gamma': np.logspace(-5, 3, 5),
+         'SVC__C': np.concatenate((np.logspace(-5, 3, 5), np.array([1])))}
     ]
 
     ksvcs = [None] * len(ksvc_types)
@@ -1701,6 +1703,499 @@ def evaluate_distances(model, train_dataset, val_dataset, gaussian_params, z_sha
     return distances_results
 
 
+def multi_evaluate_regression(models, add_features_li, train_dataset, val_dataset, save_dir, device,
+                              fithyperparam=True, batch_size=10, n_permutation_test=None):
+    if isinstance(train_dataset, GraphDataset):
+        n_permutation_test = 5 if n_permutation_test is None else n_permutation_test
+        train_dataset.permute_graphs_in_dataset()
+        val_dataset.permute_graphs_in_dataset()
+
+    zlinridges = []
+
+    # Compute results with our approach if not None
+    if models is not None:
+        for i, model in enumerate(models):
+            train_dataset.add_feature = add_features_li[i]
+            print(f'Model {i} predictor definition...')
+            model.to(device)
+            model.eval()
+            start = time.time()
+            Z = []
+            tlabels = []
+            if isinstance(train_dataset, GraphDataset):
+                n_permutation = n_permutation_test
+                for n_perm in range(n_permutation):
+                    train_dataset.permute_graphs_in_dataset()
+
+                    loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+
+                    with torch.no_grad():
+                        for j, data in enumerate(loader):
+                            inp, labels = data
+                            inp = train_dataset.format_data(inp, device)
+                            labels = labels.to(device)
+                            log_p, distloss, logdet, out = model(inp, labels)
+                            Z.append(out.detach().cpu().numpy())
+                            tlabels.append(labels.detach().cpu().numpy())
+            else:
+                loader = train_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+
+                with torch.no_grad():
+                    for j, data in enumerate(loader):
+                        inp, labels = data
+                        inp = train_dataset.format_data(inp, device)
+                        labels = labels.to(device)
+                        log_p, distloss, logdet, out = model(inp, labels)
+                        Z.append(out.detach().cpu().numpy())
+                        tlabels.append(labels.detach().cpu().numpy())
+            tlabels = np.concatenate(tlabels, axis=0)
+            Z = np.concatenate(Z, axis=0).reshape(tlabels.shape[0], -1)
+            end = time.time()
+            print(f"time to get Z_train from X_train: {str(end - start)}, batch size: {batch_size}")
+
+            # Learn Ridge
+            start = time.time()
+            kernel_name = 'zlinear'
+            if fithyperparam:
+                # param_gridlin = [{'Ridge__kernel': [kernel_name], 'Ridge__alpha': np.linspace(0, 10, 11)}]
+                # linridge = learn_or_load_modelhyperparams(X_train, labels_train, kernel_name, param_gridlin, save_dir,
+                #                                           model_type=('Ridge', KernelRidge()), scaler=True)
+                # param_gridlin = [{'Ridge__kernel': [kernel_name], 'Ridge__alpha': np.logspace(-5, 2, 11)}]
+                param_gridlin = [{'Ridge__alpha': np.concatenate((np.logspace(-5, 2, 11), np.array([1])))}]
+                model_type = ('Ridge', Ridge(max_iter=100000))
+                # model_type = ('SVC', SVC())
+                scaler = False
+                zlinridge = learn_or_load_modelhyperparams(Z, tlabels, kernel_name, param_gridlin, save_dir,
+                                                           model_type=model_type, scaler=scaler, save=False)
+            else:
+                # linridge = make_pipeline(StandardScaler(), KernelRidge(kernel=kernel_name))
+                zlinridge = make_pipeline(StandardScaler(), Ridge(alpha=1.0))
+                zlinridge.fit(Z, tlabels)
+                print(f'Fitting done.')
+            print(zlinridge)
+            end = time.time()
+            print(f"time to fit linear ridge in Z : {str(end - start)}")
+            zlinridges.append(zlinridge)
+            model.to('cpu')
+
+    # KERNELS FIT
+    X_train = train_dataset.get_flattened_X()  # TODO : add the permutations ?
+    labels_train = train_dataset.true_labels
+
+    start = time.time()
+    kernel_name = 'linear'
+    if fithyperparam:
+        # param_gridlin = [{'Ridge__kernel': [kernel_name], 'Ridge__alpha': np.linspace(0, 10, 11)}]
+        # linridge = learn_or_load_modelhyperparams(X_train, labels_train, kernel_name, param_gridlin, save_dir,
+        #                                           model_type=('Ridge', KernelRidge()), scaler=True)
+        # param_gridlin = [{'Ridge__kernel': [kernel_name], 'Ridge__alpha': np.logspace(-5, 2, 11)}]
+        param_gridlin = [{'Ridge__alpha': np.logspace(-5, 2, 11)}]
+        linridge = learn_or_load_modelhyperparams(X_train, labels_train, kernel_name, param_gridlin, save_dir,
+                                                  model_type=('Ridge', Ridge()), scaler=False)
+    else:
+        # linridge = make_pipeline(StandardScaler(), KernelRidge(kernel=kernel_name))
+        linridge = make_pipeline(StandardScaler(), Ridge(alpha=0.1))
+        linridge.fit(X_train, labels_train)
+        print(f'Fitting done.')
+    end = time.time()
+    print(f"time to fit linear svc : {str(end - start)}")
+
+    krr_types = ['rbf', 'poly', 'sigmoid']
+    # krr_types = ['rbf']
+    # krr_types = ['poly', 'sigmoid']
+    # krr_types = []
+    # krr_params = [
+    #     {'Ridge__kernel': ['rbf'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__alpha': np.logspace(-5, 2, 11)},
+    #     {'Ridge__kernel': ['poly'], 'Ridge__gamma': np.logspace(-5, 3, 5),
+    #      'Ridge__degree': np.linspace(1, 4, 4).astype(np.int),
+    #      'Ridge__alpha': np.logspace(-5, 2, 11)},
+    #     {'Ridge__kernel': ['sigmoid'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__alpha': np.logspace(-5, 2, 11)}
+    # ]
+    krr_params = [
+        {'Ridge__kernel': ['rbf'], 'Ridge__gamma': np.logspace(-5, 3, 10),
+         'Ridge__alpha': np.concatenate((np.logspace(-5, 3, 5), np.array([1])))},
+        {'Ridge__kernel': ['poly'], 'Ridge__gamma': np.logspace(-5, 1, 5),
+         'Ridge__degree': np.linspace(1, 4, 4).astype(np.int),
+         'Ridge__alpha': np.concatenate((np.logspace(-5, 3, 5), np.array([1])))},
+        {'Ridge__kernel': ['sigmoid'], 'Ridge__gamma': np.logspace(-5, 3, 5),
+         'Ridge__alpha': np.concatenate((np.logspace(-5, 3, 5), np.array([1])))}
+    ]
+
+    krrs = [None] * len(krr_types)
+    for i, krr_type in enumerate(krr_types):
+        start = time.time()
+        if fithyperparam:
+            krrs[i] = learn_or_load_modelhyperparams(X_train, labels_train, krr_type, [krr_params[i]], save_dir,
+                                                     model_type=('SVC', KernelRidge()), scaler=False)
+        else:
+            krrs[i] = make_pipeline(StandardScaler(), KernelRidge(kernel=krr_type))
+            krrs[i].fit(X_train, labels_train)
+            print(f'Fitting done.')
+        end = time.time()
+        print(f"time to fit {krr_type} ridge : {str(end - start)}")
+
+    # GRAPH KERNELS FIT
+    if isinstance(train_dataset, GraphDataset):
+        def compute_kernel(name, dataset, edge_to_node, normalize, wl_height=10, attributed_node=False):
+            if name == 'wl':
+                K = compute_wl_kernel(dataset, wl_height=wl_height, edge_to_node=edge_to_node,
+                                      normalize=normalize, attributed_node=attributed_node)
+            elif name == 'prop':
+                K = compute_propagation_kernel(dataset, normalize=normalize, edge_to_node=edge_to_node,
+                                               attributed_node=attributed_node)
+            elif name == 'sp':
+                K = compute_sp_kernel(dataset, normalize=normalize, edge_to_node=edge_to_node,
+                                      attributed_node=attributed_node)
+            elif name == 'mslap':
+                K = compute_mslap_kernel(dataset, normalize=normalize, edge_to_node=edge_to_node,
+                                         attributed_node=attributed_node)
+            elif name == 'hadcode':
+                K = compute_hadcode_kernel(dataset, normalize=normalize, edge_to_node=edge_to_node,
+                                           attributed_node=attributed_node)
+            else:
+                assert False, f'unknown graph kernel: {graph_kernel}'
+            return K
+
+        wl_height = 5
+        normalize = False
+        if val_dataset.is_attributed_node_dataset():
+            graph_kernel_names = ['mslap', 'prop']
+            # graph_kernel_names = ['prop']
+            # graph_kernel_names = []
+            attributed_node = True
+            edge_to_node = False
+        else:
+            graph_kernel_names = ['wl', 'sp', 'hadcode']
+            attributed_node = False
+            edge_to_node = True
+        graph_kernels = []
+        graph_krr_params = []
+        for graph_kernel in graph_kernel_names:
+            K = compute_kernel(graph_kernel, train_dataset, edge_to_node=edge_to_node, normalize=normalize,
+                               wl_height=wl_height, attributed_node=attributed_node)
+            graph_kernels.append(('precomputed', K, graph_kernel))
+            graph_krr_params.append(
+                {'Ridge__kernel': ['precomputed'],
+                 'Ridge__alpha': np.concatenate((np.logspace(-5, 3, 10), np.array([1])))})
+
+        graph_krrs = [None] * len(graph_kernels)
+        for i, (krr_type, K, name) in enumerate(graph_kernels):
+            start = time.time()
+            if fithyperparam:
+                graph_krrs[i] = learn_or_load_modelhyperparams(K, labels_train, name, [graph_krr_params[i]],
+                                                               save_dir,
+                                                               model_type=('Ridge', KernelRidge()), scaler=False)
+            else:
+                graph_krrs[i] = make_pipeline(StandardScaler(), KernelRidge(kernel=name))
+                graph_krrs[i].fit(K, labels_train)
+                print(f'Fitting done.')
+            end = time.time()
+            print(f"time to fit {krr_type} svc : {str(end - start)}")
+
+    if isinstance(train_dataset, GraphDataset):
+        n_permutation = 20
+        models_preds = []
+        models_r2_scores = []
+        models_mae_scores = []
+        models_mse_scores = []
+        for model in models:
+            models_r2_scores.append([])
+            models_mae_scores.append([])
+            models_mse_scores.append([])
+            models_preds.append([])
+        ridge_preds = []
+        ridge_r2_scores = []
+        ridge_mse_scores = []
+        ridge_mae_scores = []
+        krr_preds = []
+        krr_scores = []
+        for krr in krrs:
+            krr_scores.append([])
+            krr_preds.append([])
+        krr_graph_preds = []
+        krr_graph_scores = []
+        for graph_ksvc in graph_krrs:
+            krr_graph_scores.append([])
+            krr_graph_preds.append([])
+
+        for n_perm in range(n_permutation):
+            val_dataset.permute_graphs_in_dataset()
+            # OUR APPROACH EVALUATION
+            if models is not None:
+                for i, model in enumerate(models):
+                    val_dataset.add_feature = add_features_li[i]
+                    model.to(device)
+                    # batch_size = 200 if 200 < len(val_dataset) else int(len(val_dataset) / 2)
+                    val_loader = val_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+
+                    start = time.time()
+                    val_inZ = []
+                    elabels = []
+                    val_predict = []
+                    with torch.no_grad():
+                        for j, data in enumerate(val_loader):
+                            inp, labels = data
+                            inp = val_dataset.format_data(inp, device)
+                            labels = labels.to(device)
+                            log_p, distloss, logdet, out = model(inp, labels)
+                            # probs = predict_by_log_p_with_gaussian_params(out, model.means, model.gaussian_params)
+                            # val_predict.append(probs.detach().cpu().numpy())
+                            val_inZ.append(out.detach().cpu().numpy())
+                            elabels.append(labels.detach().cpu().numpy())
+                    val_inZ = np.concatenate(val_inZ, axis=0).reshape(len(val_dataset), -1)
+                    elabels = np.concatenate(elabels, axis=0)
+                    # val_predict = np.concatenate(val_predict, axis=0)
+                    end = time.time()
+                    print(f"time to get Z_val from X_val : {str(end - start)}")
+
+                    start = time.time()
+                    pred = zlinridges[i].predict(val_inZ)
+                    zridge_r2_score = zlinridge.score(val_inZ, elabels)
+                    zridge_mae_score = np.abs(pred - elabels).mean()
+                    zridge_mse_score = np.power(pred - elabels, 2).mean()
+                    # print(f'Our approach R2: {zridge_r2_score}, MSE: {zridge_mse_score}, MAE: {zridge_mae_score}')
+                    models_preds[i].append(pred)
+                    models_r2_scores[i].append(zridge_r2_score)
+                    models_mse_scores[i].append(zridge_mse_score)
+                    models_mae_scores[i].append(zridge_mae_score)
+
+                    end = time.time()
+                    print(f"time to predict with zlinridge : {str(end - start)}")
+                    model.to('cpu')
+
+            # KERNELS EVALUATION
+            X_val = val_dataset.get_flattened_X()
+            labels_val = val_dataset.true_labels
+
+            start = time.time()
+            ridge_r2_score = linridge.score(X_val, labels_val)
+            ridge_mae_score = np.abs(linridge.predict(X_val) - labels_val).mean()
+            ridge_mse_score = np.power(linridge.predict(X_val) - labels_val, 2).mean()
+            ridge_r2_scores.append(ridge_r2_score)
+            ridge_mae_scores.append(ridge_mae_score)
+            ridge_mse_scores.append(ridge_mse_score)
+            end = time.time()
+            print(f"time to predict with xlinridge : {str(end - start)}")
+
+            start = time.time()
+            for i, krr in enumerate(krrs):
+                kridge_pred = krr.predict(X_val)
+                kridge_score = classification_score(kridge_pred, labels_val)
+                # ksvc_score = ksvc.score(X_val, labels_val)
+                krr_preds[i].append(kridge_pred)
+                krr_scores[i].append(kridge_score)
+            end = time.time()
+            print(f"time to predict with {len(krrs)} kernelridge : {str(end - start)}")
+
+            start = time.time()
+            # GRAPH KERNELS EVALUATION
+            for i, graph_krr in enumerate(graph_krrs):
+                K_val = compute_kernel(graph_kernels[i][2], (val_dataset, train_dataset), edge_to_node=edge_to_node,
+                                       normalize=normalize, wl_height=wl_height)
+                # K_val = compute_wl_kernel((val_dataset, train_dataset), wl_height=wl_height, edge_to_node=edge_to_node,
+                #                           normalize=normalize)
+                graph_krr_r2_score = graph_krr.score(K_val, labels_val)
+                graph_krr_mae_score = np.abs(graph_krr.predict(K_val) - labels_val).mean()
+                graph_krr_mse_score = np.power(graph_krr.predict(K_val) - labels_val, 2).mean()
+
+                # print(f'GraphKernelRidge ({graph_kernels[i][2]}) R2: {graph_krr_r2_score}, '
+                #       f'MSE: {graph_krr_mse_score}, MAE: {graph_krr_mae_score}')
+                krr_graph_scores[i].append((graph_krr_r2_score, graph_krr_mae_score, graph_krr_mse_score))
+
+            end = time.time()
+            print(f"time to predict with {len(graph_krrs)} graphkernelridge : {str(end - start)}")
+
+        # PRINT RESULTS
+        lines = []
+        print('Predictions scores :')
+        r2_mean_score = np.mean(ridge_r2_scores)
+        mse_mean_score = np.mean(ridge_mse_scores)
+        mae_mean_score = np.mean(ridge_mae_scores)
+        r2_std_score = np.std(ridge_r2_scores)
+        mse_std_score = np.std(ridge_mse_scores)
+        mae_std_score = np.std(ridge_mae_scores)
+        score_str = f'Ridge R2: {ridge_r2_scores}, MSE: {ridge_mse_scores}, MAE: {ridge_mae_scores} \n' \
+                    f'Mean Scores: R2: {r2_mean_score}, MSE: {mse_mean_score}, MAE: {mae_mean_score} \n' \
+                    f'Std Scores: R2: {r2_std_score}, MSE: {mse_std_score}, MAE: {mae_std_score}'
+        print(score_str)
+        lines += [score_str, '\n']
+
+        for j, krr_type in enumerate(krr_types):
+            r2_scores = []
+            mse_scores = []
+            mae_scores = []
+            for krr_r2_score, krr_mae_score, krr_mse_score in krr_scores[j]:
+                r2_scores.append(krr_r2_score)
+                mse_scores.append(krr_mse_score)
+                mae_scores.append(krr_mae_score)
+            r2_mean_score = np.mean(r2_scores)
+            mse_mean_score = np.mean(mse_scores)
+            mae_mean_score = np.mean(mae_scores)
+            r2_std_score = np.std(r2_scores)
+            mse_std_score = np.std(mse_scores)
+            mae_std_score = np.std(mae_scores)
+            score_str = f'KernelRidge ({krr_type}) R2: {r2_scores}, MSE: {mse_scores}, MAE: {mae_scores} \n' \
+                        f'Mean Scores: R2: {r2_mean_score}, MSE: {mse_mean_score}, MAE: {mae_mean_score} \n' \
+                        f'Std Scores: R2: {r2_std_score}, MSE: {mse_std_score}, MAE: {mae_std_score}'
+            print(score_str)
+            lines += [score_str, '\n']
+
+        for j, graph_krr in enumerate(graph_krrs):
+            r2_scores = []
+            mse_scores = []
+            mae_scores = []
+            for graph_krr_r2_score, graph_krr_mae_score, graph_krr_mse_score in krr_graph_scores[j]:
+                r2_scores.append(graph_krr_r2_score)
+                mse_scores.append(graph_krr_mse_score)
+                mae_scores.append(graph_krr_mae_score)
+            r2_mean_score = np.mean(r2_scores)
+            mse_mean_score = np.mean(mse_scores)
+            mae_mean_score = np.mean(mae_scores)
+            r2_std_score = np.std(r2_scores)
+            mse_std_score = np.std(mse_scores)
+            mae_std_score = np.std(mae_scores)
+            score_str = f'GraphKernelRidge ({graph_kernels[j][2]}) R2: {r2_scores}, MSE: {mse_scores}, MAE: {mae_scores} \n' \
+                        f'Mean Scores: R2: {r2_mean_score}, MSE: {mse_mean_score}, MAE: {mae_mean_score} \n' \
+                        f'Std Scores: R2: {r2_std_score}, MSE: {mse_std_score}, MAE: {mae_std_score}'
+            print(score_str)
+            lines += [score_str, '\n']
+
+        for j, model in enumerate(models):
+            r2_mean_score = np.mean(models_r2_scores[j])
+            mse_mean_score = np.mean(models_mse_scores[j])
+            mae_mean_score = np.mean(models_mae_scores[j])
+            r2_std_score = np.std(models_r2_scores[j])
+            mse_std_score = np.std(models_mse_scores[j])
+            mae_std_score = np.std(models_mae_scores[j])
+            score_str = f'Our approach R2: {models_r2_scores}, MSE: {models_mse_scores}, MAE: {models_mae_scores} \n' \
+                        f'Mean Scores: R2: {r2_mean_score}, MSE: {mse_mean_score}, MAE: {mae_mean_score} \n' \
+                        f'Std Scores: R2: {r2_std_score}, MSE: {mse_std_score}, MAE: {mae_std_score}'
+            print(score_str)
+            lines += [score_str, '\n']
+
+    else:
+        # OUR APPROACH EVALUATION
+        if models is not None:
+            models_r2_scores = []
+            models_mae_scores = []
+            models_mse_scores = []
+            models_q2ext_scores = []
+            t_models_r2_scores = []
+            t_models_mae_scores = []
+            t_models_mse_scores = []
+            proj_mae_scores = []
+            proj_mse_scores = []
+            for i, model in enumerate(models):
+                model.to(device)
+                val_loader = val_dataset.get_loader(batch_size, shuffle=False, drop_last=False, pin_memory=False)
+
+                start = time.time()
+                val_inZ = []
+                elabels = []
+                with torch.no_grad():
+                    for j, data in enumerate(val_loader):
+                        inp, labels = data
+                        inp = val_dataset.format_data(inp, device)
+                        labels = labels.to(device)
+                        log_p, distloss, logdet, out = model(inp, labels)
+                        val_inZ.append(out.detach().cpu().numpy())
+                        elabels.append(labels.detach().cpu().numpy())
+                val_inZ = np.concatenate(val_inZ, axis=0).reshape(len(val_dataset), -1)
+                elabels = np.concatenate(elabels, axis=0)
+                end = time.time()
+                print(f"time to get Z_val from X_val : {str(end - start)}")
+
+                pred = zlinridges[i].predict(val_inZ)
+                zridge_r2_score = zlinridges[i].score(val_inZ, elabels)
+                zridge_mae_score = np.abs(pred - elabels).mean()
+                zridge_mse_score = np.power(pred - elabels, 2).mean()
+                models_r2_scores.append(zridge_r2_score)
+                models_mae_scores.append(zridge_mae_score)
+                models_mse_scores.append(zridge_mse_score)
+                q2_ext = 1 - (np.sum(np.power(elabels - pred, 2)) / elabels.shape[0]) / (
+                        np.sum(np.power(tlabels - np.mean(tlabels), 2)) / tlabels.shape[0])
+                models_q2ext_scores.append(q2_ext)
+                print(
+                    f'Our approach R2: {zridge_r2_score}, MSE: {zridge_mse_score}, MAE: {zridge_mae_score}, q2_ext: {q2_ext}')
+
+                pred = zlinridges[i].predict(Z)
+                t_zridge_r2_score = zlinridges[i].score(Z, tlabels)
+                t_zridge_mae_score = np.abs(pred - tlabels).mean()
+                t_zridge_mse_score = np.power(pred - tlabels, 2).mean()
+                t_models_r2_scores.append(t_zridge_r2_score)
+                t_models_mae_scores.append(t_zridge_mae_score)
+                t_models_mse_scores.append(t_zridge_mse_score)
+                print(
+                    f'(On train) Our approach R2: {t_zridge_r2_score}, MSE: {t_zridge_mse_score}, MAE: {t_zridge_mae_score}')
+
+                # TEST project between the means
+                means = model.means.detach().cpu().numpy()
+                proj, dot_val = project_between(val_inZ, means[0], means[1])
+                # pred = ((proj - means[1]) / (means[0] - means[1])) * (
+                #         model.label_max - model.label_min) + model.label_min
+                # pred = pred.mean(axis=1)
+                pred = dot_val.squeeze() * (model.label_max - model.label_min) + model.label_min
+                projection_mse_score = np.power((pred - elabels), 2).mean()
+                projection_mae_score = np.abs((pred - elabels)).mean()
+                proj_mae_scores.append(projection_mae_score)
+                proj_mse_scores.append(projection_mse_score)
+                print(f'Our approach (projection) MSE: {projection_mse_score}, MAE: {projection_mae_score}')
+
+                model.to('cpu')
+
+        # KERNELS EVALUATION
+        X_val = val_dataset.get_flattened_X()
+        labels_val = val_dataset.true_labels
+
+        krr_preds = []
+        krr_scores = []
+        for krr in krrs:
+            krr_scores.append([])
+
+        ridge_r2_score = linridge.score(X_val, labels_val)
+        ridge_mae_score = np.abs(linridge.predict(X_val) - labels_val).mean()
+        ridge_mse_score = np.power(linridge.predict(X_val) - labels_val, 2).mean()
+
+        for i, krr in enumerate(krrs):
+            krr_r2_score = krr.score(X_val, labels_val)
+            krr_mae_score = np.abs(krr.predict(X_val) - labels_val).mean()
+            krr_mse_score = np.power(krr.predict(X_val) - labels_val, 2).mean()
+            # krr_score = np.abs(krr.predict(X_val) - labels_val).mean()
+            krr_scores[i].append((krr_r2_score, krr_mae_score, krr_mse_score))
+
+        lines = []
+        print('Predictions scores :')
+        score_str = f'Ridge R2: {ridge_r2_score}, MSE: {ridge_mse_score}, MAE: {ridge_mae_score}'
+        print(score_str)
+        lines += [score_str, '\n']
+        for j, krr_type in enumerate(krr_types):
+            krr_r2_score, krr_mae_score, krr_mse_score = krr_scores[j][0]
+            score_str = f'KernelRidge ({krr_type}) R2: {krr_r2_score}, MSE: {krr_mse_score}, MAE: {krr_mae_score}'
+            print(score_str)
+            lines += [score_str, '\n']
+
+        if models is not None:
+            for j, model in enumerate(models):
+                score_str = f'Our approach (projection) MSE: {proj_mse_scores[j]}, MAE: {proj_mae_scores[j]}'
+                print(score_str)
+                lines += [score_str, '\n']
+                score_str = f'Our approach R2: {models_r2_scores[j]}, MSE: {models_mse_scores[j]}, ' \
+                            f'MAE: {models_mae_scores[j]}, q2_ext: {models_q2ext_scores[j]}'
+                print(score_str)
+                lines += [score_str, '\n']
+                score_str = f'(On train) Our approach R2: {t_models_r2_scores[j]}, MSE: {t_models_mse_scores[j]}, ' \
+                            f'MAE: {t_models_mae_scores[j]}'
+                print(score_str)
+                lines += [score_str, '\n']
+
+    with open(f"{save_dir}/eval_res.txt", 'w') as f:
+        f.writelines(lines)
+
+    # np.save(f"{save_dir}/predictions.npy", predictions)
+
+    return zlinridges
+
+
 def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fithyperparam=True, save_res=True,
                         batch_size=200, n_permutation_test=None):
     if isinstance(train_dataset, GraphDataset):
@@ -1794,23 +2289,26 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
     end = time.time()
     print(f"time to fit linear ridge : {str(end - start)}")
 
-    # krr_types = ['rbf', 'poly', 'sigmoid']
+    krr_types = ['rbf', 'poly', 'sigmoid']
     # krr_types = ['rbf']
-    krr_types = ['poly', 'sigmoid']
+    # krr_types = ['poly', 'sigmoid']
     # krr_types = []
-    krr_params = [
-        # {'Ridge__kernel': ['rbf'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__alpha': np.logspace(-5, 2, 11)},
-        {'Ridge__kernel': ['poly'], 'Ridge__gamma': np.logspace(-5, 3, 5),
-         'Ridge__degree': np.linspace(1, 4, 4).astype(np.int),
-         'Ridge__alpha': np.logspace(-5, 2, 11)},
-        {'Ridge__kernel': ['sigmoid'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__alpha': np.logspace(-5, 2, 11)}
-    ]
     # krr_params = [
-    #     {'Ridge__kernel': ['rbf'], 'Ridge__alpha': np.linspace(0, 10, 11)},
-    #     {'Ridge__kernel': ['poly'], 'Ridge__degree': np.linspace(1, 4, 4).astype(np.int),
-    #      'Ridge__alpha': np.linspace(0, 10, 11)},
-    #     {'Ridge__kernel': ['sigmoid'], 'Ridge__alpha': np.linspace(0, 10, 11)}
+    #     {'Ridge__kernel': ['rbf'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__alpha': np.logspace(-5, 2, 11)},
+    #     {'Ridge__kernel': ['poly'], 'Ridge__gamma': np.logspace(-5, 3, 5),
+    #      'Ridge__degree': np.linspace(1, 4, 4).astype(np.int),
+    #      'Ridge__alpha': np.logspace(-5, 2, 11)},
+    #     {'Ridge__kernel': ['sigmoid'], 'Ridge__gamma': np.logspace(-5, 3, 5), 'Ridge__alpha': np.logspace(-5, 2, 11)}
     # ]
+    krr_params = [
+        {'Ridge__kernel': ['rbf'], 'Ridge__gamma': np.logspace(-5, 3, 10),
+         'Ridge__alpha': np.concatenate((np.logspace(-5, 3, 5), np.array([1])))},
+        {'Ridge__kernel': ['poly'], 'Ridge__gamma': np.logspace(-5, 1, 5),
+         'Ridge__degree': np.linspace(1, 4, 4).astype(np.int),
+         'Ridge__alpha': np.concatenate((np.logspace(-5, 3, 5), np.array([1])))},
+        {'Ridge__kernel': ['sigmoid'], 'Ridge__gamma': np.logspace(-5, 3, 5),
+         'Ridge__alpha': np.concatenate((np.logspace(-5, 3, 5), np.array([1])))}
+    ]
     krrs = [None] * len(krr_types)
     for i, krr_type in enumerate(krr_types):
         start = time.time()
@@ -2137,10 +2635,12 @@ def evaluate_regression(model, train_dataset, val_dataset, save_dir, device, fit
         score_str = f'Our approach (projection) MSE: {projection_mse_score}, MAE: {projection_mae_score}'
         print(score_str)
         lines += [score_str, '\n']
-        score_str = f'Our approach R2: {zridge_r2_score}, MSE: {zridge_mse_score}, MAE: {zridge_mae_score}, q2_ext: {q2_ext}'
+        score_str = f'Our approach R2: {zridge_r2_score}, MSE: {zridge_mse_score}, ' \
+                    f'MAE: {zridge_mae_score}, q2_ext: {q2_ext}'
         print(score_str)
         lines += [score_str, '\n']
-        score_str = f'(On train) Our approach R2: {t_zridge_r2_score}, MSE: {t_zridge_mse_score}, MAE: {t_zridge_mae_score}'
+        score_str = f'(On train) Our approach R2: {t_zridge_r2_score}, MSE: {t_zridge_mse_score}, ' \
+                    f'MAE: {t_zridge_mae_score}'
         print(score_str)
         lines += [score_str, '\n']
 
@@ -3051,7 +3551,9 @@ def evaluate_predictor(eval_type, dataset_name, models, add_features_li, train_d
     elif eval_type == 'regression':
         assert train_dataset.is_regression_dataset(), 'the dataset is not made for regression purposes'
         if len(models) > 1:
-            assert False, 'Not Implemented'
+            predictors = multi_evaluate_regression(models, add_features_li, train_dataset, test_dataset, save_dir,
+                                                   device, batch_size=batch_size,
+                                                   n_permutation_test=args.n_permutation_test)
         else:
             predictor = evaluate_regression(models[0], train_dataset, test_dataset, save_dir, device,
                                             batch_size=batch_size, n_permutation_test=n_permutation_test)
