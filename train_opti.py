@@ -225,18 +225,18 @@ if __name__ == "__main__":
         val_dataset.save_split(path)
 
     # Config MUTAG
-    # config = {
-    #     "var_type": 'uniform',
-    #     "var": tune.uniform(10, 300),
-    #     "beta": tune.randint(10, 200),
-    #     "noise": tune.uniform(0.2, 0.6),
-    #     # "noise_x": tune.uniform(0.05, 0.3),
-    #     "noise_x": None,
-    #     "lr": tune.loguniform(1e-4, 0.0004),
-    #     "batch_size": tune.choice([50]),
-    #     "add_feature": tune.randint(0, 20),
-    #     "split_graph_dim": True
-    # }
+    config = {
+        "var_type": 'uniform',
+        "var": tune.uniform(10, 300),
+        "beta": tune.randint(180, 300),
+        "noise": tune.uniform(0.2, 0.6),
+        # "noise_x": tune.uniform(0.05, 0.3),
+        "noise_x": None,
+        "lr": tune.loguniform(1e-4, 0.0004),
+        "batch_size": tune.choice([10]),
+        "add_feature": tune.randint(0, 20),
+        "split_graph_dim": True
+    }
     # Config Letter
     # config = {
     #     "var_type": 'uniform',
@@ -251,18 +251,18 @@ if __name__ == "__main__":
     #     "split_graph_dim": True
     # }
     # QM7, ESOL
-    config = {
-        "var_type": 'uniform',
-        "var": tune.uniform(0.05, 0.5),
-        "beta": tune.randint(10, 200),
-        "noise": tune.uniform(0.3, 0.6),
-        # "noise_x": tune.uniform(0.05, 0.3),
-        "noise_x": None,
-        "lr": tune.loguniform(1e-4, 0.001),
-        "batch_size": tune.choice([100, 150, 200]),
-        "add_feature": tune.randint(0, 20),
-        "split_graph_dim": True
-    }
+    # config = {
+    #     "var_type": 'uniform',
+    #     "var": tune.uniform(0.05, 0.5),
+    #     "beta": tune.randint(10, 200),
+    #     "noise": tune.uniform(0.3, 0.6),
+    #     # "noise_x": tune.uniform(0.05, 0.3),
+    #     "noise_x": None,
+    #     "lr": tune.loguniform(1e-4, 0.001),
+    #     "batch_size": tune.choice([100, 150, 200]),
+    #     "add_feature": tune.randint(0, 20),
+    #     "split_graph_dim": True
+    # }
     # BACE
     # config = {
     #     "var_type": 'uniform',
