@@ -19,6 +19,6 @@ def multivariate_gaussian(z, mean, determinant, inverse_cov_mat_diag):
                     torch.diag((((z_flat - mean) @
                                  (inverse_cov_mat_diag.to(z.device) * torch.eye(inverse_cov_mat_diag.shape[0]).to(
                                      z.device)).unsqueeze(0)).reshape(b_size, -1) @
-                                torch.transpose(z_flat - mean, 1, 0)).reshape(b_size, -1), 0)) - math.log(determinant)
+                                torch.transpose(z_flat - mean, 1, 0)).reshape(b_size, -1), 0)) - math.log(1e-10 + determinant)
 
     return log_p
