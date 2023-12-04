@@ -12,6 +12,63 @@ The implementation of the different models are based on existing codes:
 
 ## Training
 
+### Paper hyperparameters
+
+Labeled node graph datasets:
+
+| Dataset | Batch size | LR | $\beta$ | Input noise | Mean of $\lambda_i$ ($\sigma^2$ for regression) | $p$ |
+|---------|------------|----|---------|-------------|------------|-----|
+| QM7 | 150 | 0.00089 | 105 | 0.307 | 0.308 | 0 / 5 |
+| ESOL | 150 | 0.00024 | 169 | 0.536 | 0.051 | 0 / 18 |
+| FREESOLV | 10 | 0.00020 | 162 | 0.572 | 0.245 | 0 / 6 |
+| MUTAG | 10 | 0.00010 | 249 | 0.322 | 185 | 0 / 12 |
+
+Attributed node graph datasets:
+
+| Dataset | Batch size | LR | $\beta$ | Input noise A | Input noise X | Mean of $\lambda_i$ ($\sigma^2$ for regression) | $p$ |
+|---------|------------|----|---------|---------------|---------------|------------|-----|
+| Letter-low | 50 | 0.00092 | 241 | 0.391 | 0.185 | 123 | 0 / 13 |
+| Letter-med | 250 | 0.0011 | 294 | 0.36 | 0.17 | 24 | 0 / 3 |
+| Letter-high | 250 | 0.0015 | 249 | 0.225 | 0.241 | 123 | 0 / 3 |
+
+How to train:
+```
+python train.py --dataset {dataset} --validation 0.1 --test 0.1 --model {model_type} {model_structure_parameters} {hyperparameters} {additionnal_arguments} {extra}
+```
+### Details about arguments:
+
+#### {dataset} :  
+**Classification :** single_moon, double_moon, iris, bcancer, mnist, MUTAG, Letter-low, Letter-med, Letter-high  
+**Regression :** swissroll, diabetes, aquatoxi, fishtoxi, qm7, esol, freesolv  
+
+#### {model_type} :  
+**Vector :** seqflow, ffjord  
+**Image :** cglow  
+**Graphs :** moflow  
+
+#### {model_structure_parameters} : Arguments to modify the structure of the model (optional)  
+
+#### {hyperparameters} :  
+**Shared :**  
+--batch_size, --lr, --beta, --mean_of_eigval (mean of $\lambda_i$ ($\sigma^2$ for regression)), --add_feature ($p$), --n_epoch  
+**Please add the --uniform_eigval argument to define uniformly the eigen values of the covariance matrices.**  
+**Non-graph model :**  
+--with_noise (noise on input applied during training)
+**For graph model (moflow) :**  
+--input_scale (Input noise / Input noise A), --input_scale_x (Input noise X to define if attributed node graph)  
+**While using regression (not classification) graph datasets please add the --isotrope_gaussian argument.  
+In addition, it is recommended to set the --split_graph_dim argument to keep the dimensional split between A and X in the feature space.**  
+
+#### {additionnal_arguments} :  
+--save_each_epoch, --save_at_epoch,  
+--reduce_train_dataset_size (value between 0 and 1) : reduce the train dataset size while fitting the predictor in the feature space at each validation step.  
+--n_permutation_test : how much permutation to use on the train dataset while fitting the predictor in the feature space at each validation step.
+
+#### {extra} :  
+--use_tb
+
+<!--
+
 ### Classifications & Denoising
 
 #### Toy datasets
@@ -103,12 +160,6 @@ QM7:
 ```
 python train.py --dataset qm7 --model moflow --n_flow 32 --n_block 1 --batch_size 100 --lr 0.0004 --noise_scale 0.5674 --use_tb --validation 0.1 --uniform_eigval --beta 157 --mean_of_eigval 0.2140 --n_epoch 1000 --save_each_epoch 1 --isotrope_gaussian
 ```
-
-<!--QM9:
-```
-python train.py --dataset qm9 --model moflow --n_flow 32 --n_block 1 --batch_size 100 --lr 0.0006 --noise_scale 0.8251 --use_tb --validation 0.1 --uniform_eigval --beta 133 --mean_of_eigval 0.5040 --n_epoch 1000 --save_each_epoch 1 --isotrope_gaussian
-```-->
-
 ESOL:
 ```
 python train.py --dataset esol --model moflow --n_flow 32 --n_block 1 --batch_size 120 --lr 0.0003 --noise_scale 0.2704 --use_tb --validation 0.1 --uniform_eigval --beta 53 --mean_of_eigval 0.9341 --n_epoch 10000 --save_each_epoch 10 --isotrope_gaussian
@@ -118,10 +169,11 @@ FREESOLV:
 ```
 python train.py --dataset freesolv --model moflow --n_flow 32 --n_block 1 --batch_size 100 --lr 0.0004 --noise_scale 0.5674 --use_tb --validation 0.1 --uniform_eigval --beta 145 --mean_of_eigval 0.8 --n_epoch 10000 --save_each_epoch 10 --isotrope_gaussian
 ```
+-->
 
 ## Find Models
 
-If you have disabled evaluation or reduced the size of the evaluation dataset during training, you can compare the 
+If you have disabled evaluation or reduced the size of the training dataset during validation steps (with --reduce_train_dataset_size), you can compare the 
 different checkpoints with each other by calling the get_best_model script:
 ```
 python get_best_model.py --eval_type {evaluation_type} --folder ./checkpoint/{dataset}/{model_type}/{model_name}
@@ -169,22 +221,27 @@ python get_best_regression.py --folder ./checkpoint/swissroll/ffjord/b1_nfkernel
 
 ## Evaluate Models
 
+Finally, it is possible to evaluate the models by calling the evaluate.py script, which evaluates the predictor model and generates pre-images by sampling the feature space in different ways.
+
 ### Classification
 ```
 python evaluate.py --folder ./checkpoint/{dataset}/{model_type}/{model_name} --eval_type classification --model_to_use classification
 ```
-### Projection
-```
-python evaluate.py --folder ./checkpoint/{dataset}/{model_type}/{model_name} --eval_type projection --model_to_use projection
-```
-The evaluation on MNIST for projection can be done on the best classification model by setting model_to_use parameter to classification. 
-
-### MNIST Generation
-```
-python evaluate.py --folder ./checkpoint/mnist/cglow/{model_name} --eval_type generation --model_to_use classification
-```
-
 ### Regression
 ```
 python evaluate.py --folder ./checkpoint/{dataset}/{model_type}/{model_name} --eval_type regression --model_to_use regression
 ```
+
+### Non-graph evaluations :
+
+In addition, other types of evaluation are possible on non-graphical datasets : 
+#### Projection (vector and image datasets)
+```
+python evaluate.py --folder ./checkpoint/{dataset}/{model_type}/{model_name} --eval_type projection --model_to_use projection
+```
+The evaluation on MNIST for projection can be done on the best classification model by setting model_to_use parameter to classification. 
+#### Image datasets generation
+```
+python evaluate.py --folder ./checkpoint/mnist/cglow/{model_name} --eval_type generation --model_to_use classification
+```
+
