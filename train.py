@@ -489,10 +489,10 @@ def test_pred_model(args, train_dataset, test_dataset, model, save_dir, config):
     batch_size = config["batch_size"]
 
     # reduce train dataset size (fitting too long)
-    if args.reduce_test_dataset_size is not None:
+    if args.reduce_train_dataset_size is not None:
         t_dataset = train_dataset.duplicate()
         print('Train dataset reduced in order to accelerate. (stratified)')
-        t_dataset.reduce_dataset_ratio(args.reduce_test_dataset_size, stratified=True)
+        t_dataset.reduce_dataset_ratio(args.reduce_train_dataset_size, stratified=True)
     else:
         t_dataset = train_dataset
 

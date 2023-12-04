@@ -114,7 +114,7 @@ def moflow_arguments():
 def ffjord_arguments():
     parser = argparse.ArgumentParser(description="FFJORD Arguments")
 
-    parser.add_argument("--n_block", default=2, type=int, help="number of blocks")
+    parser.add_argument("--n_block", default=1, type=int, help="number of blocks")
 
     # -------- FFJORD parameters ---------
     SOLVERS = ["dopri5", "bdf", "rk4", "midpoint", 'adams', 'explicit_adams', 'fixed_adams']
@@ -241,7 +241,7 @@ def training_arguments(optimize_training=False):
     parser.add_argument("--restart", action="store_true",
                         help='restart from the restart.pth model')
 
-    parser.add_argument('--reduce_test_dataset_size', type=float, default=None,
+    parser.add_argument('--reduce_train_dataset_size', type=float, default=None,
                         help='reduce the train dataset size when the model is tested')
     parser.add_argument('--n_permutation_test', type=int, default=5,
                         help='number of permutation to use during the model test on the train set')

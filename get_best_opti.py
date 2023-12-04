@@ -89,10 +89,10 @@ def main(args):
                                                     reselect_val_idx=args.reselect_val_idx, split_type='val')
 
     # reduce train dataset size (fitting too long)
-    if args.reduce_test_dataset_size is not None:
+    if args.reduce_train_dataset_size is not None:
         train_dataset = train_dataset.duplicate()
         print('Train dataset reduced in order to accelerate. (stratified)')
-        train_dataset.reduce_dataset_ratio(args.reduce_test_dataset_size, stratified=True)
+        train_dataset.reduce_dataset_ratio(args.reduce_train_dataset_size, stratified=True)
 
     n_dim, dim_per_label = dataset.get_dim_per_label(return_total_dim=True)
     config['dim_per_label'] = dim_per_label

@@ -1171,6 +1171,7 @@ def evaluate_classification(model, train_dataset, val_dataset, save_dir, device,
             edge_to_node = False
         else:
             graph_kernel_names = ['wl', 'sp', 'hadcode']
+            # graph_kernel_names = []
             attributed_node = False
             edge_to_node = True
         graph_kernels = []
@@ -2179,11 +2180,11 @@ def multi_evaluate_regression(models, add_features_li, train_dataset, val_datase
                 score_str = f'Our approach (projection) MSE: {proj_mse_scores[j]}, MAE: {proj_mae_scores[j]}'
                 print(score_str)
                 lines += [score_str, '\n']
-                score_str = f'Our approach R2: {models_r2_scores[j]}, MSE: {models_mse_scores[j]}, ' \
+                score_str = f'Our approach ({j}) R2: {models_r2_scores[j]}, MSE: {models_mse_scores[j]}, ' \
                             f'MAE: {models_mae_scores[j]}, q2_ext: {models_q2ext_scores[j]}'
                 print(score_str)
                 lines += [score_str, '\n']
-                score_str = f'(On train) Our approach R2: {t_models_r2_scores[j]}, MSE: {t_models_mse_scores[j]}, ' \
+                score_str = f'(On train) Our approach ({j}) R2: {t_models_r2_scores[j]}, MSE: {t_models_mse_scores[j]}, ' \
                             f'MAE: {t_models_mae_scores[j]}'
                 print(score_str)
                 lines += [score_str, '\n']
@@ -2669,9 +2670,17 @@ def create_figures_XZ(model, train_dataset, save_path, device, std_noise=0.1, on
             else:
                 inp = inp + torch.from_numpy(np.random.randn(*inp.shape)).float().to(device) * std_noise
             labels = labels.to(device)
-            # inp = (data[0] + np.random.randn(*data[0].shape) * std_noise).float().to(device)
-            # labels = data[1].to(device)
             log_p, distloss, logdet, out = model(inp, labels)
+
+            # Test inversibility (remove noise to test)
+            # x, adj = inp
+            # x = x.detach().cpu().numpy().reshape(x.shape[0], -1)
+            # adj = np.concatenate([np.expand_dims(v, axis=0) for v in adj.detach().cpu().numpy()], axis=0)
+            # adj = adj.reshape(adj.shape[0], -1)
+            # flat_i = np.concatenate((x, adj), axis=1)
+            #
+            # inverse_i = model.reverse(out).detach().cpu().numpy()
+
             if not only_Z:
                 X.append(inp.detach().cpu().numpy())
             Z.append(out.detach().cpu().numpy())
@@ -2810,8 +2819,10 @@ def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_b
     covariance_matrices = [eigval * np.identity(eigval.shape[0]) for _, eigval, _ in model.gp]
     # covariance_matrices = [0.1 * np.identity(eigval.shape[0]) for _, eigval, _ in model.gp]
     # TEST smaller variance
-    # for cov in covariance_matrices:
-    #     cov[np.where(cov > 1)] = 1
+    for i, cov in enumerate(covariance_matrices):
+        cov[np.where(cov > 1)] = 1
+        # cov[np.where(cov > 1)] = cov[np.where(cov > 1)] / 50
+        # covariance_matrices[i] = cov / 90
     samples = []
     datasets_close_samples = []
     datasets_close_y = []
@@ -2955,17 +2966,17 @@ def evaluate_preimage2(model, val_dataset, device, save_dir, n_y=50, n_samples_b
             # legends_with_seed = [legend + ', y:' + str(round(ys[ys_idx[i]], 2)) for i, legend in enumerate(legends_with_seed)]
             legends_with_seed = ['y=' + str(round(ys[ys_idx[i]], 2)) for i, legend in enumerate(legends_with_seed)]
             if predmodel is not None:
-                legends_with_seed = [legend + ', f(G)=' + str(round(pred_ys[i], 2)) for i, legend in
+                legends_with_seed = [legend + ', f(X,A)=' + str(round(pred_ys[i], 2)) for i, legend in
                                      enumerate(legends_with_seed)]
             img = Draw.MolsToGridImage(valid_mols, legends=legends_with_seed,
                                        # molsPerRow=int(2* math.sqrt(len(valid_mols))),
-                                       molsPerRow=6,
+                                       molsPerRow=4,
                                        subImgSize=psize, useSVG=True)
             with open(f'{save_dir}/generated_samples/all_generated_grid.svg', 'w') as f:
                 f.write(img)
             # img.save(f'{save_dir}/generated_samples/all_generated_grid.png')
 
-            print('mean_error between y sampled and pred y:', np.mean(sampled_ys - pred_ys))
+            print('mean_error between y sampled and pred y:', np.mean(np.abs(sampled_ys - pred_ys)))
 
         # if graphs
         if print_as_graph:
@@ -3587,9 +3598,10 @@ def evaluate_feature_space(eval_type, dataset_name, model, gaussian_params, trai
         evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=print_as_mol,
                           print_as_graph=print_as_graph, eval_type=eval_type, means=computed_means,
                           batch_size=batch_size)
-        evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=12, print_as_mol=print_as_mol,
+        debug = False
+        evaluate_preimage2(model, val_dataset, device, save_dir, n_y=20, n_samples_by_y=6, print_as_mol=print_as_mol,
                            print_as_graph=print_as_graph, eval_type=eval_type, predmodel=predictor,
-                           means=computed_means, debug=True, batch_size=batch_size)
+                           means=computed_means, debug=debug, batch_size=batch_size)
         if isinstance(val_dataset, GraphDataset):
             evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=9, n_interpolation=30, Z=Z,
                                           print_as_mol=print_as_mol, print_as_graph=print_as_graph, eval_type=eval_type,
@@ -3606,7 +3618,7 @@ def evaluate_feature_space(eval_type, dataset_name, model, gaussian_params, trai
         from torchvision import transforms
         val_dataset.transform = transforms.Compose(val_dataset.transform.transforms + [AddGaussianNoise(0., .2)])
         print('Gaussian noise added to transforms...')
-        debug = True
+        debug = False
         # transformation_interpretation(model, val_dataset, device, save_dir, debug=False)
         evaluate_image_interpolations(model, val_dataset, device, save_dir, n_sample=6, n_interpolation=10, label=None,
                                       debug=debug)
@@ -3705,8 +3717,9 @@ def evaluate_feature_space(eval_type, dataset_name, model, gaussian_params, trai
               f'({print_as_mol},{print_as_graph}).')
         evaluate_preimage(model, val_dataset, device, save_dir, print_as_mol=print_as_mol,
                           print_as_graph=print_as_graph, batch_size=batch_size)
+        debug = False
         evaluate_preimage2(model, val_dataset, device, save_dir, n_y=12, n_samples_by_y=1,
-                           print_as_mol=print_as_mol, print_as_graph=print_as_graph, predmodel=predictor, debug=True,
+                           print_as_mol=print_as_mol, print_as_graph=print_as_graph, predmodel=predictor, debug=debug,
                            batch_size=batch_size)
         if isinstance(val_dataset, GraphDataset):
             evaluate_graph_interpolations(model, val_dataset, device, save_dir, n_sample=100, n_interpolation=30, Z=Z,
@@ -3942,10 +3955,10 @@ def main(args):
                                                      reselect_val_idx=args.reselect_val_idx, split_type='test')
 
     # reduce train dataset size (fitting too long)
-    if args.reduce_test_dataset_size is not None:
+    if args.reduce_train_dataset_size is not None:
         train_dataset = train_dataset.duplicate()
         print('Train dataset reduced in order to accelerate. (stratified)')
-        train_dataset.reduce_dataset_ratio(args.reduce_test_dataset_size, stratified=True)
+        train_dataset.reduce_dataset_ratio(args.reduce_train_dataset_size, stratified=True)
 
     # if multiple models
     if '[' in args.folder:
@@ -4024,14 +4037,21 @@ def main(args):
 
 if __name__ == "__main__":
     choices = ['classification', 'projection', 'generation', 'regression']
-    best_model_choices = ['classification', 'projection', 'regression']
+    best_model_choices = [None, 'classification', 'projection', 'regression']
     for choice in best_model_choices.copy():
         best_model_choices.append(choice + '_train')
     parser = testing_arguments()
     parser.add_argument('--eval_type', type=str, default='classification', choices=choices, help='evaluation type')
-    parser.add_argument('--model_to_use', type=str, default='classification', choices=best_model_choices,
+    parser.add_argument('--model_to_use', type=str, default=None, choices=best_model_choices,
                         help='what best model to use for the evaluation')
     parser.add_argument("--method", default=0, type=int, help='select between [0,1,2]')
     args = parser.parse_args()
+    if args.model_to_use is None:
+        if args.eval_type != 'generation':
+            args.model_to_use = args.eval_type
+        else:
+            assert False, f'the model_to_use argument should be defined if you want to evaluate the model for ' \
+                          f'generation, it can be {best_model_choices}'
+    # args.seed = 1 # 9
     args.seed = 2
     main(args)

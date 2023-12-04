@@ -31,7 +31,7 @@ def testing_arguments():
                         help='Reselect a set of validation data from the entire dataset except data from training')
     parser.add_argument("--batch_size", default=20, type=int, help="batch size")
 
-    parser.add_argument('--reduce_test_dataset_size', type=float, default=None,
+    parser.add_argument('--reduce_train_dataset_size', type=float, default=None,
                         help='reduce the train dataset size when the model is tested')
     parser.add_argument('--n_permutation_test', type=int, default=5,
                         help='number of permutation to use during the model test on the train set')  # for graph eval

@@ -687,10 +687,10 @@ def main(args):
                                                     reselect_val_idx=args.reselect_val_idx, split_type='val')
 
     # reduce train dataset size (fitting too long)
-    if args.reduce_test_dataset_size is not None:
+    if args.reduce_train_dataset_size is not None:
         train_dataset = train_dataset.duplicate()
         print('Train dataset reduced in order to accelerate. (stratified)')
-        train_dataset.reduce_dataset_ratio(args.reduce_test_dataset_size, stratified=True)
+        train_dataset.reduce_dataset_ratio(args.reduce_train_dataset_size, stratified=True)
 
     # dim_per_label, n_dim = dataset.get_dim_per_label(return_total_dim=True)
     n_dim = dataset.get_n_dim()
@@ -747,14 +747,20 @@ def main(args):
 if __name__ == '__main__':
     parser = testing_arguments()
     choices = ['classification', 'projection', 'regression']
-    best_model_choices = ['classification', 'projection', 'regression']
+    best_model_choices = [None, 'classification', 'projection', 'regression']
     for choice in best_model_choices.copy():
         best_model_choices.append(choice + '_train')
     parser = testing_arguments()
     parser.add_argument('--eval_type', type=str, default='classification', choices=choices, help='evaluation type')
-    parser.add_argument('--model_to_use', type=str, default='classification', choices=best_model_choices,
+    parser.add_argument('--model_to_use', type=str, default=None, choices=best_model_choices,
                         help='what best model to use for the evaluation')
     args = parser.parse_args()
+    if args.model_to_use is None:
+        if args.eval_type != 'generation':
+            args.model_to_use = args.eval_type
+        else:
+            assert False, f'the model_to_use argument should be defined if you want to evaluate the model for ' \
+                          f'generation, it can be {best_model_choices}'
     args.seed = 0
 
     main(args)
