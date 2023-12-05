@@ -26,7 +26,7 @@ IMAGE_DATASETS = ['mnist', 'cifar10', 'olivetti_faces']
 SIMPLE_REGRESSION_DATASETS = ['swissroll', 'diabetes', 'waterquality', 'aquatoxi', 'fishtoxi', 'trafficflow']
 GRAPH_REGRESSION_DATASETS = ['qm7', 'qm9', 'freesolv', 'esol', 'lipo', 'fishtoxi']
 GRAPH_CLASSIFICATION_DATASETS = ['toxcast', 'AIDS', 'Letter-low', 'Letter-med', 'Letter-high', 'MUTAG', 'COIL-DEL',
-                                 'BZR', 'BACE']
+                                 'BZR', 'BACE', 'PTC_FM', 'PTC_FR', 'PTC_MM', 'PTC_MR']
 
 
 # abstract base kernel dataset class
@@ -1534,9 +1534,9 @@ class ClassificationGraphDataset(GraphDataset):
         elif self.dataset_name == 'AIDS':
             b_n_type = 4
             # b_n_squeeze = 13
-            b_n_squeeze = 19
+            b_n_squeeze = 5
             # a_n_node = 13
-            a_n_node = 95
+            a_n_node = 25
             a_n_type = len(node_type_list) + 1  # 5
         elif self.dataset_name == 'BZR':
             b_n_type = 4
@@ -1577,6 +1577,11 @@ class ClassificationGraphDataset(GraphDataset):
             b_n_type = 4
             b_n_squeeze = 5
             a_n_node = 50
+            a_n_type = len(node_type_list) + 1  # 5
+        elif 'PTC' in self.dataset_name:
+            b_n_type = 4
+            b_n_squeeze = 16
+            a_n_node = 64
             a_n_type = len(node_type_list) + 1  # 5
         else:
             assert False, 'unknown dataset'
@@ -1626,25 +1631,31 @@ class ClassificationGraphDataset(GraphDataset):
     @staticmethod
     def get_filter_size(dataset_name):
         if dataset_name == 'AIDS':
-            # return 22
-            return None
+            return 25
+            # return None
         elif dataset_name == 'MUTAG':
             return None
         elif 'Letter' in dataset_name:
             return None
         elif dataset_name == 'COIL-DEL':
             return 60
+        elif 'PTC' in dataset_name:
+            return None
         else:
             return None
 
     @staticmethod
-    def clear_aromatic_molecule_bonds_from_dataset(X, A, label_map):
+    def clear_aromatic_molecule_bonds_from_dataset(X, A, label_map, aromatic_pos='first'):
         import rdkit.Chem as Chem
         from utils.graphs.mol_utils import construct_mol
         from utils.graphs.molecular_graph_utils import get_atoms_adj_from_mol, atoms_to_one_hot
         virtual_bond_idx = 4
-        custom_bond_assignement = [Chem.rdchem.BondType.AROMATIC, Chem.rdchem.BondType.SINGLE,
-                                   Chem.rdchem.BondType.DOUBLE, Chem.rdchem.BondType.TRIPLE]
+        if aromatic_pos == 'first':
+            custom_bond_assignement = [Chem.rdchem.BondType.AROMATIC, Chem.rdchem.BondType.SINGLE,
+                                       Chem.rdchem.BondType.DOUBLE, Chem.rdchem.BondType.TRIPLE]
+        else:
+            custom_bond_assignement = [Chem.rdchem.BondType.SINGLE, Chem.rdchem.BondType.DOUBLE,
+                                       Chem.rdchem.BondType.TRIPLE, Chem.rdchem.BondType.AROMATIC]
 
         atomic_num_list = [ATOMIC_NUM_MAP[label] for label, _ in label_map.items()] + [0]
         max_num_nodes = X.shape[1]
@@ -1730,7 +1741,8 @@ class ClassificationGraphDataset(GraphDataset):
             #     plt.close()
 
             if exist_dataset:
-                if 'Letter' in name or name in ['AIDS', 'MUTAG', 'COIL-DEL', 'BZR']:
+                if 'Letter' in name or name in ['AIDS', 'MUTAG', 'COIL-DEL', 'BZR', 'PTC_FM', 'PTC_FR', 'PTC_MM',
+                                                'PTC_MR']:
                     X = np.load(f'{path}/{full_name}_X.npy')
                     A = np.load(f'{path}/{full_name}_A.npy')
                     Y = np.load(f'{path}/{full_name}_Y.npy')
@@ -1749,7 +1761,8 @@ class ClassificationGraphDataset(GraphDataset):
                 else:
                     assert False, 'unknown dataset'
             else:
-                if 'Letter' in name or name in ['AIDS', 'MUTAG', 'COIL-DEL', 'BZR']:
+                if 'Letter' in name or name in ['AIDS', 'MUTAG', 'COIL-DEL', 'BZR', 'PTC_FM', 'PTC_FR', 'PTC_MM',
+                                                'PTC_MR']:
                     # node_features = name in ['Letter-med', 'COIL-DEL']  # features if not node labels (e.g Letter-med (x,y))
                     node_features = 'Letter' in name or name in [
                         'COIL-DEL']  # features if not node labels (e.g Letter-med (x,y))
@@ -1762,15 +1775,33 @@ class ClassificationGraphDataset(GraphDataset):
 
                     if name == 'AIDS':
                         ordered_labels = ['C', 'O', 'N', 'Cl', 'F', 'S', 'Se', 'P', 'Na', 'I', 'Co', 'Br', 'Li', 'Si',
-                                          'Mg',
-                                          'Cu', 'As', 'B', 'Pt', 'Ru', 'K', 'Pd', 'Au', 'Te', 'W', 'Rh', 'Zn', 'Bi',
-                                          'Pb',
-                                          'Ge', 'Sb', 'Sn', 'Ga', 'Hg', 'Ho', 'Tl', 'Ni', 'Tb']
+                                          'Mg', 'Cu', 'As', 'B', 'Pt', 'Ru', 'K', 'Pd', 'Au', 'Te', 'W', 'Rh', 'Zn',
+                                          'Bi', 'Pb', 'Ge', 'Sb', 'Sn', 'Ga', 'Hg', 'Ho', 'Tl', 'Ni', 'Tb']
                         label_map = {label: i + 1 for i, label in enumerate(ordered_labels)}
-                    elif name == 'MUTAG':
-                        ordered_labels = ['C', 'N', 'O', 'F', 'I', 'Cl', 'Br']
+                    elif name in ['MUTAG', 'PTC_FM', 'PTC_FR', 'PTC_MM', 'PTC_MR']:
+                        if name == 'MUTAG':
+                            ordered_labels = ['C', 'N', 'O', 'F', 'I', 'Cl', 'Br']
+                            aromatic_pos = 'first'
+                        elif name == 'PTC_MR':
+                            ordered_labels = ['In', 'P', 'O', 'N', 'Na', 'C', 'Cl', 'S', 'Br', 'F', 'K', 'Cu', 'Zn',
+                                              'I', 'Ba', 'Sn', 'Pb', 'Ca']
+                            aromatic_pos = 'last'
+                        elif name == 'PTC_FR':
+                            ordered_labels = ['In', 'P', 'O', 'N', 'Na', 'C', 'Cl', 'S', 'Br', 'F', 'As', 'K', 'Cu',
+                                              'Zn', 'I', 'Sn', 'Pb', 'Te', 'Ca']
+                            aromatic_pos = 'last'
+                        elif name == 'PTC_FM':
+                            ordered_labels = ['In', 'P', 'C', 'O', 'N', 'Cl', 'S', 'Br', 'Na', 'F', 'As', 'K', 'Cu',
+                                              'I', 'Ba', 'Sn', 'Pb', 'Ca']
+                            aromatic_pos = 'last'
+                        elif name == 'PTC_MM':
+                            ordered_labels = ['In', 'P', 'O', 'N', 'Na', 'C', 'Cl', 'S', 'Br', 'F', 'As', 'K', 'B',
+                                              'Cu', 'Zn', 'I', 'Ba', 'Sn', 'Pb', 'Ca']
+                            aromatic_pos = 'last'
+
                         label_map = {label: i + 1 for i, label in enumerate(ordered_labels)}
-                        X, A = ClassificationGraphDataset.clear_aromatic_molecule_bonds_from_dataset(X, A, label_map)
+                        X, A = ClassificationGraphDataset.clear_aromatic_molecule_bonds_from_dataset(X, A, label_map,
+                                                                                                     aromatic_pos=aromatic_pos)
                     else:
                         label_map = None
 
