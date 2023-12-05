@@ -1580,8 +1580,8 @@ class ClassificationGraphDataset(GraphDataset):
             a_n_type = len(node_type_list) + 1  # 5
         elif 'PTC' in self.dataset_name:
             b_n_type = 4
-            b_n_squeeze = 16
-            a_n_node = 64
+            b_n_squeeze = 5
+            a_n_node = 25
             a_n_type = len(node_type_list) + 1  # 5
         else:
             assert False, 'unknown dataset'
@@ -1640,22 +1640,16 @@ class ClassificationGraphDataset(GraphDataset):
         elif dataset_name == 'COIL-DEL':
             return 60
         elif 'PTC' in dataset_name:
-            return None
+            return 25
         else:
             return None
 
     @staticmethod
-    def clear_aromatic_molecule_bonds_from_dataset(X, A, label_map, aromatic_pos='first'):
+    def clear_aromatic_molecule_bonds_from_dataset(X, A, label_map, custom_bond_assignement):
         import rdkit.Chem as Chem
         from utils.graphs.mol_utils import construct_mol
         from utils.graphs.molecular_graph_utils import get_atoms_adj_from_mol, atoms_to_one_hot
         virtual_bond_idx = 4
-        if aromatic_pos == 'first':
-            custom_bond_assignement = [Chem.rdchem.BondType.AROMATIC, Chem.rdchem.BondType.SINGLE,
-                                       Chem.rdchem.BondType.DOUBLE, Chem.rdchem.BondType.TRIPLE]
-        else:
-            custom_bond_assignement = [Chem.rdchem.BondType.SINGLE, Chem.rdchem.BondType.DOUBLE,
-                                       Chem.rdchem.BondType.TRIPLE, Chem.rdchem.BondType.AROMATIC]
 
         atomic_num_list = [ATOMIC_NUM_MAP[label] for label, _ in label_map.items()] + [0]
         max_num_nodes = X.shape[1]
@@ -1664,7 +1658,11 @@ class ClassificationGraphDataset(GraphDataset):
         for i, (x, adj) in enumerate(zip(X, A)):
             mol = construct_mol(x, adj, atomic_num_list, custom_bond_assignement=custom_bond_assignement,
                                 virtual_bond_idx=virtual_bond_idx)
-            Chem.Kekulize(mol, clearAromaticFlags=True)
+            # Remove Aromatic bond marking
+            try:
+                Chem.Kekulize(mol, clearAromaticFlags=True)
+            except:
+                mol = Chem.MolFromSmiles(Chem.MolToSmiles(Chem.RemoveHs(mol)))
             nx, nadj, _ = get_atoms_adj_from_mol(mol, max_num_nodes=max_num_nodes, label_map=label_map)
             nx = atoms_to_one_hot(nx, label_map)
             n_X[i, :] = nx
@@ -1779,29 +1777,36 @@ class ClassificationGraphDataset(GraphDataset):
                                           'Bi', 'Pb', 'Ge', 'Sb', 'Sn', 'Ga', 'Hg', 'Ho', 'Tl', 'Ni', 'Tb']
                         label_map = {label: i + 1 for i, label in enumerate(ordered_labels)}
                     elif name in ['MUTAG', 'PTC_FM', 'PTC_FR', 'PTC_MM', 'PTC_MR']:
+                        from rdkit import Chem
                         if name == 'MUTAG':
                             ordered_labels = ['C', 'N', 'O', 'F', 'I', 'Cl', 'Br']
-                            aromatic_pos = 'first'
+                            custom_bond_assignement = [Chem.rdchem.BondType.AROMATIC, Chem.rdchem.BondType.SINGLE,
+                                                       Chem.rdchem.BondType.DOUBLE, Chem.rdchem.BondType.TRIPLE]
                         elif name == 'PTC_MR':
                             ordered_labels = ['In', 'P', 'O', 'N', 'Na', 'C', 'Cl', 'S', 'Br', 'F', 'K', 'Cu', 'Zn',
                                               'I', 'Ba', 'Sn', 'Pb', 'Ca']
-                            aromatic_pos = 'last'
+
+                            custom_bond_assignement = [Chem.rdchem.BondType.TRIPLE, Chem.rdchem.BondType.DOUBLE,
+                                                       Chem.rdchem.BondType.SINGLE, Chem.rdchem.BondType.AROMATIC]
                         elif name == 'PTC_FR':
                             ordered_labels = ['In', 'P', 'O', 'N', 'Na', 'C', 'Cl', 'S', 'Br', 'F', 'As', 'K', 'Cu',
                                               'Zn', 'I', 'Sn', 'Pb', 'Te', 'Ca']
-                            aromatic_pos = 'last'
+                            custom_bond_assignement = [Chem.rdchem.BondType.TRIPLE, Chem.rdchem.BondType.DOUBLE,
+                                                       Chem.rdchem.BondType.SINGLE, Chem.rdchem.BondType.AROMATIC]
                         elif name == 'PTC_FM':
                             ordered_labels = ['In', 'P', 'C', 'O', 'N', 'Cl', 'S', 'Br', 'Na', 'F', 'As', 'K', 'Cu',
                                               'I', 'Ba', 'Sn', 'Pb', 'Ca']
-                            aromatic_pos = 'last'
+                            custom_bond_assignement = [Chem.rdchem.BondType.TRIPLE, Chem.rdchem.BondType.SINGLE,
+                                                       Chem.rdchem.BondType.DOUBLE, Chem.rdchem.BondType.AROMATIC]
                         elif name == 'PTC_MM':
                             ordered_labels = ['In', 'P', 'O', 'N', 'Na', 'C', 'Cl', 'S', 'Br', 'F', 'As', 'K', 'B',
                                               'Cu', 'Zn', 'I', 'Ba', 'Sn', 'Pb', 'Ca']
-                            aromatic_pos = 'last'
+                            custom_bond_assignement = [Chem.rdchem.BondType.TRIPLE, Chem.rdchem.BondType.DOUBLE,
+                                                       Chem.rdchem.BondType.SINGLE, Chem.rdchem.BondType.AROMATIC]
 
                         label_map = {label: i + 1 for i, label in enumerate(ordered_labels)}
-                        X, A = ClassificationGraphDataset.clear_aromatic_molecule_bonds_from_dataset(X, A, label_map,
-                                                                                                     aromatic_pos=aromatic_pos)
+                        X, A = ClassificationGraphDataset.clear_aromatic_molecule_bonds_from_dataset(
+                            X, A, label_map, custom_bond_assignement=custom_bond_assignement)
                     else:
                         label_map = None
 
