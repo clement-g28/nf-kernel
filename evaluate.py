@@ -4037,9 +4037,10 @@ def main(args):
 
 if __name__ == "__main__":
     choices = ['classification', 'projection', 'generation', 'regression']
-    best_model_choices = [None, 'classification', 'projection', 'regression']
+    best_model_choices = ['classification', 'projection', 'regression']
     for choice in best_model_choices.copy():
         best_model_choices.append(choice + '_train')
+    best_model_choices += [None]
     parser = testing_arguments()
     parser.add_argument('--eval_type', type=str, default='classification', choices=choices, help='evaluation type')
     parser.add_argument('--model_to_use', type=str, default=None, choices=best_model_choices,
