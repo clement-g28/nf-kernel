@@ -1754,6 +1754,20 @@ class ClassificationGraphDataset(GraphDataset):
                     elif name == 'MUTAG':
                         ordered_labels = ['C', 'N', 'O', 'F', 'I', 'Cl', 'Br']
                         label_map = {label: i + 1 for i, label in enumerate(ordered_labels)}
+                    elif name in ['MUTAG', 'PTC_FM', 'PTC_FR', 'PTC_MM', 'PTC_MR']:
+                        if name == 'PTC_MR':
+                            ordered_labels = ['In', 'P', 'O', 'N', 'Na', 'C', 'Cl', 'S', 'Br', 'F', 'K', 'Cu', 'Zn',
+                                              'I', 'Ba', 'Sn', 'Pb', 'Ca']
+                        elif name == 'PTC_FR':
+                            ordered_labels = ['In', 'P', 'O', 'N', 'Na', 'C', 'Cl', 'S', 'Br', 'F', 'As', 'K', 'Cu',
+                                              'Zn', 'I', 'Sn', 'Pb', 'Te', 'Ca']
+                        elif name == 'PTC_FM':
+                            ordered_labels = ['In', 'P', 'C', 'O', 'N', 'Cl', 'S', 'Br', 'Na', 'F', 'As', 'K', 'Cu',
+                                              'I', 'Ba', 'Sn', 'Pb', 'Ca']
+                        elif name == 'PTC_MM':
+                            ordered_labels = ['In', 'P', 'O', 'N', 'Na', 'C', 'Cl', 'S', 'Br', 'F', 'As', 'K', 'B',
+                                              'Cu', 'Zn', 'I', 'Ba', 'Sn', 'Pb', 'Ca']
+                        label_map = {label: i + 1 for i, label in enumerate(ordered_labels)}
                     else:
                         label_map = None
                 else:
